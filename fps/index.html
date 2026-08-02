@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BLACKOUT — 市街地掃討戦</title>
+<style>
+  :root {
+    --hud: #e8f0f4;
+    --accent: #63d2ff;
+    --warn: #ff4632;
+    --dim: rgba(232, 240, 244, 0.55);
+    --mono: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #05070a;
+    overflow: hidden;
+    font-family: var(--mono);
+    color: var(--hud);
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    cursor: default;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  #hud, #overlay { position: fixed; inset: 0; pointer-events: none; }
+  #hud { opacity: 0; transition: opacity .25s; }
+  #hud.on { opacity: 1; }
+
+  /* ------------------------------------------------------ クロスヘア */
+  #cross { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+  #cross i {
+    position: absolute; display: block; background: var(--hud);
+    box-shadow: 0 0 3px rgba(0,0,0,.9);
+    transition: background .08s;
+  }
+  #cross i.v { width: 2px; height: 9px; left: -1px; }
+  #cross i.h { height: 2px; width: 9px; top: -1px; }
+  #cross.hit i { background: var(--warn); }
+  #dot {
+    position: absolute; left: -1.5px; top: -1.5px;
+    width: 3px; height: 3px; border-radius: 50%;
+    background: var(--hud); box-shadow: 0 0 4px rgba(0,0,0,.9);
+  }
+
+  /* ヒットマーカー */
+  #marker { position: absolute; left: 50%; top: 50%; opacity: 0; }
+  #marker span {
+    position: absolute; width: 12px; height: 2px; background: #fff;
+    box-shadow: 0 0 4px rgba(0,0,0,.8);
+  }
+  #marker.head span { background: var(--warn); height: 2.5px; width: 15px; }
+
+  /* ------------------------------------------------------- 被弾方向 */
+  #dirs { position: absolute; left: 50%; top: 50%; }
+  .dmgdir {
+    position: absolute; left: -60px; top: -60px;
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    border: 3px solid transparent;
+    border-top-color: rgba(255, 60, 40, .9);
+    transform-origin: 50% 50%;
+    filter: drop-shadow(0 0 6px rgba(255,60,40,.7));
+  }
+
+  /* ----------------------------------------------------------- 下部 */
+  .bottom { position: absolute; left: 0; right: 0; bottom: 0; padding: 26px 34px; display: flex; justify-content: space-between; align-items: flex-end; }
+
+  .block { display: flex; flex-direction: column; gap: 6px; }
+  .label { font-size: 10px; letter-spacing: .22em; color: var(--dim); }
+
+  #healthWrap { display: flex; align-items: baseline; gap: 10px; }
+  #health { font-size: 40px; font-weight: 600; line-height: .9; letter-spacing: -.02em; text-shadow: 0 2px 10px rgba(0,0,0,.7); }
+  #healthBar { width: 190px; height: 3px; background: rgba(255,255,255,.14); overflow: hidden; }
+  #healthFill { height: 100%; width: 100%; background: var(--hud); transition: width .18s, background .18s; }
+  .low #healthFill { background: var(--warn); }
+  .low #health { color: var(--warn); }
+
+  .right { align-items: flex-end; text-align: right; }
+  #weapon { font-size: 12px; letter-spacing: .18em; color: var(--dim); }
+  #ammoWrap { display: flex; align-items: baseline; gap: 8px; }
+  #ammo { font-size: 40px; font-weight: 600; line-height: .9; letter-spacing: -.02em; text-shadow: 0 2px 10px rgba(0,0,0,.7); }
+  #reserve { font-size: 17px; color: var(--dim); }
+  #ammoWrap.empty #ammo { color: var(--warn); }
+  #reloading { font-size: 11px; letter-spacing: .2em; color: var(--accent); height: 13px; }
+  #reloadBar { width: 130px; height: 2px; background: rgba(255,255,255,.15); margin-top: 2px; }
+  #reloadFill { height: 100%; width: 0%; background: var(--accent); }
+
+  /* 武器スロット */
+  #slots { display: flex; gap: 6px; margin-top: 8px; }
+  .slot {
+    font-size: 10px; letter-spacing: .1em; padding: 3px 8px;
+    border: 1px solid rgba(255,255,255,.18); color: var(--dim);
+  }
+  .slot.on { border-color: var(--accent); color: var(--accent); background: rgba(99,210,255,.08); }
+
+  /* ----------------------------------------------------------- 上部 */
+  .top { position: absolute; left: 0; right: 0; top: 0; padding: 24px 34px; display: flex; justify-content: space-between; }
+  #waveBox { text-align: left; }
+  #wave { font-size: 22px; letter-spacing: .1em; }
+  #remain { font-size: 11px; letter-spacing: .18em; color: var(--dim); }
+  #scoreBox { text-align: right; }
+  #score { font-size: 22px; letter-spacing: .05em; }
+
+  /* 対戦の得点。波の数は対戦では意味がないので、同じ場所を差し替える */
+  #matchBox { display: none; }
+  #hud.versus #waveBox { display: none; }
+  #hud.versus #matchBox { display: block; }
+  #matchScore { font-size: 22px; letter-spacing: .1em; }
+  #matchTime { font-size: 11px; letter-spacing: .18em; color: var(--dim); }
+  #matchTime.urgent { color: var(--warn); }
+
+  /* キルログ */
+  #killfeed { position: absolute; right: 34px; top: 92px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .kill {
+    font-size: 11px; letter-spacing: .1em; padding: 3px 9px;
+    background: rgba(6,10,14,.6); border-left: 2px solid var(--warn);
+    animation: slideIn .18s ease-out;
+  }
+  .kill.head { border-left-color: var(--accent); color: var(--accent); }
+  @keyframes slideIn { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+
+  /* 対戦のキルログ。他人同士の行が流れる中から、自分が絡んだ行だけ拾えないと意味がない。
+     .headより後に置いて、自分絡みの色が勝つようにする */
+  .kill .vs { color: var(--dim); margin: 0 7px; }
+  .kill .hs { font-size: 9px; letter-spacing: .1em; margin-left: 8px; color: var(--warn); }
+  .kill.byme { border-left-color: var(--accent); color: var(--accent); background: rgba(99,210,255,.16); }
+  .kill.byme .hs { color: var(--accent); }
+  .kill.onme { border-left-width: 3px; border-left-color: var(--warn); color: #ffd8d2; background: rgba(255,70,50,.22); }
+  .kill.onme .hs { color: #ffd8d2; }
+
+  /* ウェーブ告知 */
+  #banner {
+    position: absolute; left: 50%; top: 27%;
+    transform: translateX(-50%);
+    text-align: center; opacity: 0;
+  }
+  #bannerMain { font-size: 34px; letter-spacing: .34em; text-shadow: 0 3px 22px rgba(0,0,0,.85); }
+  #bannerSub { font-size: 11px; letter-spacing: .3em; color: var(--accent); margin-top: 7px; }
+
+  /* --------------------------------------------------- オーバーレイ */
+  #overlay {
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at center, rgba(8,12,18,.82), rgba(3,5,8,.97));
+    backdrop-filter: blur(3px);
+    pointer-events: auto;
+    cursor: pointer;
+  }
+  #overlay.hidden { display: none; }
+  .panel { width: min(560px, 88vw); text-align: center; }
+  .title { font-size: 42px; letter-spacing: .3em; margin-bottom: 6px; }
+  .subtitle { font-size: 11px; letter-spacing: .34em; color: var(--accent); margin-bottom: 34px; }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 9px 20px; text-align: left; font-size: 12px; margin: 0 auto 34px; width: fit-content; }
+  .keys b { color: var(--hud); font-weight: 600; letter-spacing: .08em; }
+  .keys span { color: var(--dim); }
+  .cta { font-size: 13px; letter-spacing: .26em; color: var(--hud); border: 1px solid rgba(255,255,255,.3); padding: 13px 28px; display: inline-block; }
+  #overlay:hover .cta { background: rgba(255,255,255,.07); }
+  .stats { font-size: 12px; color: var(--dim); letter-spacing: .12em; line-height: 2; margin-bottom: 30px; }
+  .stats b { color: var(--hud); font-size: 15px; }
+
+  /* ------------------------------------------------------- 接続画面 */
+  /* 起動画面と同じ見た目にする。対戦を選んだ人だけが通る画面なので、
+     1人で遊ぶ人には今まで通り#overlayが出る（こちらは隠したまま） */
+  #netmenu {
+    position: fixed; inset: 0; z-index: 20;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px 0; overflow-y: auto;
+    /* 後ろの起動画面が透けると、BLACKOUTの文字が二重に見えて汚い。ここは塗り潰す */
+    background: radial-gradient(ellipse at center, rgba(7,10,15,1), rgba(3,5,8,1));
+  }
+  #netmenu.hidden { display: none; }
+  .netpanel { width: min(420px, 86vw); text-align: center; }
+  .netpanel .title { font-size: 34px; }
+  .netpanel .subtitle { margin-bottom: 26px; }
+
+  .field { text-align: left; margin-bottom: 13px; }
+  .field .label { display: block; margin-bottom: 5px; }
+  .field input {
+    width: 100%; padding: 9px 11px;
+    font-family: var(--mono); font-size: 14px; letter-spacing: .08em;
+    color: var(--hud); background: rgba(255,255,255,.05);
+    border: 1px solid rgba(255,255,255,.2);
+    /* body側でuser-select:noneを掛けているので、入力欄だけ選べるように戻す */
+    user-select: text; -webkit-user-select: text; cursor: text;
+  }
+  .field input:focus { outline: none; border-color: var(--accent); background: rgba(99,210,255,.07); }
+  #nmRoom { width: 7em; text-align: center; font-size: 18px; letter-spacing: .45em; text-indent: .45em; }
+  .hint { font-size: 10px; line-height: 1.7; color: var(--dim); margin-top: 5px; }
+
+  /* 文言が出た時にボタンが下へ逃げないよう、2行ぶんの場所を最初から空けておく */
+  #nmStatus { font-size: 11px; letter-spacing: .1em; line-height: 1.7; color: var(--accent); min-height: 38px; margin: 6px 0 4px; text-align: left; }
+  #nmStatus.bad { color: var(--warn); }
+
+  .netbtns { display: flex; gap: 10px; }
+  .netbtn {
+    flex: 1; padding: 13px 0;
+    font-family: var(--mono); font-size: 13px; letter-spacing: .2em;
+    color: var(--hud); background: transparent;
+    border: 1px solid rgba(255,255,255,.3); cursor: pointer;
+  }
+  .netbtn:hover { background: rgba(255,255,255,.07); }
+  .netbtn.main { border-color: var(--accent); color: var(--accent); background: rgba(99,210,255,.08); }
+  .netbtn.main:hover { background: rgba(99,210,255,.16); }
+  /* 接続中に連打されると同じ部屋へ何本も繋ぎにいく */
+  #netmenu.busy .netbtn { opacity: .35; cursor: default; pointer-events: none; }
+  #netmenu.busy .field input { opacity: .45; pointer-events: none; }
+
+  /* ----------------------------------------------------- スコアボード */
+  /* 上端からの固定位置。割合で置くと狭い窓で回線表示と重なる */
+  #scoreboard {
+    position: absolute; left: 50%; top: 100px; transform: translateX(-50%);
+    width: min(520px, 86vw); padding: 14px 16px 10px;
+    background: rgba(6,10,14,.86); border: 1px solid rgba(255,255,255,.14);
+  }
+  #scoreboard.hidden, #finalboard.hidden, #netstat.hidden { display: none; }
+  .sbtitle { font-size: 10px; letter-spacing: .3em; color: var(--dim); margin-bottom: 8px; }
+  .sbrow { display: flex; align-items: center; font-size: 12px; letter-spacing: .06em; padding: 6px 6px; border-bottom: 1px solid rgba(255,255,255,.07); }
+  .sbrow .c1 { width: 32px; text-align: left; color: var(--dim); }
+  .sbrow .cn { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
+  .sbrow .c { width: 46px; text-align: right; }
+  .sbrow .cp { width: 58px; text-align: right; color: var(--dim); }
+  .sbrow.sbh { font-size: 10px; letter-spacing: .18em; color: var(--dim); border-bottom-color: rgba(255,255,255,.2); }
+  .sbrow.sbh .c1, .sbrow.sbh .cp { color: var(--dim); }
+  /* 自分の行が見つけられないスコアボードは、出す意味がない */
+  .sbrow.me { color: var(--accent); background: rgba(99,210,255,.1); }
+  .sbrow.me .c1, .sbrow.me .cp { color: var(--accent); }
+  /* 最終順位の1位。class名をtopにするとHUD上部の.topに掴まれて画面の天辺へ飛ぶ */
+  .sbrow.win .c1 { color: var(--hud); }
+
+  /* ------------------------------------------------------- 相手の名札 */
+  #plates { position: absolute; inset: 0; overflow: hidden; z-index: 0; }
+  .plate { position: absolute; transform: translate(-50%, -100%); text-align: center; }
+  .plate .pname {
+    display: inline-block; font-size: 1em; line-height: 1.25; letter-spacing: .08em;
+    padding: 1px 6px; background: rgba(4,7,10,.45);
+    /* 名札同士が重なっても字が読めるように、縁を黒で締める */
+    text-shadow: 0 0 5px rgba(0,0,0,.95), 0 1px 2px rgba(0,0,0,.9);
+    white-space: nowrap;
+  }
+  .plate .pbar { height: 2px; margin: 3px auto 0; background: rgba(0,0,0,.55); }
+  .plate .pfill { height: 100%; background: var(--hud); }
+  .plate.hurt .pfill { background: var(--warn); }
+
+  /* --------------------------------------------------------- 回線表示 */
+  #netstat {
+    position: absolute; left: 50%; top: 72px; transform: translateX(-50%);
+    max-width: 80vw; text-align: center;
+    font-size: 11px; letter-spacing: .16em; color: var(--warn);
+    background: rgba(6,10,14,.65); padding: 4px 12px;
+  }
+
+  /* ------------------------------------------------------- 最終順位 */
+  #finalboard {
+    position: fixed; inset: 0; z-index: 15;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px 0; overflow-y: auto;
+    background: radial-gradient(ellipse at center, rgba(8,12,18,.86), rgba(3,5,8,.98));
+    backdrop-filter: blur(3px);
+  }
+  .fbpanel { width: min(520px, 86vw); text-align: center; }
+  .fbpanel .subtitle { margin-bottom: 22px; }
+  .fbnote { font-size: 11px; letter-spacing: .2em; color: var(--dim); margin-top: 22px; }
+
+  #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 16px; background: #05070a; z-index: 10; }
+  #loading .bar { width: 220px; height: 2px; background: rgba(255,255,255,.14); }
+  #loading .fill { height: 100%; width: 0%; background: var(--accent); transition: width .2s; }
+  #loading .msg { font-size: 11px; letter-spacing: .28em; color: var(--dim); }
+  #loading.done { display: none; }
+
+  /* 走行時に画面端を締める */
+  #speedlines { position: absolute; inset: 0; opacity: 0; transition: opacity .2s;
+    background: radial-gradient(ellipse at center, transparent 42%, rgba(0,0,0,.55) 100%); }
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="msg" id="loadMsg">起動中</div>
+  <div class="bar"><div class="fill" id="loadFill"></div></div>
+</div>
+
+<div id="hud">
+  <div id="speedlines"></div>
+
+  <!-- 名札はクロスヘアより先に置く。後ろの要素ほど手前に描かれるので、
+       名札が照準に被らない -->
+  <div id="plates"></div>
+
+  <div id="cross">
+    <i class="v" id="cUp"></i><i class="v" id="cDown"></i>
+    <i class="h" id="cLeft"></i><i class="h" id="cRight"></i>
+    <div id="dot"></div>
+  </div>
+  <div id="marker">
+    <span style="transform: translate(-14px,-14px) rotate(45deg)"></span>
+    <span style="transform: translate(4px,-14px) rotate(-45deg)"></span>
+    <span style="transform: translate(-14px,12px) rotate(-45deg)"></span>
+    <span style="transform: translate(4px,12px) rotate(45deg)"></span>
+  </div>
+  <div id="dirs"></div>
+
+  <div class="top">
+    <div id="waveBox">
+      <div id="wave">第1波</div>
+      <div id="remain">残敵 0</div>
+    </div>
+    <div id="matchBox">
+      <div id="matchScore">0 / 30</div>
+      <div id="matchTime">残り 10:00</div>
+    </div>
+    <div id="scoreBox">
+      <div id="score">0</div>
+      <div class="label">スコア</div>
+    </div>
+  </div>
+
+  <div id="netstat" class="hidden"></div>
+
+  <div id="killfeed"></div>
+
+  <div id="scoreboard" class="hidden">
+    <div class="sbtitle">戦績</div>
+    <div class="sbrow sbh">
+      <div class="c1">順位</div><div class="cn">名前</div>
+      <div class="c">撃破</div><div class="c">戦死</div><div class="cp">応答</div>
+    </div>
+    <div id="sbRows"></div>
+  </div>
+
+  <div id="banner">
+    <div id="bannerMain">第1波</div>
+    <div id="bannerSub">接近中</div>
+  </div>
+
+  <div class="bottom">
+    <div class="block" id="healthBlock">
+      <div class="label">体力</div>
+      <div id="healthWrap"><div id="health">100</div></div>
+      <div id="healthBar"><div id="healthFill"></div></div>
+    </div>
+    <div class="block right">
+      <div id="reloading"></div>
+      <div id="weapon">MK-4 カービン</div>
+      <div id="ammoWrap"><div id="ammo">30</div><div id="reserve">/ 240</div></div>
+      <div id="slots">
+        <div class="slot on">1 ライフル</div>
+        <div class="slot">2 短機関銃</div>
+        <div class="slot">3 ショットガン</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="overlay">
+  <div class="panel" id="panel">
+    <div class="title">BLACKOUT</div>
+    <div class="subtitle">市街地掃討戦</div>
+    <div class="keys">
+      <b>WASD</b><span>移動</span>
+      <b>SHIFT</b><span>スプリント</span>
+      <b>CTRL / C</b><span>しゃがみ</span>
+      <b>SPACE</b><span>ジャンプ</span>
+      <b>左クリック</b><span>射撃</span>
+      <b>右クリック</b><span>覗き込み（ADS）</span>
+      <b>R</b><span>リロード</span>
+      <b>1 / 2 / 3</b><span>武器切り替え</span>
+      <b>ESC</b><span>一時停止</span>
+    </div>
+    <div class="cta" id="cta">クリックで出撃</div>
+  </div>
+</div>
+
+<div id="netmenu" class="hidden">
+  <div class="netpanel">
+    <div class="title">BLACKOUT</div>
+    <div class="subtitle">市街地掃討戦</div>
+
+    <div class="field">
+      <label class="label" for="nmName">名前</label>
+      <input id="nmName" type="text" maxlength="12" autocomplete="off" spellcheck="false">
+    </div>
+
+    <div class="field">
+      <label class="label" for="nmUrl">接続先</label>
+      <input id="nmUrl" type="text" autocomplete="off" spellcheck="false">
+      <div class="hint">部屋を立てた人の端末のアドレス。同じWi-Fiにいる人はここだけ書き換える</div>
+    </div>
+
+    <div class="field">
+      <label class="label" for="nmRoom">合言葉</label>
+      <input id="nmRoom" type="text" maxlength="4" autocomplete="off" spellcheck="false">
+      <div class="hint">4文字。空のままなら誰でも入れる共通の部屋に入る</div>
+    </div>
+
+    <div id="nmStatus"></div>
+
+    <div class="netbtns">
+      <button id="nmSolo" class="netbtn" type="button">1人で遊ぶ</button>
+      <button id="nmJoin" class="netbtn main" type="button">対戦に参加</button>
+    </div>
+  </div>
+</div>
+
+<div id="finalboard" class="hidden">
+  <div class="fbpanel">
+    <div class="title">試合終了</div>
+    <div class="subtitle">最終順位</div>
+    <div class="sbrow sbh">
+      <div class="c1">順位</div><div class="cn">名前</div>
+      <div class="c">撃破</div><div class="c">戦死</div><div class="cp">応答</div>
+    </div>
+    <div id="fbRows"></div>
+    <div class="fbnote" id="fbNote"></div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./node_modules/three/build/three.module.js",
+    "three/addons/": "./node_modules/three/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
