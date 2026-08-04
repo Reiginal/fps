@@ -4,18 +4,17 @@
 // 画面の見た目を直すたびに通信の作法まで触ることになる。
 const $ = (id) => document.getElementById(id);
 
-// 前回の入力を覚えておく口。遊ぶたびに名前とIPを打ち直させない
-const SAVE = { name: 'blackout.name', url: 'blackout.url' };
+// 前回の入力を覚えておく口。遊ぶたびに名前を打ち直させない
+const SAVE = { name: 'blackout.name' };
 
-// 繋がらなかった時の文言。「エラー」とだけ出すと、アドレスが違うのか
-// 相手がまだ立てていないのか分からず、遊ぶ側に打つ手が無くなる。
+// 繋がらなかった時の文言。「エラー」とだけ出すと、遊ぶ側に打つ手が無くなる。
 // 統合側はsetStatusにこれを渡す
 export const NET_MSG = {
   connecting: '接続中…',
-  offline: '相手に繋がりません。接続先のアドレスと、同じWi-Fiに繋がっているかを確かめてください',
+  offline: 'サーバーに繋がりません。少し待ってから、もう一度押してください',
   full: 'いま満員です。誰かが抜けるのを待ってください',
   lost: '接続が切れました。もう一度「対戦に参加」を押してください',
-  timeout: '応答がありません。相手の端末でサーバーが動いているか確かめてください',
+  timeout: 'サーバーから応答がありません。少し待ってから、もう一度押してください',
 };
 
 // localStorageは設定次第で読み書きどちらも例外を投げる。
@@ -31,19 +30,9 @@ export class NetMenu {
   constructor() {
     this.el = {
       root: $('netmenu'),
-      name: $('nmName'), url: $('nmUrl'),
+      name: $('nmName'),
       status: $('nmStatus'), solo: $('nmSolo'), join: $('nmJoin'),
-      urlField: $('nmUrlField'), urlToggle: $('nmUrlToggle'),
     };
-
-    // 公開のサーバーに置いた時（httpsで開いている時）は、全員が同じ場所
-    // ＝今開いているページに繋ぐので、接続先の欄そのものが要らない。
-    // 畳んでおいて、押した時だけ出す。
-    //
-    // 畳むもう1つの理由: 前にLANで遊んだブラウザには ws://192.168... が
-    // 保存されたままになっていて、そのままだとHTTPSのページから繋ごうとして
-    // 混在コンテンツで弾かれる。遊ぶ側には原因がまったく見えない
-    this.hosted = location.protocol === 'https:';
 
     // 統合側が差し替える。初期値を空関数にしておくと、繋ぎ忘れても画面が落ちない
     this.onSolo = () => {};
@@ -51,17 +40,7 @@ export class NetMenu {
     this.busy = false;
 
     this.el.name.value = load(SAVE.name, '');
-    // 空で覚えてしまった時も既定へ戻す。接続先が空欄の画面は手掛かりが無い。
-    // 公開の場所に置いてある時は、覚えている値ではなく必ず今のページを使う
-    this.el.url.value = this.hosted ? defaultUrl() : (load(SAVE.url, '') || defaultUrl());
-    if (this.hosted) {
-      this.el.urlField.classList.add('hidden');
-      this.el.urlToggle.classList.remove('hidden');
-      this.el.urlToggle.onclick = () => {
-        const folded = this.el.urlField.classList.toggle('hidden');
-        this.el.urlToggle.textContent = folded ? '別の場所へ繋ぐ ▾' : '別の場所へ繋ぐ ▴';
-      };
-    }
+
     // addEventListenerではなく代入で持つ。DOMはindex.html側に1組しかないので、
     // 2回作られた時に古い方の処理まで動いて二重に始まるのを防ぐ
     this.el.solo.onclick = () => {
@@ -72,13 +51,11 @@ export class NetMenu {
     this.el.join.onclick = () => this._join();
 
     // 打ち終わってEnterを押すのが自然な形。押せるボタンを探させない
-    for (const k of ['name', 'url']) {
-      this.el[k].onkeydown = (e) => {
-        if (e.key === 'Enter') this._join();
-        // WASDやRが下のゲームへ抜けないようにする（入力中に武器が切り替わる）
-        e.stopPropagation();
-      };
-    }
+    this.el.name.onkeydown = (e) => {
+      if (e.key === 'Enter') this._join();
+      // WASDやRが下のゲームへ抜けないようにする（入力中に武器が切り替わる）
+      e.stopPropagation();
+    };
   }
 
   show() {
@@ -123,34 +100,28 @@ export class NetMenu {
       return;
     }
 
-    let url = this.el.url.value.trim();
-    if (!url) {
-      this.setStatus('接続先を入れてください。部屋を立てた人の端末のアドレス', true);
-      this.el.url.focus();
-      return;
-    }
-    // 口頭で伝わるのはIPだけなので、ws://を書き忘れた形で入ってくる。
-    // 補ったうえで欄にも戻して、次から何を書けばいいか見て分かるようにする。
-    // HTTPSのページからは ws:// が混在コンテンツとして弾かれるので、
-    // 補う時も手で打たれた時も wss:// へ寄せる
-    if (!/^wss?:\/\//i.test(url)) url = `${this.hosted ? 'wss' : 'ws'}://${url}`;
-    else if (this.hosted && /^ws:\/\//i.test(url)) url = url.replace(/^ws:\/\//i, 'wss://');
-    this.el.url.value = url;
-
     this._store();
     this.setStatus(NET_MSG.connecting, false);
     this.setBusy(true);
-    this.onJoin({ url, name });
+    this.onJoin({ url: defaultUrl(), name });
   }
 
   _store() {
     save(SAVE.name, this.el.name.value.trim());
-    save(SAVE.url, this.el.url.value.trim());
   }
 }
 
-// 既定の接続先は今開いているページと同じ端末。自分で立てて自分で入る時は
-// そのまま押せて、他人の所へ入る時だけIPを書き換えれば済む
+// 繋ぎ先は必ず今開いているページと同じ場所。
+//
+// 手で書き換える欄を出していた時期があるが、畳んだ。
+// 全員が同じURLを開いて遊ぶ形になった以上、書き換える理由がもう無い。
+// 加えて、あの欄は事故の元でもあった。前にLANで遊んだブラウザには
+// ws://192.168... が保存されたままになっていて、httpsのページから
+// それで繋ごうとして混在コンテンツで弾かれる。
+// 遊ぶ側にはなぜ繋がらないのかまったく見えない。
+//
+// 手元で npm start して遊ぶ時も、開くのは http://localhost:8080 なので
+// この関数がそのまま ws://localhost:8080 を返す。困らない
 function defaultUrl() {
   const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
   return proto + (location.host || 'localhost:8080');
