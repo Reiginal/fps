@@ -181,6 +181,54 @@ console.log('\n[3.6] 包帯の見え方');
   ok(!ws.bandage.visible, 'しまうと消える');
 }
 
+/* -------------------------------------- 巻いている間、手が回り続けないか */
+
+console.log('\n[3.7] 包帯を巻いている間の動き');
+// 遊んで「巻いてる時に腕もぐるぐる回ってる」と言われた所。
+// 原因は、増え続ける値(spin)を手の向きへそのまま足していたこと。
+// 2.4秒巻くと手が1回転半していた。
+//
+// 見た目の不具合は画面を見ないと気づけないが、「回りすぎ」は角度なので測れる。
+// 巻いている間の向きを1コマずつ拾って、振れ幅が往復の範囲に収まるかを見る
+{
+  const p = {
+    alive: true, sprinting: false, crouching: false, onFloor: true,
+    horizontalSpeed: 0, adsFactor: 0, moveMul: 1, roll: 0, healing: 0, bandages: 2,
+    yaw: 0, pitch: 0, bobAmount: 0,
+    addRecoil: () => {}, cancelHeal: () => {}, startHeal: () => false,
+    collider: { start: new THREE.Vector3() },
+  };
+  const none = {
+    down: () => false, pressed: () => false, clicked: () => false, buttons: [false, false, false],
+  };
+  ws.toggleBandage(p);
+  for (let i = 0; i < 30; i++) ws.update(1 / 60, none, p, {});
+
+  // 巻いている最中を再現する。healingは残り秒なので、満タンから減らしていく
+  const HEAL_S = 2.4;
+  let minY = 9, maxY = -9, rollX = 0;
+  // 巻き終わる手前で止める。healingが0になったコマまで含めると、
+  // そこは「巻いていない」扱いで回転が0に戻るので、最後の値を拾うと0が出る
+  for (let i = 0; i < Math.round(HEAL_S * 60); i++) {
+    p.healing = HEAL_S - i / 60;
+    ws.update(1 / 60, none, p, {});
+    minY = Math.min(minY, ws.bandage.rotation.y);
+    maxY = Math.max(maxY, ws.bandage.rotation.y);
+    rollX = Math.max(rollX, Math.abs(ws.bandage.userData.roll.rotation.x));
+  }
+  const swing = maxY - minY;
+  // 手首のひねりは往復。半回転(π)を超えたら、それはもう「回っている」
+  ok(swing < Math.PI, `手の振れ幅が往復に収まる (${swing.toFixed(2)}ラジアン / 上限${Math.PI.toFixed(2)})`);
+  // 逆に、まったく動かないのも困る。持っているだけの絵に見える
+  ok(swing > 0.1, `手はちゃんと動いている (${swing.toFixed(2)}ラジアン)`);
+  // 帯そのものはほどけていく物なので、こちらは回り続けるのが正しい
+  ok(rollX > Math.PI * 2, `帯はほどける向きに回っている (${rollX.toFixed(1)}ラジアン)`);
+
+  p.healing = 0;
+  ws.holsterBandage();
+  for (let i = 0; i < 40; i++) ws.update(1 / 60, none, p, {});
+}
+
 console.log('\n[4] 近接武器を振った時');
 const idle = {
   down: () => false, pressed: () => false, clicked: () => false, buttons: [false, false, false],
