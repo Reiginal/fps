@@ -19,9 +19,19 @@ export class Input {
       this.keys.add(e.code);
       this._pressedThisFrame.add(e.code);
       // スペースでページがスクロールしたりタブが移動すると台無しになる
-      if (['Space', 'Tab', 'KeyR', 'ControlLeft'].includes(e.code)) e.preventDefault();
+      if (['Space', 'Tab', 'KeyR', 'ControlLeft', 'MetaLeft', 'MetaRight'].includes(e.code)) e.preventDefault();
     });
-    addEventListener('keyup', (e) => this.keys.delete(e.code));
+    addEventListener('keyup', (e) => {
+      this.keys.delete(e.code);
+      // MacはCommandを押している間、他のキーのkeyupを一切よこさない。
+      // 「Wで走る → Commandでしゃがむ → Wを離す → Commandを離す」と辿ると、
+      // Wのkeyupがどこにも来ないまま押しっぱなし扱いで残り、手を離しているのに
+      // 前へ走り続ける（戦域の外へ出て力尽きる）。
+      // Commandが離れた時点で全部落とす。取りこぼした物がここで必ず消える。
+      // 本当に押し続けていたキーまで落ちるが、押し直せば戻る。
+      // 「勝手に走り続ける」より「一瞬止まる」のほうが被害が小さい
+      if (e.code === 'MetaLeft' || e.code === 'MetaRight') this.keys.clear();
+    });
     addEventListener('blur', () => { this.keys.clear(); this.buttons.fill(false); });
 
     document.addEventListener('pointerlockchange', () => {

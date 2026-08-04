@@ -325,6 +325,13 @@
   .keys span { color: var(--dim); }
   .cta { font-size: 13px; letter-spacing: .26em; color: var(--hud); border: 1px solid rgba(255,255,255,.3); padding: 13px 28px; display: inline-block; }
   #overlay:hover .cta { background: rgba(255,255,255,.07); }
+  /* 一時停止から選択画面へ戻る口。#overlayは「どこを押しても復帰」なので、
+     こいつだけは押した時に復帰させない（main.js側でstopPropagationしている）。
+     復帰より小さく地味に置く。戻るほうが目立つと、休憩のたびに押し間違える */
+  .ovhome { font-size: 11px; letter-spacing: .2em; color: var(--dim); background: none;
+    border: 1px solid rgba(255,255,255,.16); padding: 9px 20px; margin-top: 20px;
+    font-family: inherit; cursor: pointer; }
+  .ovhome:hover { color: var(--hud); border-color: rgba(255,255,255,.36); }
   .stats { font-size: 12px; color: var(--dim); letter-spacing: .12em; line-height: 2; margin-bottom: 30px; }
   .stats b { color: var(--hud); font-size: 15px; }
 
@@ -358,7 +365,6 @@
     user-select: text; -webkit-user-select: text; cursor: text;
   }
   .field input:focus { outline: none; border-color: var(--accent); background: rgba(99,210,255,.07); }
-  #nmRoom { width: 7em; text-align: center; font-size: 18px; letter-spacing: .45em; text-indent: .45em; }
   .hint { font-size: 10px; line-height: 1.7; color: var(--dim); margin-top: 5px; }
 
   /* つまみ。作った側が音を聴けないので、聴ける側が直接回せる場所を用意する。
@@ -387,6 +393,46 @@
   .netbtn.main:hover { background: rgba(99,210,255,.16); }
   /* 接続中に連打されると同じ部屋へ何本も繋ぎにいく */
   #netmenu.busy .netbtn { opacity: .35; cursor: default; pointer-events: none; }
+
+  /* --------------------------------------------------------- ロビー */
+  /* 繋がってから試合が始まるまでの画面。接続画面と同じ塗り潰しにして、
+     裏の起動画面が透けないようにする */
+  #lobby {
+    position: fixed; inset: 0; z-index: 20;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px 0; overflow-y: auto;
+    background: radial-gradient(ellipse at center, rgba(7,10,15,1), rgba(3,5,8,1));
+  }
+  #lobby.hidden { display: none; }
+  .lbpanel { width: min(560px, 90vw); text-align: center; }
+  .lbpanel .title { font-size: 34px; }
+  /* 始まらない理由がここに出る。出ていない時も場所を空けておかないと、
+     理由が出た瞬間に席の絵が下へずれて、押そうとしていた席が動く */
+  .lbpanel .subtitle { margin-bottom: 24px; min-height: 16px; color: var(--warn); }
+  .lbteams { display: flex; gap: 14px; margin-bottom: 18px; }
+  .lbteam { flex: 1; border: 1px solid rgba(255,255,255,.14); padding: 12px 10px; }
+  .lbhead { font-size: 20px; letter-spacing: .3em; margin-bottom: 10px; }
+  .lbteam[data-team="0"] .lbhead { color: var(--accent); }
+  .lbteam[data-team="1"] .lbhead { color: var(--warn); }
+  .lbseats { display: flex; flex-direction: column; gap: 7px; }
+  /* 席1つ。空席は押せる、埋まっている席は押せない。
+     押せるかどうかを色だけで表すと、埋まっている席を押して無反応に見える。
+     カーソルの形まで変えて、押せない事を触る前に分からせる */
+  .lbseat {
+    padding: 10px 8px; font-family: var(--mono); font-size: 12px; letter-spacing: .1em;
+    color: var(--dim); background: transparent;
+    border: 1px dashed rgba(255,255,255,.18); cursor: pointer; width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .lbseat:hover { color: var(--hud); border-color: rgba(255,255,255,.4); }
+  .lbseat.taken {
+    color: var(--hud); border-style: solid; border-color: rgba(255,255,255,.28);
+    background: rgba(255,255,255,.05); cursor: default;
+  }
+  .lbseat.taken:hover { border-color: rgba(255,255,255,.28); }
+  /* 自分の席。どれが自分かが一目で分からないと、降りる時に他人の席を押す */
+  .lbseat.me { border-color: var(--accent); color: var(--accent); background: rgba(99,210,255,.1); }
+  .lbstand { font-size: 11px; color: var(--dim); letter-spacing: .1em; min-height: 30px; margin-bottom: 10px; }
   #netmenu.busy .field input { opacity: .45; pointer-events: none; }
 
   /* ----------------------------------------------------- スコアボード */
@@ -590,6 +636,31 @@
   </div>
 </div>
 
+<!-- 対戦に繋がった後、試合が始まるまでの画面。
+     ここが「入る」と「始まる」の間の踊り場で、席・チームを自分で選ぶ。
+     席の中身はサーバーが持っていて、lobby.jsは配られた物を描くだけ -->
+<div id="lobby" class="hidden">
+  <div class="lbpanel">
+    <div class="title">ロビー</div>
+    <div class="subtitle" id="lbWhy"></div>
+    <div class="lbteams">
+      <div class="lbteam" data-team="0">
+        <div class="lbhead">A</div>
+        <div class="lbseats" id="lbSeatsA"></div>
+      </div>
+      <div class="lbteam" data-team="1">
+        <div class="lbhead">B</div>
+        <div class="lbseats" id="lbSeatsB"></div>
+      </div>
+    </div>
+    <div class="lbstand" id="lbStand"></div>
+    <div class="netbtns">
+      <button id="lbLeave" class="netbtn" type="button">ホームへ戻る</button>
+      <button id="lbStandUp" class="netbtn" type="button">席を降りる</button>
+    </div>
+  </div>
+</div>
+
 <div id="netmenu" class="hidden">
   <div class="netpanel">
     <div class="title">BLACKOUT</div>
@@ -605,12 +676,6 @@
       <label class="label" for="nmUrl">接続先</label>
       <input id="nmUrl" type="text" autocomplete="off" spellcheck="false">
       <div class="hint">部屋を立てた人の端末のアドレス。同じWi-Fiにいる人はここだけ書き換える</div>
-    </div>
-
-    <div class="field">
-      <label class="label" for="nmRoom">合言葉</label>
-      <input id="nmRoom" type="text" maxlength="4" autocomplete="off" spellcheck="false">
-      <div class="hint">4文字。空のままなら誰でも入れる共通の部屋に入る</div>
     </div>
 
     <div id="nmStatus"></div>

@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { Capsule } from 'three/addons/math/Capsule.js';
 import {
   TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS, MATCH, PHASE, ZONE, NADE, outsideZone,
-  Sv, EV, packPlayer,
+  Sv, EV, packPlayer, SEATS_PER_TEAM, SEAT_SPAWN,
 } from '../src/net/protocol.js';
 import { SimPlayer, resolveShot, rewindMs, originVisible } from './sim.js';
 
@@ -41,8 +41,7 @@ const _nadeTo = new THREE.Vector3();
 const REWIND_ON = process.env.NO_REWIND !== '1';
 
 export class Room {
-  constructor(code, world) {
-    this.code = code;
+  constructor(world) {
     this.world = world;
     this.slots = new Map();      // id -> slot
     this.nextId = 1;
@@ -61,19 +60,98 @@ export class Room {
     this._timer = null;
     this._nextTickAt = nowMs();
     this._scoreTimer = 0;
-    this.onEmpty = null;
   }
 
   /* ------------------------------------------------------ 出入り */
 
   get full() { return this.slots.size >= MAX_PLAYERS; }
 
-  /** 空いている一番小さい席番号 */
-  _freeSeat() {
-    const used = new Set([...this.slots.values()].map((s) => s.seat));
-    let n = 0;
-    while (used.has(n)) n++;
-    return n;
+  /* -------------------------------------------------------- ロビーの席 */
+
+  /**
+   * 席に着く／降りる。teamに-1を渡すと降りる。
+   * 埋まっている席や、番号が範囲外の指定は黙って捨てる。
+   * 「その席は埋まっています」と返さないのは、席の絵が全員に配られていて
+   * 押せない事は画面から見えているため。押した側の間違いではなく、
+   * 押す直前に他人が座った時にしか起きない
+   */
+  takeSeat(slot, team, seat) {
+    // 試合が始まってから席を移られると、湧く位置も陣営も途中で変わる。
+    // 席を動かせるのはロビーにいる間だけ
+    if (this.phase !== PHASE.WAIT) return;
+
+    if (team < 0) {
+      if (slot.team === null) return;   // 既に立っている
+      slot.team = null;
+      slot.seat = null;
+      this._sendLobby();
+      return;
+    }
+    if (team !== 0 && team !== 1) return;
+    if (!Number.isInteger(seat) || seat < 0 || seat >= SEATS_PER_TEAM) return;
+    if (slot.team === team && slot.seat === seat) return;   // 今いる席
+    for (const s of this.slots.values()) {
+      if (s !== slot && s.team === team && s.seat === seat) return;   // 埋まっている
+    }
+    slot.team = team;
+    slot.seat = seat;
+    // 座った所から湧くので、席が決まった時点で位置も合わせておく。
+    // ここで動かしておかないと、ロビーで待っている間だけ前の席の場所に立っている
+    this._respawn(slot);
+    // 先に始めてから配る。始まっていれば理由は空文字になり、
+    // 受け取った側は「もう始まった」と分かる
+    this._startIfReady();
+    this._sendLobby();
+  }
+
+  /** 各チームに座っている人。[Aの人たち, Bの人たち] */
+  _seated() {
+    const teams = [[], []];
+    for (const s of this.slots.values()) {
+      if (s.team === 0 || s.team === 1) teams[s.team].push(s);
+    }
+    return teams;
+  }
+
+  /** 揃っていれば始める */
+  _startIfReady() {
+    if (this._whyNotStart() === '') this._startMatch();
+  }
+
+  _lobbyRows() {
+    const rows = [];
+    for (const s of this.slots.values()) {
+      rows.push([s.id, s.name, s.team === null ? -1 : s.team, s.seat === null ? -1 : s.seat]);
+    }
+    return rows;
+  }
+
+  /** ロビーの絵を全員へ配る。席が動いた時と、人が出入りした時だけ呼ぶ */
+  _sendLobby(why) {
+    // whyを渡されなかった時は、その場で数え直す。
+    // 呼ぶ側に毎回計算させると、片方だけ古い理由を配る事故が起きる
+    const msg = {
+      t: Sv.LOBBY,
+      rows: this._lobbyRows(),
+      why: why === undefined ? this._whyNotStart() : why,
+    };
+    for (const s of this.slots.values()) s.conn.send(msg);
+  }
+
+  /**
+   * 始まらない理由。始められる状態なら空文字。
+   * 今の試合の中身は1対1のままなので、各チームちょうど1人の時だけ始まる。
+   * 席を3つずつ出しているのは、3対3にする時にこの仕組みをそのまま使うため。
+   * 決着条件（今は「どちらかが倒れたら終わり」）を作り直すのが次の話
+   */
+  _whyNotStart() {
+    if (this.phase !== PHASE.WAIT) return '';
+    const [a, b] = this._seated();
+    if (a.length === 1 && b.length === 1) return '';
+    if (a.length === 0 && b.length === 0) return '席に着いてください';
+    if (a.length === 0) return 'Aに誰もいません';
+    if (b.length === 0) return 'Bに誰もいません';
+    return 'いまは1対1だけ動きます。各チーム1人ずつにしてください';
   }
 
   join(conn, name) {
@@ -83,9 +161,11 @@ export class Room {
       id,
       name,
       conn,
-      // 定位置の席番号。空いている一番小さい番号を取る。
-      // idをそのまま使うと、抜けて入り直すたびに番号が増えて席が一周する
-      seat: this._freeSeat(),
+      // ロビーの席。入った時点では立ったまま（どちらのチームでもない）で、
+      // 自分で押して座る。サーバーが勝手に割り振らないのは、
+      // 誰と組むかを選べることがロビーを置く理由そのものだから
+      team: null,
+      seat: null,
       sim: new SimPlayer(id, name, this.world),
       pending: new Map(),   // seq -> [bits, yaw, pitch]
       nextSeq: -1,          // 次に食わせるseq
@@ -106,8 +186,9 @@ export class Room {
     this._respawn(slot);
     this.push({ e: EV.JOIN, id, name });
     if (!this._timer) this._start();
-    // 揃った瞬間に1ラウンド目を始める。待っている側を待たせ続けない
-    if (this.phase === PHASE.WAIT && this.slots.size >= MATCH.NEEDED) this._startMatch();
+    // 入っただけでは始まらない。席に着いた時に_startIfReadyが見る。
+    // 入った人と、先にいた人の両方へロビーの絵を配り直す
+    this._sendLobby();
     return slot;
   }
 
@@ -115,19 +196,28 @@ export class Room {
     if (!this.slots.delete(slot.id)) return;
     this.push({ e: EV.LEAVE, id: slot.id });
     if (this.slots.size === 0) {
+      // 誰もいなくなったら60Hzのタイマーを止める。部屋そのものは残す
       this._stop();
-      this.onEmpty?.(this);
+      this.phase = PHASE.WAIT;
+      this.timeLeft = 0;
+      this.round = 0;
       return;
     }
-    // 1対1なので、片方が抜けた時点で試合は成立しない。
-    // 点数を持ち越すと、次に入ってきた別人が知らない負けを背負って始まる
-    if (this.slots.size < MATCH.NEEDED) {
+    // 抜けた人の席は空く。今は1対1なので、片方が抜けた時点で試合は成立しない。
+    // 点数を持ち越すと、次に入ってきた別人が知らない負けを背負って始まる。
+    //
+    // ここで_whyNotStart()を使ってはいけない。あれは試合中(phaseがWAITでない)なら
+    // 常に空文字を返すので、試合の最中に抜けられた時だけ素通りしてしまい、
+    // 1人になった部屋で試合が進み続ける
+    const [aSide, bSide] = this._seated();
+    if (aSide.length !== 1 || bSide.length !== 1) {
       this.phase = PHASE.WAIT;
       this.timeLeft = 0;
       this.round = 0;
       for (const s of this.slots.values()) { s.rounds = 0; s.sim.kills = 0; s.sim.deaths = 0; }
       this._sendScore();
     }
+    this._sendLobby();
   }
 
   // 先客の名前と戦績。座標は直後のSNAPSHOTで届くのでここには載せない。
@@ -147,7 +237,6 @@ export class Room {
     return {
       t: Sv.WELCOME,
       id: slot.id,
-      room: this.code,
       tick: this.tick,
       now: Math.round(nowMs()),
       you: { name: slot.name },
@@ -436,15 +525,21 @@ export class Room {
     return null;
   }
 
-  // 席ごとの定位置。1対1なので2人ぶんあればよく、選ぶ余地を残さない。
+  // 席ごとの定位置。選ぶ余地を残さない。
   //
   // 以前は8箇所から「他人からSPAWN_MIN_DIST以上離れた所」を毎回抽選していたが、
   // ラウンドの頭は2人が同時に湧くので、相手の位置が決まる前に自分の位置を選ぶことになる。
   // 結果、条件を満たしているつもりで隣同士に出る回があった。
-  // 席で固定すれば、どのラウンドでも必ず対角の35m離れた位置から始まる
+  // 席で固定すれば、どのラウンドでも必ず離れた位置から始まる。
+  //
+  // ロビーを入れてからは、湧く位置はチームと席番号から決まる（protocol.jsのSEAT_SPAWN）。
+  // Aは西側、Bは東側にまとまるので、味方と敵が入り混じった位置から始まることが無い。
+  // まだ席に着いていない人は、ロビーで立っているだけなので0番へ置く
   _spawnFor(slot) {
     const spawns = this.world.arenaSpawns;
-    return spawns[slot.seat % spawns.length];
+    if (slot.team === null || slot.seat === null) return spawns[0];
+    const idx = SEAT_SPAWN[slot.team][slot.seat % SEATS_PER_TEAM];
+    return spawns[idx % spawns.length];
   }
 
   _respawn(slot) {
@@ -673,24 +768,22 @@ export class Room {
   }
 }
 
-/* -------------------------------------------------------- 部屋の名簿 */
+/* ------------------------------------------------------------ 唯一の部屋 */
 
-const rooms = new Map();
+// 合言葉で部屋を分けるのをやめたので、部屋はサーバーに1つだけ。
+// 名簿(Map)を持っていた時は、誰もいなくなった部屋をその都度畳んでいたが、
+// 1つしかないなら畳む相手がいない。作り直しもしない。
+//
+// 空になっても捨てないのは、次に誰かが来た時に地形を組み直させないため。
+// 部屋が抱えているのは進行の状態だけで、地形(world)は外から渡された1つを
+// 参照しているだけなので、空のまま置いておいても重さはほとんど無い。
+// 60Hzのタイマーだけは空になった時点で止まる（leave側で_stopしている）
+let theRoom = null;
 
-export function getRoom(code, world) {
-  let r = rooms.get(code);
-  if (!r) {
-    r = new Room(code, world);
-    r.onEmpty = (room) => {
-      rooms.delete(room.code);
-      console.log(`[room] ${room.code} 誰もいなくなったので畳んだ`);
-    };
-    rooms.set(code, r);
-    console.log(`[room] ${code} を開いた`);
+export function getRoom(world) {
+  if (!theRoom) {
+    theRoom = new Room(world);
+    console.log('[room] 部屋を開いた');
   }
-  return r;
-}
-
-export function roomList() {
-  return [...rooms.values()].map((r) => ({ code: r.code, players: r.slots.size }));
+  return theRoom;
 }

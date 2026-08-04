@@ -10,7 +10,7 @@
    DOMには触らない。接続画面もスコアボードも別のファイルが作る。 */
 
 import {
-  C, Sv, EV, PHASE, encode, decode, unpackPlayer, normalizeRoom,
+  C, Sv, EV, PHASE, encode, decode, unpackPlayer,
   qPos, qAng, INPUT_BATCH, INTERP_DELAY_MS, TIMEOUT_MS,
 } from './protocol.js';
 
@@ -60,6 +60,10 @@ export class NetClient {
     this.onDisconnect = null;
     // 試合終了。ここで受けた得点だけが最終順位で、直後に届くSCOREは次の試合の0点
     this.onMatchEnd = null;
+    // ロビーの中身が変わった。誰かが座った・降りた・出入りした時に届く
+    this.onLobby = null;
+    // 局面が変わった。ロビーを畳んで操作を握るのはこれが起点
+    this.onPhase = null;
 
     /* 未確認の入力。ackが返るまで捨てない。
        中身は [seq, キー, yaw, pitch] に加えて、その入力を送った時点の自分の
@@ -97,7 +101,7 @@ export class NetClient {
   /* ------------------------------------------------------------ 接続 */
 
   /** 成功でお迎えの電文（WELCOME）がそのまま返る。失敗は理由つきで投げる */
-  connect(url, { name = '', room = '' } = {}) {
+  connect(url, { name = '' } = {}) {
     this.disconnect();
     this._closed = false;
     return new Promise((resolve, reject) => {
@@ -119,7 +123,7 @@ export class NetClient {
       this._connectTimer.unref?.();
 
       ws.onopen = () => {
-        this._send({ t: C.JOIN, name: String(name).slice(0, 24), room: normalizeRoom(room) });
+        this._send({ t: C.JOIN, name: String(name).slice(0, 24) });
       };
       ws.onmessage = (ev) => this._recv(ev.data);
       // 切れ方の違いは遊ぶ側にはどうでもいい。理由の文字列だけ変えて同じ道を通す
@@ -228,6 +232,11 @@ export class NetClient {
         break;
       case Sv.SCORE: this._score(m); break;
       case Sv.MATCHEND: this._matchEnd(m); break;
+      // ロビーの中身。届いた物をそのまま渡す。
+      // ここで席の絵を組み立てないのは、通信の層が画面の都合を持たないため
+      case Sv.LOBBY:
+        this._emit(this.onLobby, { rows: Array.isArray(m.rows) ? m.rows : [], why: m.why || '' });
+        break;
       // 往復を測るのはサーバー。こちらは即返すことだけが仕事
       case Sv.PING: this._send({ t: C.PONG, id: m.id }); break;
       case Sv.FULL: this._fail(m.why || '満員'); break;
@@ -348,8 +357,13 @@ export class NetClient {
     this._syncClock(m.now);
     if (typeof m.left === 'number') this.timeLeft = m.left;
     // 局面。timeLeftが「ラウンドの残り」なのか「次が始まるまで」なのかは
-    // これを見ないと分からない
-    if (typeof m.ph === 'number') this.phase = m.ph;
+    // これを見ないと分からない。
+    // 変わった時だけ知らせる。ロビーを畳んで操作を握るのはこの合図が起点で、
+    // 毎フレーム自分で見に行く形にすると「見た人」と「見ていない人」が分かれる
+    if (typeof m.ph === 'number' && m.ph !== this.phase) {
+      this.phase = m.ph;
+      this._emit(this.onPhase, this.phase);
+    }
 
     const time = typeof m.now === 'number' ? m.now : (this._snaps.length ? this._snaps[this._snaps.length - 1].time + 50 : 0);
     const last = this._snaps[this._snaps.length - 1];
@@ -550,6 +564,12 @@ export class NetClient {
   sendWeapon(index) {
     if (!this.connected) return;
     this._send({ t: C.WEAPON, i: index | 0 });
+  }
+
+  /** ロビーで席に着く。teamに-1を渡すと降りる。座れたかどうかはLOBBYが返ってくるかで分かる */
+  sendSeat(team, seat) {
+    if (!this.connected) return;
+    this._send({ t: C.SEAT, tm: team | 0, st: seat | 0 });
   }
 
   /* -------------------------------------------------------- 他人の補間 */

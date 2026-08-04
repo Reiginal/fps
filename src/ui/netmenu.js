@@ -2,12 +2,10 @@
 // 通信は一切やらない。繋ぐのは統合側で、この画面は「何を入力したか」を渡して、
 // 結果の文言を受け取るだけにしてある。ここに接続まで持たせると、
 // 画面の見た目を直すたびに通信の作法まで触ることになる。
-import { normalizeRoom, ROOM_LEN } from '../net/protocol.js';
-
 const $ = (id) => document.getElementById(id);
 
 // 前回の入力を覚えておく口。遊ぶたびに名前とIPを打ち直させない
-const SAVE = { name: 'blackout.name', url: 'blackout.url', room: 'blackout.room' };
+const SAVE = { name: 'blackout.name', url: 'blackout.url' };
 
 // 繋がらなかった時の文言。「エラー」とだけ出すと、アドレスが違うのか
 // 相手がまだ立てていないのか分からず、遊ぶ側に打つ手が無くなる。
@@ -15,7 +13,7 @@ const SAVE = { name: 'blackout.name', url: 'blackout.url', room: 'blackout.room'
 export const NET_MSG = {
   connecting: '接続中…',
   offline: '相手に繋がりません。接続先のアドレスと、同じWi-Fiに繋がっているかを確かめてください',
-  full: 'この部屋は満員です。合言葉を変えるか、誰かが抜けるのを待ってください',
+  full: 'いま満員です。誰かが抜けるのを待ってください',
   lost: '接続が切れました。もう一度「対戦に参加」を押してください',
   timeout: '応答がありません。相手の端末でサーバーが動いているか確かめてください',
 };
@@ -33,7 +31,7 @@ export class NetMenu {
   constructor() {
     this.el = {
       root: $('netmenu'),
-      name: $('nmName'), url: $('nmUrl'), room: $('nmRoom'),
+      name: $('nmName'), url: $('nmUrl'),
       status: $('nmStatus'), solo: $('nmSolo'), join: $('nmJoin'),
       urlField: $('nmUrlField'), urlToggle: $('nmUrlToggle'),
     };
@@ -64,8 +62,6 @@ export class NetMenu {
         this.el.urlToggle.textContent = folded ? '別の場所へ繋ぐ ▾' : '別の場所へ繋ぐ ▴';
       };
     }
-    this.el.room.value = normalizeRoom(load(SAVE.room, ''));
-
     // addEventListenerではなく代入で持つ。DOMはindex.html側に1組しかないので、
     // 2回作られた時に古い方の処理まで動いて二重に始まるのを防ぐ
     this.el.solo.onclick = () => {
@@ -76,18 +72,13 @@ export class NetMenu {
     this.el.join.onclick = () => this._join();
 
     // 打ち終わってEnterを押すのが自然な形。押せるボタンを探させない
-    for (const k of ['name', 'url', 'room']) {
+    for (const k of ['name', 'url']) {
       this.el[k].onkeydown = (e) => {
         if (e.key === 'Enter') this._join();
         // WASDやRが下のゲームへ抜けないようにする（入力中に武器が切り替わる）
         e.stopPropagation();
       };
     }
-
-    // 合言葉は口頭で伝わってくるので、小文字も紛れた文字も打った端から整える
-    this.el.room.oninput = () => {
-      this.el.room.value = normalizeRoom(this.el.room.value);
-    };
   }
 
   show() {
@@ -146,25 +137,15 @@ export class NetMenu {
     else if (this.hosted && /^ws:\/\//i.test(url)) url = url.replace(/^ws:\/\//i, 'wss://');
     this.el.url.value = url;
 
-    const room = normalizeRoom(this.el.room.value);
-    this.el.room.value = room;
-    // 半端な文字数は打ち間違い。空(共通の部屋)とは分けて止める
-    if (room.length > 0 && room.length < ROOM_LEN) {
-      this.setStatus(`合言葉は${ROOM_LEN}文字です。空のままなら共通の部屋に入ります`, true);
-      this.el.room.focus();
-      return;
-    }
-
     this._store();
     this.setStatus(NET_MSG.connecting, false);
     this.setBusy(true);
-    this.onJoin({ url, room, name });
+    this.onJoin({ url, name });
   }
 
   _store() {
     save(SAVE.name, this.el.name.value.trim());
     save(SAVE.url, this.el.url.value.trim());
-    save(SAVE.room, normalizeRoom(this.el.room.value));
   }
 }
 
