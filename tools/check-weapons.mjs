@@ -216,6 +216,17 @@ console.log('\n[3.7] 包帯を巻いている間の動き');
     maxY = Math.max(maxY, ws.bandage.rotation.y);
     rollX = Math.max(rollX, Math.abs(ws.bandage.userData.roll.rotation.x));
   }
+  // 手が帯を握る向きになっているか。
+  // 「手の形はしているが握っていない」は画面を見ないと気づけないが、
+  // 握り軸(手のローカルY)と帯の軸(横に寝た円筒なのでX)の角度なら測れる。
+  // 元は69.9度ずれていて、指が帯を回り込まずに横切って閉じていた
+  {
+    const hand = ws.bandage.children.find((c) => c !== ws.bandage.userData.roll);
+    const grip = new THREE.Vector3(0, 1, 0).applyQuaternion(hand.quaternion).normalize();
+    const gap = THREE.MathUtils.radToDeg(Math.acos(Math.abs(grip.dot(new THREE.Vector3(1, 0, 0)))));
+    ok(gap < 20, `手が帯を握る向きになっている (軸のずれ ${gap.toFixed(1)}度 / 上限20度)`);
+  }
+
   const swing = maxY - minY;
   // 手首のひねりは往復。半回転(π)を超えたら、それはもう「回っている」
   ok(swing < Math.PI, `手の振れ幅が往復に収まる (${swing.toFixed(2)}ラジアン / 上限${Math.PI.toFixed(2)})`);

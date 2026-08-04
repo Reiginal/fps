@@ -32,6 +32,9 @@ serves('/src/net/protocol.js');
 serves('/node_modules/three/build/three.module.js');
 serves('/node_modules/three/examples/jsm/math/Octree.js');
 serves('/src/main.js?v=2', 'クエリ付きでも読める');
+// URLを貼った時の札の絵。LINEやSlackがここを取りに来る。
+// 配れていないと、絵の無い小さい札になる（本番だけそうなるのが一番気づけない）
+serves('/assets/ogp.png', 'URLを貼った時の札の絵');
 
 console.log('\n[2] サーバー側の実装は配らない');
 blocks('/server/sim.js', '当たり判定の実装');

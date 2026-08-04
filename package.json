@@ -3,12 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "ThreeJSで作るブラウザFPS。テクスチャも音も手続き的生成でアセットファイルなし",
+  "description": "ThreeJSで作るブラウザFPS。今のところテクスチャも音もコードで生成している",
   "scripts": {
     "start": "node server/index.js",
     "lint": "eslint .",
     "check": "node tools/check-calls.mjs && node tools/check-serve.mjs && node tools/check-hud.mjs && node tools/check-weapons.mjs && node tools/check-audio.mjs && node tools/check-audio-leak.mjs && node tools/check-sound.mjs && node tools/check-heal.mjs && node tools/check-lobby.mjs",
-    "sounds": "node tools/sound-lab.mjs"
+    "sounds": "node tools/sound-lab.mjs",
+    "ogp": "node tools/make-ogp.mjs"
   },
   "dependencies": {
     "three": "^0.185.1",

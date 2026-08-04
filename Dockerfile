@@ -22,6 +22,9 @@ RUN npm ci --omit=dev
 COPY index.html ./
 COPY src ./src
 COPY server ./server
+# URLを貼った時の札に使う画像。ここに書き忘れると、手元では出るのに
+# 本番だけ札に絵が出ない（コンテナの中に無いので404になる）
+COPY assets ./assets
 
 ENV NODE_ENV=production
 # 置き場所がPORTを渡してくる。渡されなければ8080
