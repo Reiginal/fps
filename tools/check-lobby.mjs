@@ -123,7 +123,26 @@ ok(a.slot.rounds === 0, '取ったラウンドも戻す');
 // 次に来た人が準備を押した瞬間、こちらは何もしていないのに試合が始まる
 ok(a.slot.ready === false, '残った人の準備完了も倒す');
 
-console.log('\n[11] ロビーの中身が配られている');
+console.log('\n[11] 入った本人へ、お迎えより後にロビーが届く');
+// 順番が逆だと、入ってきた本人の画面は受け口をまだ繋いでいないので
+// ロビーを取りこぼし、**先にいた人が誰も映らない**。
+// 実際に「相手から見たら俺がロビーにいない」が起きた。
+// room.join()だけではロビーを配らず、server/index.jsがWELCOMEの後に配る
+{
+  const d2 = join('でぃー');
+  const kinds = d2.conn.sent.map((m) => m.t);
+  ok(!kinds.includes('L'), 'join()の時点ではまだロビーを配っていない');
+  // server/index.jsがやっている順番を再現する
+  d2.conn.send(room.welcome(d2.slot));
+  room.sendLobby();
+  const order = d2.conn.sent.map((m) => m.t).join('');
+  ok(order.indexOf('W') < order.indexOf('L'), `お迎えが先、ロビーが後 (${order})`);
+  const lob = d2.conn.sent.filter((m) => m.t === 'L').pop();
+  ok(lob.rows.length === room.slots.size, `先にいた人も入っている (${lob.rows.length}人)`);
+  room.leave(d2.slot);
+}
+
+console.log('\n[12] ロビーの中身が配られている');
 const last = a.conn.sent.filter((m) => m.t === 'L').pop();
 ok(!!last, 'LOBBYが届いている');
 ok(Array.isArray(last.rows), '席の一覧が入っている');
