@@ -133,6 +133,32 @@ export class Room {
     if (this._whyNotStart() === '') this._startMatch();
   }
 
+  /**
+   * 試合が決まった後、次の試合を勝手に始めずロビーへ戻す。
+   *
+   * 以前は決着の8秒後に同じ顔ぶれで次が始まっていた。抜けたい人も
+   * 席を変えたい人も、始まってしまうと次の決着まで動けない。
+   * 準備完了を押し直してもらう形にすると、続けるかどうかを選べる。
+   *
+   * 席はそのまま残す。毎回座り直させるのは、同じ相手と続ける時に邪魔になる
+   */
+  _backToLobby() {
+    this.phase = PHASE.WAIT;
+    this.timeLeft = 0;
+    this.round = 0;
+    for (const s of this.slots.values()) {
+      s.rounds = 0;
+      s.sim.kills = 0;
+      s.sim.deaths = 0;
+      // 準備は倒す。倒さないと、結果を見ている間に相手が押した瞬間、
+      // こちらは何もしていないのに次が始まる
+      s.ready = false;
+      this._respawn(s);
+    }
+    this._sendScore();
+    this._sendLobby();
+  }
+
   _lobbyRows() {
     const rows = [];
     for (const s of this.slots.values()) {
@@ -144,6 +170,16 @@ export class Room {
       ]);
     }
     return rows;
+  }
+
+  /**
+   * 発言を全員へ配る。名前も一緒に載せる。
+   * idだけにすると、言った人が抜けた後で名前が引けなくなり、
+   * 誰の発言か分からない行が画面に残る
+   */
+  chat(slot, text) {
+    const msg = { t: Sv.CHAT, name: slot.name, m: text };
+    for (const s of this.slots.values()) s.conn.send(msg);
   }
 
   /** ロビーの絵を全員へ配る。席が動いた時と、人が出入りした時だけ呼ぶ */
@@ -661,7 +697,7 @@ export class Room {
       if (this.timeLeft <= 0) {
         if (this.phase === PHASE.LIVE) this._endRound(null, 'time');
         else if (this.phase === PHASE.BREAK) this._startRound();
-        else this._startMatch();
+        else this._backToLobby();
       }
     }
 

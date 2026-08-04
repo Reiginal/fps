@@ -11,7 +11,7 @@
 
 import {
   C, Sv, EV, PHASE, encode, decode, unpackPlayer,
-  qPos, qAng, INPUT_BATCH, INTERP_DELAY_MS, TIMEOUT_MS,
+  qPos, qAng, INPUT_BATCH, INTERP_DELAY_MS, TIMEOUT_MS, CHAT_MAX,
 } from './protocol.js';
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -64,6 +64,8 @@ export class NetClient {
     this.onLobby = null;
     // 局面が変わった。ロビーを畳んで操作を握るのはこれが起点
     this.onPhase = null;
+    // 誰かが発言した
+    this.onChat = null;
 
     /* 未確認の入力。ackが返るまで捨てない。
        中身は [seq, キー, yaw, pitch] に加えて、その入力を送った時点の自分の
@@ -232,6 +234,13 @@ export class NetClient {
         break;
       case Sv.SCORE: this._score(m); break;
       case Sv.MATCHEND: this._matchEnd(m); break;
+      // 発言。名前と本文をそのまま渡す。
+      // HTMLとして解釈されないようにするのは、画面へ出す側の仕事
+      case Sv.CHAT:
+        if (typeof m.m === 'string') {
+          this._emit(this.onChat, { name: String(m.name ?? ''), text: m.m });
+        }
+        break;
       // ロビーの中身。届いた物をそのまま渡す。
       // ここで席の絵を組み立てないのは、通信の層が画面の都合を持たないため
       case Sv.LOBBY:
@@ -576,6 +585,14 @@ export class NetClient {
   sendReady(on) {
     if (!this.connected) return;
     this._send({ t: C.READY, r: on ? 1 : 0 });
+  }
+
+  /** 発言する。長さも連投もサーバーが見るので、ここでは送るだけ */
+  sendChat(text) {
+    if (!this.connected) return;
+    const s = String(text ?? '').trim();
+    if (!s) return;
+    this._send({ t: C.CHAT, m: s.slice(0, CHAT_MAX) });
   }
 
   /* -------------------------------------------------------- 他人の補間 */

@@ -13,6 +13,7 @@ import { Director } from './ai/enemy.js';
 import { HUD } from './ui/hud.js';
 import { NetMenu, NET_MSG } from './ui/netmenu.js';
 import { Lobby } from './ui/lobby.js';
+import { Chat } from './ui/chat.js';
 import { NetClient } from './net/client.js';
 import { RemotePlayers } from './net/remote.js';
 import {
@@ -716,6 +717,11 @@ class Game {
     this.lobby = lobby;
     lobby.onSeat = (team, seat) => this.net?.sendSeat(team, seat);
     lobby.onReady = (on) => this.net?.sendReady(on);
+
+    // 発言。ロビーでも試合中でも同じ物を使う
+    const chat = new Chat();
+    this.chat = chat;
+    chat.onSend = (text) => this.net?.sendChat(text);
     lobby.onLeave = () => this._quitMatch();
 
     menu.onSolo = () => {
@@ -783,12 +789,18 @@ class Game {
     net.onMatchEnd = (r) => this._onMatchEnd(r);
     net.onDisconnect = (why) => this._onNetLost(why);
     net.onLobby = (m) => { this._lobbyChime(m.rows); this.lobby.render(m); };
+    net.onChat = ({ name, text }) => this.chat.push(name, text, name === this._myName);
     net.onPhase = (ph) => this._onPhase(ph);
 
     this.hud.setMode('versus');
     this.hud.netStatus('');
     this.menu.setBusy(false);
     this.menu.hide();
+    // 発言の中身は誰が言ったかを名前で運ぶので、自分の名前を覚えておく。
+    // idで比べたいところだが、抜けた人の発言を残すために名前で運んでいる
+    this._myName = name;
+    this.chat.clear();
+    this.chat.show();
     // 前の顔ぶれを忘れてから入る。持ち越すと、2回目に入った時に
     // 「前にいた人」が新顔として数えられて、入った瞬間に鳴る
     this._lobbyIds = null;
@@ -859,6 +871,7 @@ class Game {
     // 出たままなので、どちらも畳んでから選択画面を出す
     this.hud.hideOverlay();
     this.lobby.hide();
+    this.chat.hide();
     this.state = 'menu';
     document.exitPointerLock?.();
     this._enterSolo();
@@ -1961,7 +1974,21 @@ class Game {
     const playing = this.state === 'playing';
 
     if (playing) {
-      const input = this.input;
+      // 発言を打っている間は、キーを1つもゲームへ通さない。
+      // 通すと、打った文字がそのまま移動や武器の切り替えになる。
+      //
+      // マウスの掴みは外さない。外すと一時停止の画面が出てしまい、
+      // 「打とうとしただけなのに試合から離れた」形になる。
+      // 掴んだままでも、文字を打つ場所に入力先があれば文字は打てる
+      const typing = !!this.chat?.typing;
+      // Enterで打つ場所を開く。対戦している時だけ
+      if (!typing && this.mode === 'versus' && this.input.pressed('Enter')) {
+        this.chat.open();
+      }
+      const input = typing ? this._noInput : this.input;
+      // 打っている間も、押した印は毎フレーム捨てる。
+      // 溜めたままにすると、打ち終わった瞬間に溜まっていた分が一度に効く
+      if (typing) this.input.endFrame();
 
       // 対戦では倒れている間の操作を受け付けない。復帰待ちの3秒に装填や持ち替えを
       // 通すと、湧いた瞬間の弾数がサーバーと食い違う
@@ -2023,6 +2050,10 @@ class Game {
       this.input.takeLook();
       this.input.endFrame();
     }
+
+    // 発言の行を古くしていく。遊んでいてもいなくても時間は進むので、
+    // どちらの道からも同じだけ薄くなるようここに置く
+    this.chat?.update(dt);
 
     // 空はカメラに追従させる（遠景として固定して見せる）
     this.sky.position.copy(this.camera.position);

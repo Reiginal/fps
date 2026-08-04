@@ -464,6 +464,39 @@
   /* 接続中に連打されると同じ部屋へ何本も繋ぎにいく */
   #netmenu.busy .netbtn { opacity: .35; cursor: default; pointer-events: none; }
 
+  /* --------------------------------------------------------- 発言 */
+  /* 左下に置く。右下は弾数、中央下は体力なので、遊ぶのに要る数字と重ならない。
+     普段は触れない（pointer-events: none）。打つ時だけ入力欄が触れるようになる */
+  #chat {
+    position: fixed; left: 26px; bottom: 132px; z-index: 15;
+    width: min(420px, 44vw); pointer-events: none;
+  }
+  #chat.hidden { display: none; }
+  #chatLog { display: flex; flex-direction: column; gap: 3px; margin-bottom: 6px; }
+  /* 1行。読めれば十分なので小さく、影で背景から浮かせる。
+     枠や下地を敷くと、撃ち合いの最中に視界を塞ぐ */
+  .cline {
+    font-size: 12px; letter-spacing: .04em; line-height: 1.5;
+    color: var(--hud); text-shadow: 0 1px 4px rgba(0,0,0,.95);
+    word-break: break-word;
+    animation: cIn .25s ease-out both;
+  }
+  .cline b { color: var(--accent); font-weight: 600; margin-right: 7px; }
+  /* 自分の発言。言ったことが流れたかを確かめられるように色を分ける */
+  .cline.me b { color: var(--ok); }
+  /* 時間が経った行は薄くする。消さないのは、撃ち合いの後に読み返せるようにするため */
+  .cline.old { opacity: .38; }
+  @keyframes cIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+  #chatInput {
+    width: 100%; padding: 7px 9px; pointer-events: auto;
+    font-family: var(--mono); font-size: 13px;
+    color: var(--hud); background: rgba(8,12,18,.86);
+    border: 1px solid var(--accent);
+    user-select: text; -webkit-user-select: text;
+  }
+  #chatInput:focus { outline: none; }
+  #chatInput.hidden { display: none; }
+
   /* --------------------------------------------------------- ロビー */
   /* 繋がってから試合が始まるまでの画面。接続画面と同じ塗り潰しにして、
      裏の起動画面が透けないようにする */
@@ -719,6 +752,14 @@
 <!-- 対戦に繋がった後、試合が始まるまでの画面。
      ここが「入る」と「始まる」の間の踊り場で、席・チームを自分で選ぶ。
      席の中身はサーバーが持っていて、lobby.jsは配られた物を描くだけ -->
+<!-- 発言。ロビーでも試合中でも同じ物を使う。
+     2つ作ると、片方だけ直して見た目がずれる。
+     試合中はマウスを掴んでいるので、Enterで開いてEnterで送る形にしてある -->
+<div id="chat" class="hidden">
+  <div id="chatLog"></div>
+  <input id="chatInput" type="text" maxlength="80" autocomplete="off" spellcheck="false" class="hidden">
+</div>
+
 <div id="lobby" class="hidden">
   <div class="lbpanel">
     <div class="title">ロビー</div>

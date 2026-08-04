@@ -29,7 +29,12 @@ export class Input {
       // 個別に並べて止める形にしない。並べ方を間違えると、遊ぶ側からは
       // 「たまにタブが消える」としか見えず、原因に辿り着けない。
       // マウスを掴んでいる＝遊んでいる間は、ブラウザの操作は全部要らない
-      if (this.locked) e.preventDefault();
+      // 文字を打つ場所に入力先がある時は止めない。
+      // 止めると、発言を打とうとしても1文字も入らない。
+      // ゲームの操作へ漏らさないのは打つ側（chat.jsのstopPropagation）の仕事
+      const typing = e.target instanceof HTMLElement
+        && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable);
+      if (this.locked && !typing) e.preventDefault();
       if (e.repeat) return;
       this.keys.add(e.code);
       this._pressedThisFrame.add(e.code);

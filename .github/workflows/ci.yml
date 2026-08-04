@@ -97,3 +97,6 @@ jobs:
 
       - name: 検査 狙いの当たり具合
         run: node tools/check-aim.mjs
+
+      - name: 検査 発言
+        run: node tools/check-chat.mjs
