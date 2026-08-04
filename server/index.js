@@ -202,7 +202,10 @@ function onMessage(conn, raw) {
 function onJoin(conn, m) {
   if (conn.slot) return;   // 二重参加は無視
 
+  // 名前から制御文字を剥がす。他人の端末に表示される文字列なので、
+  // 端末の表示を壊す文字や改行を混ぜられないようにする
   const name = typeof m.name === 'string'
+    // eslint-disable-next-line no-control-regex -- 制御文字を消すのが目的の正規表現
     ? m.name.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 16) || '名無し'
     : '名無し';
   const code = normalizeRoom(m.room) || 'MAIN';

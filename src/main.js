@@ -796,7 +796,7 @@ class Game {
     this.menu.setStatus(why || NET_MSG.lost, true);
   }
 
-  _onMatchEnd({ rows, why }) {
+  _onMatchEnd({ rows }) {
     this.hud.matchEnd(rows, true, `${MATCH.ROUND_WINS}本先取で決着`);
     // 次の試合が始まったら畳む。サーバーはINTERMISSION後に0点を配って再開する。
     // 前のタイマーが残っていると、続けて2試合終わった時に早い方が新しい順位を消す
@@ -1105,7 +1105,7 @@ class Game {
     return best;
   }
 
-  _enemyShot(enemy, muzzle, dir, damage, dist) {
+  _enemyShot(enemy, muzzle, dir, damage, _dist) {
     this.effects.muzzle(muzzle, dir);
     this.audio.gunshot(
       { volume: 0.62, bodyFreq: 360, crackFreq: 3000, bodyDecay: 0.17, tailDecay: 0.30, thumpFrom: 105, thumpTo: 42 },

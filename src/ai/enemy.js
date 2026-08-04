@@ -1951,7 +1951,7 @@ export class Enemy {
     eye.emissiveIntensity = 0.85 * (1 - sstep(12, 25, dist));
   }
 
-  _shoot(player, dist, ctx) {
+  _shoot(player, dist, _ctx) {
     const muzzleWorld = this.parts.muzzle.getWorldPosition(new THREE.Vector3());
     const playerEye = _v.set(
       player.collider.start.x,
