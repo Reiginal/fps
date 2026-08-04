@@ -96,6 +96,7 @@ ok('explosion', () => a.explosion(at, cam));
 ok('whizBy', () => a.whizBy(1.5));
 ok('click', () => a.click(2800, 0.3, 0.03));
 ok('lobbyJoin（入室音）', () => a.lobbyJoin());
+ok('playerDown（自分が倒れた）', () => a.playerDown());
 ok('setEnvironment', () => a.setEnvironment(0.4));
 
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);

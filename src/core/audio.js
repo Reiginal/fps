@@ -1211,6 +1211,58 @@ export class AudioEngine {
   }
 
   /**
+   * 自分が倒れた時。
+   *
+   * 敵が倒れる音(death)とは別物にしてある。あちらは「向こうで何かが倒れた」を
+   * 場の中で鳴らす音だが、こちらは自分にしか聞こえない音なので、
+   * 場に馴染ませる必要がない。遠慮なく前に出す。
+   *
+   * 作りは3層:
+   *   1. 落ちる低音 … 倒れ込む重さ。ここが無いと「点数が止まった」だけになる
+   *   2. 潰れたノイズ … 地面に着く音
+   *   3. 尾を引く高い音 … 耳鳴り。撃たれて意識が飛ぶ側の合図で、
+   *      これがあると音が途切れずに結果画面へ繋がる
+   */
+  playerDown() {
+    if (!this.ready || !this.enabled) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+
+    // 1. 落ちる低音。高い所から下へ滑らせる
+    const lo = ctx.createOscillator();
+    lo.type = 'sine';
+    lo.frequency.setValueAtTime(180, t);
+    lo.frequency.exponentialRampToValueAtTime(38, t + 0.9);
+    const lg = ctx.createGain();
+    lo.connect(lg); lg.connect(this.postBus);
+    this._env(lg, t, 0.55, 0.006, 0.95);
+    this._reap([lg], 1.6);
+    lo.start(t); lo.stop(t + 1.2);
+
+    // 2. 地面に着く音。低音の滑りが終わるあたりに置く
+    const thud = this._noiseSource(1.2);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(420, t);
+    const tg = ctx.createGain();
+    thud.connect(lp); lp.connect(tg); tg.connect(this.postBus);
+    this._env(tg, t + 0.34, 0.30, 0.004, 0.22);
+    this._reap([tg], 1.4);
+    thud.start(t + 0.34); thud.stop(t + 0.75);
+
+    // 3. 耳鳴り。長く薄く残して、結果画面まで音を切らさない
+    const ring = ctx.createOscillator();
+    ring.type = 'sine';
+    ring.frequency.setValueAtTime(3100, t);
+    ring.frequency.exponentialRampToValueAtTime(2350, t + 1.6);
+    const rg = ctx.createGain();
+    ring.connect(rg); rg.connect(this.postBus);
+    this._env(rg, t + 0.05, 0.075, 0.05, 1.5);
+    this._reap([rg], 2.2);
+    ring.start(t); ring.stop(t + 1.9);
+  }
+
+  /**
    * 誰かがロビーに入ってきた合図。「ピコン」。
    *
    * これは戦闘中に鳴る音ではなく、**別の作業をしている人に気づかせる音**なので、
