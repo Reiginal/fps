@@ -20,6 +20,24 @@ import {
 } from './net/protocol.js';
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+
+// 倒れてから結果が出るまで。ここが短いと、撃たれた次の瞬間に文字が出て
+// 何が起きたのかを見る時間が無い。長いと待たされる。1.3秒は
+// 「崩れ落ちて地面に転がるのを見終わる」あたり
+const DEATH_FALL_S = 1.3;
+
+// 自己ベスト。localStorageは設定次第で読み書きどちらも例外を投げるので、
+// 覚えられないだけで遊べなくなることのないよう握り潰す（netmenu.jsと同じ作法）
+const BEST_KEY = 'blackout.best';
+function loadBest() {
+  try {
+    const v = JSON.parse(localStorage.getItem(BEST_KEY) || '{}');
+    return { score: v.score | 0, wave: v.wave | 0 };
+  } catch { return { score: 0, wave: 0 }; }
+}
+function saveBest(v) {
+  try { localStorage.setItem(BEST_KEY, JSON.stringify(v)); } catch { /* 覚えられないだけ */ }
+}
 const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
 
 // 太陽の向き。ここが画の出来をほぼ決める。
@@ -961,19 +979,71 @@ class Game {
     this.menu.show();
   }
 
+  /* 自分が倒れた。撃たれた・爆風・落下の3経路から同じ形で入る。
+     以前はこの3箇所が同じ4行を各自持っていて、演出を足すなら3箇所を直す形だった */
+  _onPlayerDown() {
+    if (this.state === 'dead') return;
+    this.state = 'dead';
+    this.deathT = 0;
+    document.exitPointerLock?.();
+    this.audio.playerDown();
+    // すぐ結果を出さない。倒れる間を見せてから出す。
+    // 260msで切り替えていた頃は、撃たれた次の瞬間に文字が出ていて、
+    // 何が起きて死んだのかを見る時間が無かった
+    clearTimeout(this._deathTimer);
+    this._deathTimer = setTimeout(() => this._showDeath(), DEATH_FALL_S * 1000);
+  }
+
+  /* 倒れる間のカメラ。player._applyCamera()が書いた後に上書きする。
+     膝から崩れて横倒しになる形。落ちるのを速く、傾くのを遅らせると
+     「崩れ落ちた」に見える。同じ曲線で動かすと板が倒れるようにしか見えない */
+  _deathFall(dt) {
+    if (this.state !== 'dead') return;
+    this.deathT = Math.min(DEATH_FALL_S, (this.deathT ?? 0) + dt);
+    const k = this.deathT / DEATH_FALL_S;
+    const drop = 1 - (1 - k) ** 3;
+    const roll = 1 - (1 - k) ** 2;
+    const cam = this.camera;
+    // 目の高さから、地面に転がった高さまで落とす
+    cam.position.y -= drop * (this.player.height - 0.42);
+    cam.rotation.z += roll * 1.15;
+    // 顔が上を向く。倒れた先に空が見えると「自分が倒れた」が伝わる
+    cam.rotation.x -= roll * 0.22;
+  }
+
   _showDeath() {
     this.hud.show(false);
     const acc = this.shotsFired ? Math.round((this.shotsHit / this.shotsFired) * 100) : 0;
-    this.hud.overlay(`
-      <div class="title">戦死</div>
-      <div class="subtitle">作戦失敗</div>
-      <div class="stats">
-        スコア <b>${this.score.toLocaleString('en-US')}</b><br>
-        到達ウェーブ <b>${this.director.wave}</b><br>
-        撃破数 <b>${this.kills}</b> &nbsp; ヘッドショット <b>${this.headshots}</b><br>
-        命中率 <b>${acc}%</b>
+    const wave = this.director.wave;
+    // 自己ベスト。点数だけ出しても、それが良い回だったのか分からない。
+    // 前回までの一番と並べて初めて、もう一度やる理由になる
+    const best = loadBest();
+    const isBest = this.score > best.score;
+    if (isBest) saveBest({ score: this.score, wave });
+
+    // 数字を1行ずつ遅らせて出す。まとめて出すと表にしか見えない
+    const row = (label, value, i, cls = '') => `<div class="drow ${cls}" style="animation-delay:${0.12 + i * 0.09}s">`
+      + `<span class="dlabel">${label}</span><span class="dval">${value}</span></div>`;
+
+    // 一時停止と同じ入れ物を使う。「ホームへ戻る」の繋ぎ込みが向こうにあり、
+    // 押した時に再出撃が一緒に走らないようにする処理もそこが持っている
+    this._pauseOverlay(`
+      <div class="dtitle">戦死</div>
+      <div class="dsub">${wave}波で力尽きた</div>
+      <div class="dgrid">
+        ${row('スコア', this.score.toLocaleString('en-US'), 0, 'big')}
+        ${row('到達ウェーブ', wave, 1)}
+        ${row('撃破', this.kills, 2)}
+        ${row('ヘッドショット', this.headshots, 3)}
+        ${row('命中率', `${acc}%`, 4)}
       </div>
-      <div class="cta">クリックで再出撃</div>
+      ${isBest
+    ? `<div class="dbest hit" style="animation-delay:.62s">自己ベスト更新</div>`
+    : `<div class="dbest" style="animation-delay:.62s">自己ベスト ${best.score.toLocaleString('en-US')}（${best.wave}波）</div>`}
+      <div class="cta dcta" style="animation-delay:.78s">クリックで再出撃</div>
+      <div class="dcta" style="animation-delay:.86s">
+        <button id="ovHome" class="ovhome" type="button">ホームへ戻る</button>
+      </div>
     `);
   }
 
@@ -981,6 +1051,9 @@ class Game {
     this.score = 0; this.kills = 0; this.headshots = 0;
     this.shotsFired = 0; this.shotsHit = 0;
     this.damageFlash = 0;
+    // 倒れる動きを止める。残すと再出撃した直後のカメラが傾いたまま始まる
+    this.deathT = 0;
+    clearTimeout(this._deathTimer);
     this.player.refill();
     this.player.yaw = 0; this.player.pitch = 0;
     this.player.teleport(this.level.playerSpawn);
@@ -1256,11 +1329,7 @@ class Game {
       // 被弾で視点が少し跳ねる
       player.addRecoil(0.014 + Math.random() * 0.012, (Math.random() - 0.5) * 0.02);
 
-      if (!player.alive) {
-        this.state = 'dead';
-        document.exitPointerLock?.();
-        setTimeout(() => this._showDeath(), 260);
-      }
+      if (!player.alive) this._onPlayerDown();
     } else {
       // 外れ弾が耳元を掠める音。これが無いと「撃たれている怖さ」が出ない。
       // 弾道への垂線距離を出して、近い時だけ鳴らす
@@ -1791,11 +1860,7 @@ class Game {
     if (dm <= NADE.BLAST_R && this.player.alive) {
       this.player.damage(Math.max(NADE.MIN_DMG, NADE.BLAST_DMG * (1 - dm / NADE.BLAST_R)));
       this.damageFlash = Math.min(0.6, this.damageFlash + 0.4);
-      if (!this.player.alive) {
-        this.state = 'dead';
-        document.exitPointerLock?.();
-        setTimeout(() => this._showDeath(), 260);
-      }
+      if (!this.player.alive) this._onPlayerDown();
     }
   }
 
@@ -1925,11 +1990,10 @@ class Game {
         // 落下や自爆で死んだ時にもリザルトへ行く。
         // 以前は「敵に撃たれた」経路にしか死亡の受け口が無く、高い所から落ちて
         // 体力が0になっても操作だけ効かないまま画面が動き続けていた
-        if (!this.player.alive && this.state === 'playing') {
-          this.state = 'dead';
-          document.exitPointerLock?.();
-          setTimeout(() => this._showDeath(), 260);
-        }
+        if (!this.player.alive) this._onPlayerDown();
+        // 倒れる動きはカメラが決まった後に上書きする。
+        // player側へ入れると、対戦の他人の描画やリスポーン処理まで巻き込む
+        this._deathFall(dt);
         this.director.update(dt, this.player, {});
         this._stepSoloNades(dt);
         this.effects.update(dt, this.camera);
@@ -1961,9 +2025,11 @@ class Game {
 
     // 被弾の赤みと体力低下の常時ビネット
     this.damageFlash = Math.max(0, this.damageFlash - dt * 2.4);
+    // 倒れている間は、崩れ落ちるのに合わせて画面を沈めていく。
+    // 死んだ瞬間から一定の濃さだと、時間が止まった絵に見える
     const lowHp = this.player.alive
       ? clamp(1 - this.player.health / (this.player.maxHealth * 0.45), 0, 1) * 0.45
-      : 0.6;
+      : 0.6 + 0.35 * clamp((this.deathT ?? 0) / DEATH_FALL_S, 0, 1);
     this.fx.grade.uniforms.uDamage.value = Math.min(1, this.damageFlash + lowHp);
     this.fx.grade.uniforms.uTime.value += dt;
     // 覗いている量。ADS中だけ浅い被写界深度を掛けるのに使う

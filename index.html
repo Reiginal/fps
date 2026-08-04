@@ -364,6 +364,44 @@
     border: 1px solid rgba(255,255,255,.16); padding: 9px 20px; margin-top: 20px;
     font-family: inherit; cursor: pointer; }
   .ovhome:hover { color: var(--hud); border-color: rgba(255,255,255,.36); }
+  /* --------------------------------------------------- 戦死の画面 */
+  /* 元は題と、数字を並べた1つの塊と、案内の3行だった。
+     読む物としては足りているが、遊びが終わった瞬間に出る画面としては
+     何も起きていない。数字を1行ずつ遅らせて出し、行の意味と値を左右に離す。
+     ここが最後に見る画面なので、もう一度やる気になるかがここで決まる */
+  .dtitle {
+    font-size: 54px; letter-spacing: .34em; color: var(--warn);
+    text-shadow: 0 0 30px rgba(255,70,50,.35);
+    animation: dIn .5s ease-out both;
+  }
+  .dsub {
+    font-size: 12px; letter-spacing: .3em; color: var(--dim);
+    margin: 8px 0 30px; animation: dIn .5s ease-out .06s both;
+  }
+  .dgrid { width: min(340px, 80vw); margin: 0 auto 18px; }
+  /* 行。左に何の数字か、右に値。中央に寄せて並べると、
+     どの数字がどの意味か目で追い直すことになる */
+  .drow {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.08);
+    animation: dRow .45s ease-out both;
+  }
+  .dlabel { font-size: 11px; letter-spacing: .18em; color: var(--dim); }
+  .dval { font-size: 17px; letter-spacing: .06em; color: var(--hud); }
+  /* スコアだけ大きく。一番上に一番大きい数字がある形にすると、
+     どれが今回の成果かを探さずに済む */
+  .drow.big .dval { font-size: 30px; font-weight: 600; }
+  .drow.big { border-bottom-color: rgba(255,255,255,.16); padding-bottom: 11px; }
+  .dbest {
+    font-size: 11px; letter-spacing: .16em; color: var(--dim);
+    margin-bottom: 26px; animation: dIn .5s ease-out both;
+  }
+  /* 更新した回だけ光らせる。毎回光ると、光っていることに意味が無くなる */
+  .dbest.hit { color: var(--ok); text-shadow: 0 0 18px rgba(125,219,138,.45); }
+  .dcta { animation: dIn .5s ease-out both; }
+  @keyframes dIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+  @keyframes dRow { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: none; } }
+
   .stats { font-size: 12px; color: var(--dim); letter-spacing: .12em; line-height: 2; margin-bottom: 30px; }
   .stats b { color: var(--hud); font-size: 15px; }
 

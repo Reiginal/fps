@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server/index.js",
     "lint": "eslint .",
-    "check": "node tools/check-calls.mjs && node tools/check-serve.mjs && node tools/check-hud.mjs && node tools/check-weapons.mjs && node tools/check-audio.mjs && node tools/check-audio-leak.mjs && node tools/check-sound.mjs && node tools/check-heal.mjs && node tools/check-lobby.mjs && node tools/check-swarm.mjs",
+    "check": "node tools/check-calls.mjs && node tools/check-serve.mjs && node tools/check-hud.mjs && node tools/check-weapons.mjs && node tools/check-audio.mjs && node tools/check-audio-leak.mjs && node tools/check-sound.mjs && node tools/check-heal.mjs && node tools/check-lobby.mjs && node tools/check-swarm.mjs && node tools/check-aim.mjs",
     "sounds": "node tools/sound-lab.mjs",
     "ogp": "node tools/make-ogp.mjs"
   },

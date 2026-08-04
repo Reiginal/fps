@@ -28,6 +28,11 @@ const SWING_TIME = 0.42;
 // （weapons.jsはprotocolを読まないので、ここだけ写す。片方を変えたら両方直すこと）
 const HEAL_TIME = 2.4;
 
+// 移動の速さ1m/sあたり、ばらつき角に足す量。
+// 0.0045から下げてある。20m先の散らばりで見ると、走りながらの腰だめが
+// 101cm→88cm、覗いた時が14cm→9cm。tools/check-aim.mjsで測っている
+const MOVE_SPREAD = 0.0028;
+
 const rand = (s) => (Math.random() - 0.5) * s;
 // pがa..bの区間のどこにいるかを0..1で返す。装填の工程を時間軸に並べるのに使う
 const seg = (p, a, b) => clamp01((p - a) / (b - a));
@@ -2052,7 +2057,11 @@ export const WEAPONS = [
     // 弾を数える場面が最後まで来なかった。5本だと、当てずに撃ち続けると
     // 1ラウンドの終盤で足りなくなる
     mag: 30, reserve: 150, reloadTime: 2.15,
-    spreadHip: 0.030, spreadAds: 0.0016, spreadPerShot: 0.0026, spreadMax: 0.052, spreadRecover: 0.09,
+    // 腰だめは0.030から下げた。0.030は20m先で60cmに散る量で、
+    // 止まっていても腰だめでは当たらない＝覗く以外の選択肢が無い状態だった。
+    // 0.024だと20m先48cm（胴の幅45cmとほぼ同じ）、10m先なら24cmで当たる。
+    // 近い距離の撃ち合いだけ腰だめが成立して、遠くは今まで通り覗く形になる
+    spreadHip: 0.024, spreadAds: 0.0016, spreadPerShot: 0.0026, spreadMax: 0.052, spreadRecover: 0.09,
     recoilPitch: 0.0125, recoilYaw: 0.0038, kick: 0.035, adsFov: 46, adsTime: 0.16,
     range: 120, falloffStart: 42, falloffEnd: 95, falloffMin: 0.5,
     // bodyFreq 640は「胴」と呼ぶには高すぎて、クラックと同じ帯で鳴っていた。
@@ -2590,7 +2599,11 @@ export class WeaponSystem {
     // ここを腰だめと同じ量にしていたせいで、歩きながらのADSが
     // 0.0016→0.0227rad（14倍）になり、20m先で45cmに散っていた。
     // 「動きながら狙って撃つ」がまったく成立しない原因がこれだった
-    s += speed * 0.0045 * (1 - this.adsFactor * 0.75);
+    // 係数は0.0045から下げた。測ったら、走りながら覗いても20m先で14cmしか
+    // 散っておらず（頭の幅18cmより狭い）、「動くと当たらない」の実体が
+    // ほとんど無かった。効いていたのは移動ではなく腰だめかどうかの差。
+    // 動き撃ちを少し許す方へ寄せるので、ここも合わせて下げる
+    s += speed * MOVE_SPREAD * (1 - this.adsFactor * 0.75);
     if (!player.onFloor) s += 0.035;
     if (player.crouching) s *= 0.72;
     return Math.min(s, d.spreadMax + 0.05);

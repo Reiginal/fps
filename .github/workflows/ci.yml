@@ -94,3 +94,6 @@ jobs:
 
       - name: 検査 敵の散らばり
         run: node tools/check-swarm.mjs
+
+      - name: 検査 狙いの当たり具合
+        run: node tools/check-aim.mjs
