@@ -24,17 +24,22 @@ export class Lobby {
       stand: $('lbStand'),
       leave: $('lbLeave'),
       standUp: $('lbStandUp'),
+      ready: $('lbReady'),
     };
 
     // 統合側が差し替える。初期値を空関数にしておくと、繋ぎ忘れても画面が落ちない
     this.onSeat = () => {};
     this.onLeave = () => {};
+    this.onReady = () => {};
 
     // 自分がどれかを知らないと、自分の席に印を付けられない
     this.myId = -1;
+    // 自分が準備完了を立てているか。押す時に「今の逆」を送るために持つ
+    this.meReady = false;
 
     this.el.leave.onclick = () => this.onLeave();
     this.el.standUp.onclick = () => this.onSeat(-1, 0);
+    this.el.ready.onclick = () => this.onReady(!this.meReady);
 
     this._build();
     this.render({ rows: [], why: '' });
@@ -69,15 +74,15 @@ export class Lobby {
 
   /**
    * サーバーから届いたロビーの中身を描く。
-   * rows は [[id, name, team, seat]]。teamとseatが-1なら、その人はまだ立っている
+   * rows は [[id, name, team, seat, ready]]。teamとseatが-1なら、その人はまだ立っている
    */
   render({ rows = [], why = '' } = {}) {
     // 席番号から座っている人を引けるようにしておく
     const bySeat = [[], []];
     const standing = [];
     for (const r of rows) {
-      const [id, name, team, seat] = r;
-      if (team === 0 || team === 1) bySeat[team][seat] = { id, name };
+      const [id, name, team, seat, ready] = r;
+      if (team === 0 || team === 1) bySeat[team][seat] = { id, name, ready: !!ready };
       else standing.push({ id, name });
     }
 
@@ -87,6 +92,7 @@ export class Lobby {
         const who = bySeat[team][seat];
         b.classList.toggle('taken', !!who);
         b.classList.toggle('me', !!who && who.id === this.myId);
+        b.classList.toggle('ready', !!who && who.ready);
         b.disabled = !!who && who.id !== this.myId;
         b.innerHTML = who
           ? esc(who.name)
@@ -98,8 +104,16 @@ export class Lobby {
     this.el.stand.textContent = standing.length
       ? `まだ席にいない人: ${standing.map((p) => p.name).join('、')}`
       : '';
-    // 自分が座っていない時に「席を降りる」を押せても何も起きない
-    const meSeated = rows.some((r) => r[0] === this.myId && (r[2] === 0 || r[2] === 1));
+
+    // 自分の行から、座っているか・準備を立てているかを読む
+    const me = rows.find((r) => r[0] === this.myId);
+    const meSeated = !!me && (me[2] === 0 || me[2] === 1);
+    this.meReady = !!me && !!me[4];
+
+    // 座っていない時に押せても何も起きない。押せない事を見た目でも出す
     this.el.standUp.disabled = !meSeated;
+    this.el.ready.disabled = !meSeated;
+    this.el.ready.classList.toggle('on', this.meReady);
+    this.el.ready.textContent = this.meReady ? '準備を取り消す' : '準備完了';
   }
 }

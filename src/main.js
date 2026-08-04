@@ -697,10 +697,8 @@ class Game {
     const lobby = new Lobby();
     this.lobby = lobby;
     lobby.onSeat = (team, seat) => this.net?.sendSeat(team, seat);
-    lobby.onLeave = () => {
-      this.net?.disconnect();
-      this._leaveMatch();
-    };
+    lobby.onReady = (on) => this.net?.sendReady(on);
+    lobby.onLeave = () => this._quitMatch();
 
     menu.onSolo = () => {
       // WebAudioはユーザーの操作を起点にしないと鳴らない。
@@ -766,16 +764,34 @@ class Game {
     net.onEvent = (ev) => this._onNetEvent(ev);
     net.onMatchEnd = (r) => this._onMatchEnd(r);
     net.onDisconnect = (why) => this._onNetLost(why);
-    net.onLobby = (m) => this.lobby.render(m);
+    net.onLobby = (m) => { this._lobbyChime(m.rows); this.lobby.render(m); };
     net.onPhase = (ph) => this._onPhase(ph);
 
     this.hud.setMode('versus');
     this.hud.netStatus('');
     this.menu.setBusy(false);
     this.menu.hide();
+    // 前の顔ぶれを忘れてから入る。持ち越すと、2回目に入った時に
+    // 「前にいた人」が新顔として数えられて、入った瞬間に鳴る
+    this._lobbyIds = null;
     // 繋がっただけでは操作を握らない。ここでロックを取ると、席を選ぶ前に
     // マウスが画面へ吸われて、ロビーのボタンが押せなくなる
     this.lobby.show(net.id);
+  }
+
+  /* 人が増えたらピコンと鳴らす。
+     待っている間に別の作業をしている人へ、画面を見ずに気づかせるのが狙い。
+     だから「席に着いた」ではなく「繋いできた」時点で鳴らす。
+     自分が入った時の1通目では鳴らさない。あの時点では前の顔ぶれを知らないので、
+     先にいた人が全員新顔に見えて、入るたびに鳴ることになる */
+  _lobbyChime(rows) {
+    const now = new Set((rows || []).map((r) => r[0]));
+    const before = this._lobbyIds;
+    this._lobbyIds = now;
+    if (!before) return;
+    for (const id of now) {
+      if (!before.has(id) && id !== this.net?.id) { this.audio.lobbyJoin(); return; }
+    }
   }
 
   /* 局面が変わった時。ロビーを出すか畳むかはここ1箇所で決める。
@@ -816,6 +832,7 @@ class Game {
     this.remotes = null;
     this._lastStates = null;
     this._lastFireAt.clear();
+    this._lobbyIds = null;
     // 試合終了の順位を畳むタイマーが残っていると、1人用に戻った後で最終順位が消えにいく
     clearTimeout(this._endTimer);
     this.hud.setMode('solo');
@@ -919,13 +936,22 @@ class Game {
     }
   }
 
+  /* 自分で対戦から抜ける。
+     disconnect()は最後に onDisconnect('bye') を自分で呼ぶ作りなので、
+     先に受け口を外しておかないと「回線が切れた」の道へ入って、
+     選択画面に赤字で bye と出る（実際に出た）。
+     切ったのは自分なので、伝える理由が無い */
+  _quitMatch() {
+    if (!this.net) return;
+    this.net.onDisconnect = null;
+    this.net.disconnect();
+    this._leaveMatch();
+  }
+
   /** 一時停止から選択画面へ戻る。対戦中なら回線も切る */
   _goHome() {
     if (this.mode === 'versus') {
-      // 自分で戻ると決めた時は、理由を画面に出す必要が無い。
-      // 抜けたことは接続が閉じた時点で相手にも伝わる
-      this.net?.disconnect();
-      this._leaveMatch();
+      this._quitMatch();
       return;
     }
     this.hud.show(false);

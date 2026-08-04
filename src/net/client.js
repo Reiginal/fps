@@ -572,6 +572,12 @@ export class NetClient {
     this._send({ t: C.SEAT, tm: team | 0, st: seat | 0 });
   }
 
+  /** 準備完了の入り切り。全員が立てた時にサーバーが試合を始める */
+  sendReady(on) {
+    if (!this.connected) return;
+    this._send({ t: C.READY, r: on ? 1 : 0 });
+  }
+
   /* -------------------------------------------------------- 他人の補間 */
 
   /** サーバー時刻の推定値 */

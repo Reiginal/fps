@@ -9,6 +9,9 @@
     --hud: #e8f0f4;
     --accent: #63d2ff;
     --warn: #ff4632;
+    /* 準備完了など「整った」を出す色。warnの赤・accentの水色と並べても
+       意味を取り違えない緑にしてある */
+    --ok: #7ddb8a;
     --dim: rgba(232, 240, 244, 0.55);
     --mono: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
   }
@@ -400,11 +403,14 @@
   #lobby {
     position: fixed; inset: 0; z-index: 20;
     display: flex; align-items: center; justify-content: center;
-    padding: 24px 0; overflow-y: auto;
+    padding: 24px; overflow: auto;
     background: radial-gradient(ellipse at center, rgba(7,10,15,1), rgba(3,5,8,1));
   }
   #lobby.hidden { display: none; }
-  .lbpanel { width: min(560px, 90vw); text-align: center; }
+  /* margin:auto はflexの中央寄せと重ねてある。画面が縦に溢れた時、
+     align-items:center だけだと上へはみ出た分を掴めなくなるが、
+     margin:auto なら溢れた時に上下の余白が潰れて全部見える */
+  .lbpanel { width: min(560px, 90vw); margin: auto; text-align: center; }
   .lbpanel .title { font-size: 34px; }
   /* 始まらない理由がここに出る。出ていない時も場所を空けておかないと、
      理由が出た瞬間に席の絵が下へずれて、押そうとしていた席が動く */
@@ -432,6 +438,13 @@
   .lbseat.taken:hover { border-color: rgba(255,255,255,.28); }
   /* 自分の席。どれが自分かが一目で分からないと、降りる時に他人の席を押す */
   .lbseat.me { border-color: var(--accent); color: var(--accent); background: rgba(99,210,255,.1); }
+  /* 準備完了の印。文字だけで「準備OK」と足すと名前が押し出されて読めなくなるので、
+     席の左端に細い帯を立てて、名前の場所を取らずに出す */
+  .lbseat.ready { box-shadow: inset 3px 0 0 var(--ok); }
+  /* 押した後は「取り消せる」ことが分かる見た目にする。
+     押しても見た目が変わらないと、押せたのかどうかが分からず何度も押す */
+  .netbtn.on { border-color: var(--ok); color: var(--ok); background: rgba(125,219,138,.12); }
+  .netbtn:disabled { opacity: .3; cursor: default; pointer-events: none; }
   .lbstand { font-size: 11px; color: var(--dim); letter-spacing: .1em; min-height: 30px; margin-bottom: 10px; }
   #netmenu.busy .field input { opacity: .45; pointer-events: none; }
 
@@ -657,6 +670,7 @@
     <div class="netbtns">
       <button id="lbLeave" class="netbtn" type="button">ホームへ戻る</button>
       <button id="lbStandUp" class="netbtn" type="button">席を降りる</button>
+      <button id="lbReady" class="netbtn main" type="button">準備完了</button>
     </div>
   </div>
 </div>
@@ -669,13 +683,6 @@
     <div class="field">
       <label class="label" for="nmName">名前</label>
       <input id="nmName" type="text" maxlength="12" autocomplete="off" spellcheck="false">
-    </div>
-
-    <button id="nmUrlToggle" class="linkbtn hidden" type="button">別の場所へ繋ぐ ▾</button>
-    <div class="field" id="nmUrlField">
-      <label class="label" for="nmUrl">接続先</label>
-      <input id="nmUrl" type="text" autocomplete="off" spellcheck="false">
-      <div class="hint">部屋を立てた人の端末のアドレス。同じWi-Fiにいる人はここだけ書き換える</div>
     </div>
 
     <div id="nmStatus"></div>

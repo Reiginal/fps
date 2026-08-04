@@ -57,10 +57,27 @@ room.takeSeat(b.slot, 0, 1);
 ok(b.slot.seat === 1, 'Aの2番には座れる');
 ok(room.phase === PHASE.WAIT, '1対1しか動かないので始まらない');
 
-console.log('\n[5] AとBに1人ずつで始まる');
+console.log('\n[5] 席が埋まっただけでは始まらない');
 room.takeSeat(b.slot, 1, 0);
 ok(b.slot.team === 1 && b.slot.seat === 0, 'Bへ移れた');
-ok(room.phase !== PHASE.WAIT, '試合が始まった');
+ok(room.phase === PHASE.WAIT, '準備完了を押していないので始まらない');
+ok(/準備待ち/.test(room._whyNotStart()), `理由が出る（${room._whyNotStart()}）`);
+
+console.log('\n[5-2] 席にいない人は準備できない');
+const d = join('でー');
+room.setReady(d.slot, true);
+ok(d.slot.ready === false, '立っている人は準備を立てられない');
+room.leave(d.slot);
+
+console.log('\n[5-3] 全員が準備完了を押したら始まる');
+room.setReady(a.slot, true);
+ok(a.slot.ready === true, '片方が押した');
+ok(room.phase === PHASE.WAIT, 'まだ片方なので始まらない');
+room.setReady(a.slot, false);
+ok(a.slot.ready === false, '取り消せる');
+room.setReady(a.slot, true);
+room.setReady(b.slot, true);
+ok(room.phase !== PHASE.WAIT, '両方押したら始まった');
 ok(room._whyNotStart() === '', '始まらない理由はもう無い');
 
 console.log('\n[6] 湧く位置がチームで分かれる');
@@ -96,10 +113,15 @@ ok(c.slot.team === null && c.slot.seat === null, '降りると立った状態へ
 
 console.log('\n[10] 試合中に抜けられたら待ちへ戻る');
 room.takeSeat(c.slot, 1, 0);
+room.setReady(a.slot, true);
+room.setReady(c.slot, true);
 ok(room.phase !== PHASE.WAIT, 'また揃って始まった');
 room.leave(c.slot);
 ok(room.phase === PHASE.WAIT, '相手が抜けたら試合を止める');
 ok(a.slot.rounds === 0, '取ったラウンドも戻す');
+// 倒しておかないと、残った人が押しっぱなしのままロビーへ戻る。
+// 次に来た人が準備を押した瞬間、こちらは何もしていないのに試合が始まる
+ok(a.slot.ready === false, '残った人の準備完了も倒す');
 
 console.log('\n[11] ロビーの中身が配られている');
 const last = a.conn.sent.filter((m) => m.t === 'L').pop();
