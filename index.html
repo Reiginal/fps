@@ -339,6 +339,10 @@
     background: radial-gradient(ellipse at center, rgba(7,10,15,1), rgba(3,5,8,1));
   }
   #netmenu.hidden { display: none; }
+  /* 隠す指定を要素ごとに書いていたので、書き忘れた所は
+     クラスが付くだけで見た目が変わらなかった（つまみの開閉が実際それだった）。
+     共通の1本を置いて、書き忘れても効くようにする */
+  .hidden { display: none; }
   .netpanel { width: min(420px, 86vw); text-align: center; }
   .netpanel .title { font-size: 34px; }
   .netpanel .subtitle { margin-bottom: 26px; }
@@ -375,13 +379,13 @@
 
   /* つまみ。作った側が音を聴けないので、聴ける側が直接回せる場所を用意する。
      ここが無いと「作る→聴いてもらう→駄目→また作る」を延々やることになる */
-  .killmore {
+  .linkbtn {
     margin-top: 7px; padding: 5px 9px;
     font-family: var(--mono); font-size: 10px; letter-spacing: .12em;
     color: var(--dim); background: transparent;
     border: 1px solid rgba(255,255,255,.16); cursor: pointer;
   }
-  .killmore:hover { color: var(--accent); border-color: var(--accent); }
+  .linkbtn:hover { color: var(--accent); border-color: var(--accent); }
   #nmKillTune { margin-top: 9px; }
   .knob { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
   .knob .kname { font-size: 10px; letter-spacing: .1em; color: var(--dim); width: 84px; flex: none; }
@@ -628,7 +632,8 @@
       <input id="nmName" type="text" maxlength="12" autocomplete="off" spellcheck="false">
     </div>
 
-    <div class="field">
+    <button id="nmUrlToggle" class="linkbtn hidden" type="button">別の場所へ繋ぐ ▾</button>
+    <div class="field" id="nmUrlField">
       <label class="label" for="nmUrl">接続先</label>
       <input id="nmUrl" type="text" autocomplete="off" spellcheck="false">
       <div class="hint">部屋を立てた人の端末のアドレス。同じWi-Fiにいる人はここだけ書き換える</div>
@@ -650,7 +655,7 @@
       <div class="hint" id="nmKillNote">押すとその場で鳴る</div>
       <!-- つまみ。出発点を選んでから、ここを回して自分で詰める。
            動かすたびにその場で鳴る -->
-      <button id="nmKillMore" class="killmore" type="button">つまみを開く ▾</button>
+      <button id="nmKillMore" class="linkbtn" type="button">つまみを開く ▾</button>
       <div id="nmKillTune" class="hidden"></div>
     </div>
 
