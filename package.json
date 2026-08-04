@@ -6,11 +6,20 @@
   "description": "ThreeJSで作るブラウザFPS。テクスチャも音も手続き的生成でアセットファイルなし",
   "scripts": {
     "start": "node server/index.js",
+    "lint": "eslint .",
     "check": "node tools/check-calls.mjs && node tools/check-hud.mjs && node tools/check-weapons.mjs && node tools/check-audio.mjs && node tools/check-audio-leak.mjs && node tools/check-sound.mjs && node tools/check-heal.mjs",
     "sounds": "node tools/sound-lab.mjs"
   },
   "dependencies": {
     "three": "^0.185.1",
     "ws": "^8.21.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.0",
+    "globals": "^17.9.0"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

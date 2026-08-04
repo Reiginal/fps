@@ -8,7 +8,7 @@ import './dom-stub.js';
 import * as THREE from 'three';
 import { Capsule } from 'three/addons/math/Capsule.js';
 import {
-  TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS, MATCH, PHASE, ZONE, NADE, HEAL, outsideZone,
+  TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS, MATCH, PHASE, ZONE, NADE, outsideZone,
   Sv, EV, packPlayer,
 } from '../src/net/protocol.js';
 import { SimPlayer, resolveShot, rewindMs, originVisible } from './sim.js';

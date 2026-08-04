@@ -148,7 +148,8 @@ tools/
 ### 検査
 
 ```bash
-npm run check     # ブラウザ無しで走る検査（184項目）
+npm run check     # ブラウザ無しで走る検査（183項目）
+npm run lint      # 静的解析
 npm run sounds    # 音を sounds/*.wav に書き出して数字で並べる
 ```
 
