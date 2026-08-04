@@ -12,10 +12,11 @@ import { WeaponSystem } from './player/weapons.js';
 import { Director } from './ai/enemy.js';
 import { HUD } from './ui/hud.js';
 import { NetMenu, NET_MSG } from './ui/netmenu.js';
+import { Lobby } from './ui/lobby.js';
 import { NetClient } from './net/client.js';
 import { RemotePlayers } from './net/remote.js';
 import {
-  K, KEY_CODES, S, EV, PART, MATCH, TICK_DT, ZONE, NADE, HEAL, outsideZone,
+  K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, outsideZone,
 } from './net/protocol.js';
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -690,6 +691,17 @@ class Game {
   _bindMenu() {
     const menu = new NetMenu();
     this.menu = menu;
+
+    // 繋がってから試合が始まるまでの画面。押された席をそのままサーバーへ送る。
+    // 座れたかどうかを手元で決めないので、ここでは絵を書き換えない
+    const lobby = new Lobby();
+    this.lobby = lobby;
+    lobby.onSeat = (team, seat) => this.net?.sendSeat(team, seat);
+    lobby.onLeave = () => {
+      this.net?.disconnect();
+      this._leaveMatch();
+    };
+
     menu.onSolo = () => {
       // WebAudioはユーザーの操作を起点にしないと鳴らない。
       // 以前は起動画面のクリックで起こしていたが、ここから直接ロックへ飛ばすと
@@ -724,10 +736,10 @@ class Game {
     this._restart();
   }
 
-  async _joinMatch({ url, room, name }) {
+  async _joinMatch({ url, name }) {
     const net = new NetClient();
     try {
-      await net.connect(url, { name, room });
+      await net.connect(url, { name });
     } catch (err) {
       this.menu.setBusy(false);
       // 満員だけは「繋がらない」と原因が違うので、文言を分けて出す
@@ -754,16 +766,50 @@ class Game {
     net.onEvent = (ev) => this._onNetEvent(ev);
     net.onMatchEnd = (r) => this._onMatchEnd(r);
     net.onDisconnect = (why) => this._onNetLost(why);
+    net.onLobby = (m) => this.lobby.render(m);
+    net.onPhase = (ph) => this._onPhase(ph);
 
     this.hud.setMode('versus');
     this.hud.netStatus('');
     this.menu.setBusy(false);
     this.menu.hide();
-    this.input.requestLock();
+    // 繋がっただけでは操作を握らない。ここでロックを取ると、席を選ぶ前に
+    // マウスが画面へ吸われて、ロビーのボタンが押せなくなる
+    this.lobby.show(net.id);
+  }
+
+  /* 局面が変わった時。ロビーを出すか畳むかはここ1箇所で決める。
+     待ちに戻る経路（相手が抜けた・試合が終わって次を待つ）が複数あるので、
+     それぞれの場所で畳んだり出したりすると必ずどれかを書き忘れる */
+  _onPhase(phase) {
+    if (this.mode !== 'versus') return;
+    if (phase === PHASE.WAIT) {
+      // 試合が成立しなくなってロビーへ戻された。操作を手放して席の画面を出す
+      if (!this.lobby.isOpen) {
+        this.hud.show(false);
+        this.state = 'menu';
+        document.exitPointerLock?.();
+        this.lobby.show(this.net?.id ?? -1);
+      }
+      return;
+    }
+    // 始まった。席の画面を畳んで操作を握る
+    if (this.lobby.isOpen) {
+      this.lobby.hide();
+      this.input.requestLock();
+    }
   }
 
   _onNetLost(why) {
     if (this.mode !== 'versus') return;
+    this._leaveMatch();
+    this.menu.setStatus(why || NET_MSG.lost, true);
+  }
+
+  /* 対戦の後片付けと、選択画面へ戻る所まで。
+     回線が切れた時と、自分でホームへ戻った時で踏む手順は同じなので1つにしてある。
+     違うのは「理由を赤字で出すかどうか」だけなので、そこは呼ぶ側が足す */
+  _leaveMatch() {
     this.mode = 'solo';
     this.net = null;
     this.remotes?.dispose();
@@ -774,12 +820,15 @@ class Game {
     clearTimeout(this._endTimer);
     this.hud.setMode('solo');
     this.hud.show(false);
+    // 一時停止から戻る時は一時停止の画面が、ロビーから戻る時はロビーが
+    // 出たままなので、どちらも畳んでから選択画面を出す
+    this.hud.hideOverlay();
+    this.lobby.hide();
     this.state = 'menu';
     document.exitPointerLock?.();
     this._enterSolo();
     this.menu.show();
     this.menu.setBusy(false);
-    this.menu.setStatus(why || NET_MSG.lost, true);
   }
 
   _onMatchEnd({ rows }) {
@@ -798,8 +847,10 @@ class Game {
     const overlay = document.getElementById('overlay');
     overlay.addEventListener('click', () => {
       // 遊び方を選ぶ前に起動画面を押してもロックを取らせない。
-      // 取ると選択画面の裏でゲームが始まってしまう
-      if (this.menu?.isOpen) return;
+      // 取ると選択画面の裏でゲームが始まってしまう。
+      // ロビーも同じで、席を選んでいる最中にロックを取られると
+      // マウスが画面へ吸われて席が押せなくなる
+      if (this.menu?.isOpen || this.lobby?.isOpen) return;
       this.audio.init();
       this.audio.resume();
       if (this.state === 'dead') this._restart();
@@ -830,7 +881,7 @@ class Game {
     if (this.mode === 'versus') {
       // 対戦は止まらない。抜けている間も撃たれるということを隠さない
       const me = this.net?.players.get(this.net.id);
-      this.hud.overlay(`
+      this._pauseOverlay(`
         <div class="title">一時停止</div>
         <div class="subtitle">試合は進行中</div>
         <div class="stats">
@@ -838,10 +889,11 @@ class Game {
           回線 <b>${Math.round(this.net?.ping || 0)}</b>ms
         </div>
         <div class="cta">クリックで復帰</div>
+        <div><button id="ovHome" class="ovhome" type="button">ホームへ戻る</button></div>
       `);
       return;
     }
-    this.hud.overlay(`
+    this._pauseOverlay(`
       <div class="title">一時停止</div>
       <div class="subtitle">作戦を中断中</div>
       <div class="stats">
@@ -849,7 +901,38 @@ class Game {
         到達 <b>${this.director.wave}</b>波 &nbsp; 撃破 <b>${this.kills}</b>
       </div>
       <div class="cta">クリックで再開</div>
+      <div><button id="ovHome" class="ovhome" type="button">ホームへ戻る</button></div>
     `);
+  }
+
+  /* 一時停止の画面を出して、「ホームへ戻る」を繋ぐ。
+     #overlayは「どこを押しても復帰」なので、そのまま置くと戻るボタンを押した瞬間に
+     復帰の処理も一緒に走る。stopPropagationで、この1箇所だけ上へ伝わらないようにする */
+  _pauseOverlay(html) {
+    this.hud.overlay(html);
+    const home = document.getElementById('ovHome');
+    if (home) {
+      home.onclick = (e) => {
+        e.stopPropagation();
+        this._goHome();
+      };
+    }
+  }
+
+  /** 一時停止から選択画面へ戻る。対戦中なら回線も切る */
+  _goHome() {
+    if (this.mode === 'versus') {
+      // 自分で戻ると決めた時は、理由を画面に出す必要が無い。
+      // 抜けたことは接続が閉じた時点で相手にも伝わる
+      this.net?.disconnect();
+      this._leaveMatch();
+      return;
+    }
+    this.hud.show(false);
+    this.hud.hideOverlay();
+    this.state = 'menu';
+    document.exitPointerLock?.();
+    this.menu.show();
   }
 
   _showDeath() {

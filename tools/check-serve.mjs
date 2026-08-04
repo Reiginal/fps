@@ -53,9 +53,9 @@ blocks('/node_modules/ws/index.js', 'three以外のnode_modules');
 blocks('/node_modules/three/package.json', 'threeでも要らない所');
 
 console.log('\n[4] 部屋の一覧を返す口は閉じた');
-// 誰でも叩けて、全部屋の合言葉と人数が取れていた。
-// 合言葉は部屋を分ける唯一の鍵なので、漏れると誰でも入れる
-blocks('/rooms', '合言葉が漏れていた');
+// 合言葉で部屋を分けていた頃、誰でも叩けて全部屋の合言葉と人数が取れていた。
+// 合言葉ごと畳んだので今は隠す物が無いが、口を開け直さないことは測り続ける
+blocks('/rooms', '部屋の中身を外へ出す口');
 
 console.log('\n[5] 抜け道');
 blocks('/../package.json', '上へ抜ける');

@@ -21,7 +21,7 @@ import { getRoom } from './room.js';
 import { publicPath } from './serve-rules.js';
 import { WEAPONS, weaponsSource } from './sim.js';
 import {
-  C, Sv, decode, encode, normalizeRoom, TIMEOUT_MS,
+  C, Sv, decode, encode, TIMEOUT_MS,
 } from '../src/net/protocol.js';
 
 const PORT = Number(process.env.PORT) || 8080;
@@ -68,9 +68,9 @@ async function serveStatic(req, res) {
       res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }).end('ok');
       return;
     }
-    // 部屋の一覧を返す口は閉じた。誰でも叩けて、全部屋の合言葉と人数が取れていた。
-    // 合言葉は部屋を分ける唯一の鍵なので、これが漏れると誰でも入れる。
-    // 合言葉は口頭で渡す物という前提に戻す
+    // 部屋の一覧を返す口は閉じてある。合言葉で部屋を分けていた頃、
+    // ここが誰でも叩けて全部屋の合言葉と人数が取れていた。
+    // 今は部屋が1つなので隠す物も無いが、外に増やす口を作らない方針は変えない
 
     // 配ってよい物か。ここを通らない物は、存在していても無いものとして返す
     const rel = publicPath(req.url);
@@ -208,6 +208,7 @@ function onMessage(conn, raw) {
     case C.SHOT: return onShot(conn, m);
     case C.THROW: return onThrow(conn, m);
     case C.WEAPON: return onWeapon(conn, m);
+    case C.SEAT: return onSeat(conn, m);
     case C.PONG: return onPong(conn, m);
     case C.CHAT: return;   // protocol側にサーバー→クライアントのCHATが無いので今は捨てる
     default: return;
@@ -223,9 +224,8 @@ function onJoin(conn, m) {
     // eslint-disable-next-line no-control-regex -- 制御文字を消すのが目的の正規表現
     ? m.name.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 16) || '名無し'
     : '名無し';
-  const code = normalizeRoom(m.room) || 'MAIN';
-
-  const room = getRoom(code, world);
+  // 部屋はサーバーに1つだけ。繋いだ人は全員そこへ入る
+  const room = getRoom(world);
   const slot = room.join(conn, name);
   if (!slot) {
     conn.send({ t: Sv.FULL, why: 'この部屋は満員' });
@@ -235,7 +235,7 @@ function onJoin(conn, m) {
   conn.slot = slot;
   conn.room = room;
   conn.send(room.welcome(slot));
-  console.log(`[net] ${name} が ${code} に入った (${room.slots.size}人)`);
+  console.log(`[net] ${name} が入った (${room.slots.size}人)`);
 }
 
 function onInput(conn, m) {
@@ -293,6 +293,15 @@ function onWeapon(conn, m) {
   const slot = conn.slot;
   if (!slot || !isNum(m.i)) return;
   conn.room.weapon(slot, Math.round(m.i));
+}
+
+// ロビーで席に着く／降りる。範囲の検査だけしてroomへ渡す。
+// 埋まっている席かどうかはroomが持っているので、ここでは見ない
+function onSeat(conn, m) {
+  const slot = conn.slot;
+  if (!slot) return;
+  if (!isNum(m.tm) || !isNum(m.st)) return;
+  conn.room.takeSeat(slot, Math.round(m.tm), Math.round(m.st));
 }
 
 function onPong(conn, m) {
