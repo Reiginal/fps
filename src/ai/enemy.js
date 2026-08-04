@@ -12,6 +12,10 @@ const _ray = new THREE.Ray();
 // 倒れ切った死体が壁や箱に刺さっていないか見るための寝そべりカプセル
 const _corpseCap = new Capsule(new THREE.Vector3(), new THREE.Vector3(), 0.26);
 const BONE_UP = new THREE.Vector3(0, 1, 0);
+// 敵同士が離れようとする距離。これより近い相手からだけ離れる。
+// 広げすぎると通路や建物の隙間へ入れなくなって、遠回りばかりするようになる。
+// 4.5mは「並んで歩くのはやめるが、同じ部屋には入れる」あたり
+const SEP_R = 4.5;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const rand = (s) => (Math.random() - 0.5) * s;
 const TAU = Math.PI * 2;
@@ -1688,9 +1692,13 @@ export class Enemy {
       if (o === this || !o.alive) continue;
       const dx = x - o.collider.start.x, dz = z - o.collider.start.z;
       const d2 = dx * dx + dz * dz;
-      if (d2 > 6.25 || d2 < 1e-4) continue;
+      // 効く距離は4.5m。以前は2.5mで、それより外にいる相手からは
+      // まったく離れようとしなかった。3m離れて並んで歩く4人組は
+      // 「ぶつかっていない」ので、この力から見ると何も問題が無い状態だった。
+      // 遊ぶ側からは、角を曲がった瞬間に4方向から撃たれる形になる
+      if (d2 > SEP_R * SEP_R || d2 < 1e-4) continue;
       const d = Math.sqrt(d2);
-      const w = (2.5 - d) / 2.5;
+      const w = (SEP_R - d) / SEP_R;
       out.x += (dx / d) * w * 1.5;
       out.z += (dz / d) * w * 1.5;
     }
@@ -2559,6 +2567,20 @@ export class Director {
     return e;
   }
 
+  /* 湧き場所の袋を作り直して混ぜる。
+     混ぜないと、袋から順に取るだけで毎回同じ順番に湧いて、
+     波が変わっても同じ道順で出てくることになる */
+  _refillSpawnBag() {
+    const n = this.level.enemySpawns.length;
+    const bag = [];
+    for (let i = 0; i < n; i++) bag.push(i);
+    for (let i = bag.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [bag[i], bag[j]] = [bag[j], bag[i]];
+    }
+    this._spawnBag = bag;
+  }
+
   _registerCorpse(e) {
     this.corpses.push(e);
     while (this.corpses.length > this.maxCorpses) this._retireCorpse(this.corpses.shift());
@@ -2626,15 +2648,30 @@ export class Director {
 
   _spawnOne(player) {
     const e = this._obtain();
-    // プレイヤーから遠い湧き場所を選ぶ（目の前に出さない）
+    // 湧き場所を選ぶ。条件は2つあって、両方要る。
+    //
+    // ① プレイヤーの目の前に出さない（遠い所を選ぶ）
+    // ② 同じ場所を続けて使わない
+    //
+    // 以前は①だけで、毎回くじを4回引いて一番遠い所を採っていた。
+    // プレイヤーはあまり動かないので「一番遠い所」は毎回似た場所になり、
+    // 実測で14体出しても使われるのは7種類、同じ場所が3回続くこともあった。
+    // 0.55秒おきに同じ所から出れば、そのまま4人の群れになって歩いてくる。
+    // （遊んで「敵が4人固まってる」と言われた所。tools/check-swarm.mjsで測っている）
+    //
+    // 袋から引いて戻さない形にする。14箇所を使い切るまで同じ場所は出てこない。
+    // ①も残すため、袋から4枚めくって、その中で一番遠い1枚を採る
     const spawns = this.level.enemySpawns;
-    let best = spawns[0], bestD = -1;
-    for (let i = 0; i < 4; i++) {
-      const s = spawns[Math.floor(Math.random() * spawns.length)];
-      const d = s.distanceToSquared(player.collider.start);
-      if (d > bestD) { bestD = d; best = s; }
+    if (!this._spawnBag || this._spawnBag.length === 0) this._refillSpawnBag();
+    const bag = this._spawnBag;
+    const look = Math.min(4, bag.length);
+    let bestAt = 0, bestD = -1;
+    for (let i = 0; i < look; i++) {
+      const d = spawns[bag[i]].distanceToSquared(player.collider.start);
+      if (d > bestD) { bestD = d; bestAt = i; }
     }
-    e.spawn(best);
+    const pick = bag.splice(bestAt, 1)[0];
+    e.spawn(spawns[pick]);
 
     // ウェーブが進むほど強くする。個体ごとに少し散らして同じ動きの群れにしない
     const w = this.wave;
