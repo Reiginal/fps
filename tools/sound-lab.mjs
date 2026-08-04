@@ -4,23 +4,17 @@
 //   node tools/sound-lab.mjs kill       … 名前で絞る
 //
 // 出力先は sounds/ 。書き出したwavはそのまま再生できる。
-//   afplay sounds/kill-1-二段ディン.wav
-//   for f in sounds/kill-*.wav; do echo "$f"; afplay "$f"; sleep 0.5; done
+//   afplay sounds/kill.wav
 import { mkdirSync } from 'node:fs';
 import { capture, BANDS } from './sound-measure.mjs';
 import '../server/dom-stub.js';
 
 const OUT = 'sounds';
-const { KILL_SOUNDS } = await import('../src/core/audio.js');
-
 mkdirSync(OUT, { recursive: true });
 
 const targets = [];
-KILL_SOUNDS.forEach((s, i) => targets.push({
-  name: `kill-${i + 1}-${s.name}`,
-  label: `キル音${i + 1} ${s.name}`,
-  play: (a) => { a.killVariant = i; a.kill(false); },
-}));
+targets.push({ name: 'kill', label: 'キル音', play: (a) => a.kill(false) });
+targets.push({ name: 'kill-head', label: 'キル音(頭)', play: (a) => a.kill(true) });
 targets.push({ name: 'hit', label: '命中', play: (a) => a.hitmarker(false) });
 targets.push({ name: 'hit-head', label: '命中(頭)', play: (a) => a.hitmarker(true) });
 targets.push({
@@ -87,5 +81,5 @@ for (const r of rows) {
 }
 
 console.log('\n聴き方:');
-console.log('  for f in sounds/kill-*.wav; do echo "$f"; afplay "$f"; sleep 0.5; done');
+console.log('  for f in sounds/*.wav; do echo "$f"; afplay "$f"; sleep 0.5; done');
 process.exit(0);

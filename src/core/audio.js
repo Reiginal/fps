@@ -47,16 +47,14 @@ const SURFACES = {
  * ここに置くと撃ち合いの中でも埋もれない）、350ms以内に終わらせる。
  */
 /**
- * 倒した合図のつまみ。
+ * 倒した合図の設定。
  *
- * ここに至った経緯: 「軽い」「甲高い」「デデンにして」と何度も作り直して、
- * 6回とも外した。こちらは音を聴けないので、良し悪しの判定ができない。
- * 遊ぶ側は判定できるが、数字を触れない。だからいつまでも往復が終わらない。
+ * ここに至った経緯: 「軽い」「甲高い」「デデンにして」と何度も作り直した。
+ * こちらは音を聴けないので良し悪しの判定ができず、7回とも外した。
+ * 一時期はロビーにつまみを出して遊ぶ側が直接回せるようにしていたが、
+ * 決まったので畳んだ。作り直したくなったら、まずこの値を触る。
  *
- * 判定できる人が直接つまみを回せるようにすれば、その往復が消える。
- * ロビーの「キル音」からその場で回して鳴らせる。
- *
- * 各つまみが何を動かすか:
+ * 各項目が何を動かすか:
  *   hits   … 打点の数。1でドン、2でデデン、3でデデデン
  *   pitch  … 全体の高さ。下げるほど重く、上げるほど鋭くなる
  *   gap    … 打点の間隔(秒)。詰めるほど1発に近づく
@@ -64,30 +62,13 @@ const SURFACES = {
  *   weight … 低い所の量。これが「重さ」。0にすると軽い通知音になる
  *   edge   … 上の芯の量。「甲高い⇔こもる」はここで決まる
  *   drive  … 歪みの量。上げると倍音が増えて太くなるが、行きすぎると割れた音になる
+ *
+ * 数字の当たりを付ける時は tools/sound-lab.mjs で書き出して測る。
+ * 低音の割合・重心・長さ・打点の数が数字で出る
  */
 export const KILL_TUNE = {
   hits: 2, pitch: 1, gap: 0.155, tail: 1, weight: 1, edge: 0.3, drive: 2.8, level: 1,
 };
-
-// つまみの範囲。画面のスライダーと、値の丸めに使う
-export const KILL_RANGE = {
-  hits: { min: 1, max: 3, step: 1, label: '打点の数' },
-  pitch: { min: 0.5, max: 2.2, step: 0.05, label: '高さ' },
-  gap: { min: 0.06, max: 0.30, step: 0.005, label: '間隔' },
-  tail: { min: 0.3, max: 2.6, step: 0.1, label: '余韻' },
-  weight: { min: 0, max: 1.8, step: 0.05, label: '低音' },
-  edge: { min: 0, max: 1.8, step: 0.05, label: '芯（明るさ）' },
-  drive: { min: 1.2, max: 4.5, step: 0.1, label: '歪み' },
-};
-
-// 出発点にする組み合わせ。ここから回して詰める
-export const KILL_SOUNDS = [
-  { name: 'デデン', note: '低い2発', cfg: {} },
-  { name: 'ドン', note: '1発だけ・短い', cfg: { hits: 1, tail: 0.8, pitch: 0.95 } },
-  { name: 'デデン 明るめ', note: '芯を強く・少し高く', cfg: { edge: 1.1, pitch: 1.3, weight: 0.7 } },
-  { name: 'デデーン', note: '余韻を長く', cfg: { tail: 2.0 } },
-  { name: 'デデデン', note: '3発', cfg: { hits: 3, gap: 0.12 } },
-];
 
 export class AudioEngine {
   constructor() {
@@ -107,15 +88,6 @@ export class AudioEngine {
 
     // 選んだキル音は端末に覚えさせる。決まった後に遊び直すたび
     // 1番へ戻ると、せっかく選んだ意味がない
-    this.killVariant = 0;
-    // つまみで動かした値。出発点(KILL_SOUNDS)の上に重ねる
-    this.killTune = null;
-    try {
-      const saved = parseInt(localStorage.getItem('blackout.killPick'), 10);
-      if (saved >= 0 && saved < KILL_SOUNDS.length) this.killVariant = saved;
-      const tune = JSON.parse(localStorage.getItem('blackout.killTune') || 'null');
-      if (tune && typeof tune === 'object') this.killTune = tune;
-    } catch { /* localStorageが使えない環境ではそのまま既定値 */ }
   }
 
   /**
@@ -1193,10 +1165,10 @@ export class AudioEngine {
 
   /**
    * 倒した合図。打点をいくつか並べて鳴らす。最後の打点が本命で余韻を持つ。
-   * 実際の値は KILL_TUNE と、選んだ出発点(KILL_SOUNDS の cfg)を混ぜた物。
+   * 実際の値は上の KILL_TUNE。
    */
-  _killShot(t, head, cfg = {}) {
-    const c = { ...KILL_TUNE, ...cfg, ...(this.killTune || {}) };
+  _killShot(t, head) {
+    const c = KILL_TUNE;
     const n = clamp(Math.round(c.hits), 1, 3);
     // 頭に当てた時だけ全体を長3度上げる。同じ音の音量違いでは差が伝わらない
     const p = c.pitch * (head ? 1.26 : 1);
@@ -1233,58 +1205,9 @@ export class AudioEngine {
     }
   }
 
-  /** 今のつまみの値を差し替える。ロビーのスライダーから呼ぶ */
-  setKillTune(tune) {
-    this.killTune = { ...(this.killTune || {}), ...tune };
-    try {
-      localStorage.setItem('blackout.killTune', JSON.stringify(this.killTune));
-    } catch { /* 覚えられないだけ */ }
-  }
-
   kill(headshot = false) {
     if (!this.ready || !this.enabled) return;
-    const i = clamp(this.killVariant | 0, 0, KILL_SOUNDS.length - 1);
-    this._killShot(this.ctx.currentTime, headshot, KILL_SOUNDS[i].cfg);
-  }
-
-  /** 今の設定。鳴らさずに値だけ取る（画面の初期表示用） */
-  killSoundInfo() {
-    const i = clamp(this.killVariant | 0, 0, KILL_SOUNDS.length - 1);
-    const s = KILL_SOUNDS[i];
-    return {
-      index: i, total: KILL_SOUNDS.length, name: s.name, note: s.note,
-      // 出発点の上につまみの値を重ねた、実際に鳴る設定
-      tune: { ...KILL_TUNE, ...s.cfg, ...(this.killTune || {}) },
-    };
-  }
-
-  /**
-   * 出発点を選び直す。つまみで動かした値は捨てる。
-   * 残したままだと、どの出発点を選んでも同じ音が鳴って選ぶ意味が消える
-   */
-  pickKillSound(i) {
-    const n = KILL_SOUNDS.length;
-    this.killVariant = ((i % n) + n) % n;
-    this.killTune = null;
-    try {
-      localStorage.setItem('blackout.killPick', String(this.killVariant));
-      localStorage.removeItem('blackout.killTune');
-    } catch { /* 覚えられないだけ */ }
-    this.kill(false);
-    return this.killSoundInfo();
-  }
-
-  /** 出発点を1つ送る。0を渡すと今の物をもう一度鳴らすだけ */
-  cycleKillSound(dir = 1) {
-    if (dir === 0) { this.kill(false); return this.killSoundInfo(); }
-    return this.pickKillSound((this.killVariant | 0) + dir);
-  }
-
-  /** つまみを1つ動かして、その場で鳴らす */
-  tweakKillSound(key, value) {
-    this.setKillTune({ [key]: value });
-    this.kill(false);
-    return this.killSoundInfo();
+    this._killShot(this.ctx.currentTime, headshot);
   }
 
   /**

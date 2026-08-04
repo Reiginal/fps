@@ -18,6 +18,10 @@ sounds/
 .env.local
 *.key
 
+# Claude向けの手元メモ。このrepoだけの事情（起動の仕方・本番の触り方・
+# 過去に外した所）を書いてある。公開リポジトリに置く物ではないので手元だけ
+CLAUDE.local.md
+
 # OS / editor
 .DS_Store
 *.swp
