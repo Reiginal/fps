@@ -48,7 +48,15 @@ jobs:
       - name: 検査
         run: npm run check
 
-      - uses: superfly/flyctl-actions/setup-flyctl@master
+      # 他人のリポジトリのコードを、このジョブの中で走らせている。
+      # @master のような枝で指すと、向こうが差し替えた物が次の実行からそのまま動く。
+      # このジョブには本番へ出す鍵(FLY_API_TOKEN)がいるので、
+      # 向こうが乗っ取られた日に鍵ごと持っていかれる。
+      # だからコミットのIDで固定する。IDは中身が1ビットでも変われば変わるので、
+      # 「あの時見た物」以外は動かない。
+      # 下のIDは v1 / 1.6 のタグが指しているのと同じ場所。
+      # 上げたい時は tags を見て、新しいIDへ手で書き換える
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1  # v1.6
 
       # --remote-only はコンテナの組み立てをFly側でやる指定。
       # GitHubの実行環境でDockerを動かすより速く、依存の取り直しも向こうで使い回される
