@@ -12,10 +12,14 @@
      意味の通らない要約が出ていた。
      読む側が知りたいのは「何ができるページか」の1行なので、それを渡す。
 
-     og:image は置いていない。この作りは画像ファイルを1枚も持たず、
-     見た目を全部コードで作っているので、貼るための1枚が存在しない。
-     画像が無くても題と説明は出る（絵の無い小さめの札になる）。
-     入れるなら、遊んでいる画面を撮った物を1枚だけ置くのが早い -->
+     下の文章は今できることを書いただけで、これが正しい姿という話ではない。
+     ログインや別の遊び方が入ったら、ここも書き直す。
+
+     絵(og:image)はコードで描いて書き出している（tools/make-ogp.mjs）。
+     題を変えたら npm run ogp を打ち直す。
+     この絵を外へ配るには、serve-rules.js と Dockerfile の両方に
+     assets/ が入っている必要がある。片方だけだと本番でだけ絵が出ない -->
+
 <meta name="description" content="ブラウザで開くだけで始まるFPS。1人で波を凌ぐか、URLを送って1対1で撃ち合うか。インストールもアカウントも要りません。">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="BLACKOUT">
@@ -23,7 +27,11 @@
 <meta property="og:description" content="開くだけで始まります。1人で波を凌ぐか、URLを送って1対1で撃ち合うか。インストールもアカウントも要りません。">
 <meta property="og:url" content="https://blackout-fps.fly.dev/">
 <meta property="og:locale" content="ja_JP">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="https://blackout-fps.fly.dev/assets/ogp.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="BLACKOUT">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#05070a">
 <style>
   :root {

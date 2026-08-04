@@ -16,6 +16,9 @@ const FILES = new Set(['/index.html']);
 // 配ってよいディレクトリ。この下は全部通す
 const DIRS = [
   '/src/',
+  // URLを貼った時の札に使う画像。LINEやSlackの取りに来る先が
+  // ここになるので、遊ぶ人向けの物と同じく外へ出す
+  '/assets/',
   // importmapがこの2つを直接参照している。ビルド手順を持たないので、
   // three本体はnode_modulesから配るしかない。
   // node_modules全体ではなくthreeの中の必要な2つに限る（wsのソース等は配らない）
