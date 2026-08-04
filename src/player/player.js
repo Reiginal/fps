@@ -431,7 +431,9 @@ export class Player {
     }
 
     /* ---------------------------------------------------- しゃがみ */
-    const wantCrouch = this.alive && (input.down('ControlLeft') || input.down('KeyC'));
+    // MetaはMacのCommand。対戦側の割り当て(protocol.jsのKEY_CODES)と揃えてある
+    const wantCrouch = this.alive && (input.down('ControlLeft') || input.down('KeyC')
+      || input.down('MetaLeft') || input.down('MetaRight'));
     if (wantCrouch !== this._wantCrouch) {
       this._wantCrouch = wantCrouch;
       this._postureArm = wantCrouch ? -1 : 1;   // 到着した時に行き過ぎさせる向き
