@@ -209,6 +209,7 @@ function onMessage(conn, raw) {
     case C.THROW: return onThrow(conn, m);
     case C.WEAPON: return onWeapon(conn, m);
     case C.SEAT: return onSeat(conn, m);
+    case C.READY: return onReady(conn, m);
     case C.PONG: return onPong(conn, m);
     case C.CHAT: return;   // protocol側にサーバー→クライアントのCHATが無いので今は捨てる
     default: return;
@@ -302,6 +303,13 @@ function onSeat(conn, m) {
   if (!slot) return;
   if (!isNum(m.tm) || !isNum(m.st)) return;
   conn.room.takeSeat(slot, Math.round(m.tm), Math.round(m.st));
+}
+
+// 準備完了の入り切り。席にいない人が押しても効かないのはroomが見ている
+function onReady(conn, m) {
+  const slot = conn.slot;
+  if (!slot) return;
+  conn.room.setReady(slot, !!m.r);
 }
 
 function onPong(conn, m) {

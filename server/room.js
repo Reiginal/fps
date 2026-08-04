@@ -84,6 +84,7 @@ export class Room {
       if (slot.team === null) return;   // 既に立っている
       slot.team = null;
       slot.seat = null;
+      slot.ready = false;
       this._sendLobby();
       return;
     }
@@ -100,6 +101,20 @@ export class Room {
     this._respawn(slot);
     // 先に始めてから配る。始まっていれば理由は空文字になり、
     // 受け取った側は「もう始まった」と分かる
+    this._startIfReady();
+    this._sendLobby();
+  }
+
+  /**
+   * 準備完了の入り切り。席に着いていない人は立てられない。
+   * 立てた人が全員揃った時に試合が始まる（_whyNotStartが見ている）
+   */
+  setReady(slot, on) {
+    if (this.phase !== PHASE.WAIT) return;
+    if (slot.team === null) return;   // 席にいない人は準備しようが無い
+    const next = !!on;
+    if (slot.ready === next) return;
+    slot.ready = next;
     this._startIfReady();
     this._sendLobby();
   }
@@ -121,7 +136,12 @@ export class Room {
   _lobbyRows() {
     const rows = [];
     for (const s of this.slots.values()) {
-      rows.push([s.id, s.name, s.team === null ? -1 : s.team, s.seat === null ? -1 : s.seat]);
+      rows.push([
+        s.id, s.name,
+        s.team === null ? -1 : s.team,
+        s.seat === null ? -1 : s.seat,
+        s.ready ? 1 : 0,
+      ]);
     }
     return rows;
   }
@@ -147,11 +167,16 @@ export class Room {
   _whyNotStart() {
     if (this.phase !== PHASE.WAIT) return '';
     const [a, b] = this._seated();
-    if (a.length === 1 && b.length === 1) return '';
     if (a.length === 0 && b.length === 0) return '席に着いてください';
     if (a.length === 0) return 'Aに誰もいません';
     if (b.length === 0) return 'Bに誰もいません';
-    return 'いまは1対1だけ動きます。各チーム1人ずつにしてください';
+    if (a.length !== 1 || b.length !== 1) return 'いまは1対1だけ動きます。各チーム1人ずつにしてください';
+    // 席が埋まっただけでは始めない。座り間違えただけで撃ち合いが始まるのを避ける。
+    // 押していない人が誰なのかまで出す。「準備待ち」とだけ出すと、
+    // 2人しかいなくても自分が押したかどうかを思い出す所から始まる
+    const notReady = [...a, ...b].filter((s) => !s.ready);
+    if (notReady.length) return `${notReady.map((s) => s.name).join('、')} の準備待ち`;
+    return '';
   }
 
   join(conn, name) {
@@ -166,6 +191,9 @@ export class Room {
       // 誰と組むかを選べることがロビーを置く理由そのものだから
       team: null,
       seat: null,
+      // 準備完了。席に着いてから自分で押す。
+      // 席を降りた時と、試合が終わって待ちへ戻った時に倒れる
+      ready: false,
       sim: new SimPlayer(id, name, this.world),
       pending: new Map(),   // seq -> [bits, yaw, pitch]
       nextSeq: -1,          // 次に食わせるseq
@@ -214,7 +242,12 @@ export class Room {
       this.phase = PHASE.WAIT;
       this.timeLeft = 0;
       this.round = 0;
-      for (const s of this.slots.values()) { s.rounds = 0; s.sim.kills = 0; s.sim.deaths = 0; }
+      for (const s of this.slots.values()) {
+        s.rounds = 0; s.sim.kills = 0; s.sim.deaths = 0;
+        // 準備完了も倒す。倒さないと、残った人が押しっぱなしの状態でロビーに戻り、
+        // 次に誰かが座って準備を押した瞬間に、心の準備なく試合が始まる
+        s.ready = false;
+      }
       this._sendScore();
     }
     this._sendLobby();
