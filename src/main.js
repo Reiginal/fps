@@ -998,7 +998,11 @@ class Game {
      膝から崩れて横倒しになる形。落ちるのを速く、傾くのを遅らせると
      「崩れ落ちた」に見える。同じ曲線で動かすと板が倒れるようにしか見えない */
   _deathFall(dt) {
-    if (this.state !== 'dead') return;
+    // 1人用は結果画面へ行くので state で、対戦は生き返るので体力で見る。
+    // 対戦側を state で見ると、倒れている間ずっと state が 'dead' のままになり、
+    // 生き返った後もカメラが地面に転がったままになる
+    const down = this.mode === 'versus' ? !this.player.alive : this.state === 'dead';
+    if (!down) { this.deathT = null; return; }
     this.deathT = Math.min(DEATH_FALL_S, (this.deathT ?? 0) + dt);
     const k = this.deathT / DEATH_FALL_S;
     const drop = 1 - (1 - k) ** 3;
@@ -1623,7 +1627,15 @@ class Game {
     if (me) {
       player.health = me.hp;
       const dead = !!(me.state & S.DEAD);
-      if (dead !== !player.alive) player.alive = !dead;
+      if (dead !== !player.alive) {
+        player.alive = !dead;
+        // 倒れ込みの時計を回す・止める。
+        // 1人用と違って結果画面へは行かない（次のラウンドの頭で生き返る）ので、
+        // 使うのは倒れる動きだけ。撃たれた瞬間に視点が固まって、
+        // 生き返るまでその場に立ったままだったのが「あっさり」の正体
+        this.deathT = dead ? 0 : null;
+        if (dead) this.audio.playerDown();
+      }
     }
 
     const wInput = player.alive ? input : this._noInput;
@@ -1635,6 +1647,8 @@ class Game {
     // もう1つは120Hzの画面で、刻みが回らないフレームが半分出るため、
     // updateの中でしか姿勢を入れないと回さなかったフレームは視点が固まる
     player._applyCamera();
+    // 倒れ込み。1人用と同じ動きを対戦にも入れる
+    this._deathFall(dt);
 
     const states = net.stateAt();
     this._lastStates = states;

@@ -15,9 +15,25 @@ export class Input {
     this._onLockChange = null;
 
     addEventListener('keydown', (e) => {
+      // 遊んでいる間はブラウザのショートカットを全部止める。
+      //
+      // Windowsで実際に起きたこと。しゃがみがCtrlなので、しゃがみながら動くと:
+      //   Ctrl+W → タブが閉じる（前進しようとして落ちる）
+      //   Ctrl+R → 再読み込み（リロードしようとしてホーム画面に戻る）
+      //   Ctrl+D → ブックマーク（右へ行けない）
+      //   Ctrl+F → ページ内検索（包帯が出せない）
+      //   Ctrl+1/2/3 → タブの切り替え（武器を変えられない）
+      // MacはこれがCommand+キーなので、Ctrlでしゃがんでも何も起きない。
+      // 作った側が一度も踏まないまま出していた。
+      //
+      // 個別に並べて止める形にしない。並べ方を間違えると、遊ぶ側からは
+      // 「たまにタブが消える」としか見えず、原因に辿り着けない。
+      // マウスを掴んでいる＝遊んでいる間は、ブラウザの操作は全部要らない
+      if (this.locked) e.preventDefault();
       if (e.repeat) return;
       this.keys.add(e.code);
       this._pressedThisFrame.add(e.code);
+      // 掴んでいない間も、これだけは止める。
       // スペースでページがスクロールしたりタブが移動すると台無しになる
       if (['Space', 'Tab', 'KeyR', 'ControlLeft', 'MetaLeft', 'MetaRight'].includes(e.code)) e.preventDefault();
     });
@@ -36,7 +52,13 @@ export class Input {
 
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.dom;
-      if (!this.locked) { this.keys.clear(); this.buttons.fill(false); }
+      if (!this.locked) {
+        this.keys.clear();
+        this.buttons.fill(false);
+        // 遊ぶのをやめたらキーボードを返す。返さないと、ロビーや選択画面でも
+        // Ctrl+Wが効かないままになって、閉じたい時に閉じられない
+        this._unlockKeyboard();
+      }
       this._onLockChange?.(this.locked);
     });
 
@@ -61,8 +83,46 @@ export class Input {
 
   onLockChange(fn) { this._onLockChange = fn; }
 
+  /**
+   * マウスを掴む。あわせて全画面にして、キーボードも借りにいく。
+   *
+   * なぜ全画面まで要るか: preventDefaultで止められないショートカットが2つある。
+   * **Ctrl+W（タブを閉じる）とCtrl+T（新しいタブ）はブラウザが予約していて、
+   * 普通のページからは絶対に止められない。** しゃがみながら前へ進むと
+   * タブが閉じる、という一番痛い形がこれで残ってしまう。
+   *
+   * Keyboard Lockという仕組みだけがこれを止められるが、条件が2つある:
+   *   1. 全画面であること
+   *   2. ChromeかEdgeであること（FirefoxとSafariには無い）
+   *
+   * だから全画面を先に頼み、そのうえでキーボードを借りる。
+   * どちらも失敗しうるので、失敗しても遊べる形（今まで通り）に落ちる。
+   * ESCを押した時に全画面と掴みの両方が外れるのは、ブラウザ側がそう作っている
+   */
   requestLock() {
+    // 全画面はマウスを掴むより先に頼む。逆にすると、全画面へ移る時の
+    // 画面の作り直しで掴みが外れることがある
+    if (!document.fullscreenElement) {
+      // 失敗しても遊べるので、断られたことは黙って受ける
+      document.documentElement.requestFullscreen?.({ navigationUI: 'hide' })
+        .then(() => this._lockKeyboard())
+        .catch(() => this._lockKeyboard());
+    } else {
+      this._lockKeyboard();
+    }
     this.dom.requestPointerLock?.();
+  }
+
+  /* キーボードを丸ごと借りる。Ctrl+WとCtrl+Tまで手元に来る。
+     対応していないブラウザでは何も起きない（navigator.keyboardが無い） */
+  _lockKeyboard() {
+    try { navigator.keyboard?.lock?.(); } catch { /* 借りられないだけ */ }
+  }
+
+  /* 借りた物を返す。遊ぶのをやめた時に返さないと、
+     ロビーや選択画面でもCtrl+Wが効かないままになる */
+  _unlockKeyboard() {
+    try { navigator.keyboard?.unlock?.(); } catch { /* 借りていないだけ */ }
   }
 
   pressed(code) { return this._pressedThisFrame.has(code); }

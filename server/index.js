@@ -236,6 +236,9 @@ function onJoin(conn, m) {
   conn.slot = slot;
   conn.room = room;
   conn.send(room.welcome(slot));
+  // ロビーはお迎えの後で配る。順番が逆だと、入ってきた本人の画面は
+  // まだ受け口を繋いでいないので、先にいた人が誰も映らないまま始まる
+  room.sendLobby();
   console.log(`[net] ${name} が入った (${room.slots.size}人)`);
 }
 
