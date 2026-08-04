@@ -2048,7 +2048,10 @@ export const WEAPONS = [
   {
     id: 'rifle', name: 'MK-4 カービン', build: buildRifle,
     damage: 27, headMult: 2.4, rpm: 640, auto: true, pellets: 1,
-    mag: 30, reserve: 240, reloadTime: 2.15,
+    // 予備は5マガジン分。240発(8マガジン)は「撃ち切る心配をしない」量で、
+    // 弾を数える場面が最後まで来なかった。5本だと、当てずに撃ち続けると
+    // 1ラウンドの終盤で足りなくなる
+    mag: 30, reserve: 150, reloadTime: 2.15,
     spreadHip: 0.030, spreadAds: 0.0016, spreadPerShot: 0.0026, spreadMax: 0.052, spreadRecover: 0.09,
     recoilPitch: 0.0125, recoilYaw: 0.0038, kick: 0.035, adsFov: 46, adsTime: 0.16,
     range: 120, falloffStart: 42, falloffEnd: 95, falloffMin: 0.5,
@@ -2099,7 +2102,8 @@ export const WEAPONS = [
   {
     id: 'shotgun', name: 'M870 ショットガン', build: buildShotgun,
     damage: 13, headMult: 1.6, rpm: 78, auto: false, pellets: 9,
-    mag: 7, reserve: 56, reloadTime: 2.9,
+    // ライフルと同じで5マガジン分（56発＝8本から落とす）
+    mag: 7, reserve: 35, reloadTime: 2.9,
     spreadHip: 0.062, spreadAds: 0.040, spreadPerShot: 0.0, spreadMax: 0.062, spreadRecover: 0.2,
     recoilPitch: 0.052, recoilYaw: 0.010, kick: 0.11, adsFov: 58, adsTime: 0.2,
     range: 40, falloffStart: 8, falloffEnd: 26, falloffMin: 0.18,
@@ -2487,12 +2491,24 @@ export class WeaponSystem {
     g.add(roll);
     g.userData.roll = roll;
 
-    // 握る手。巻きの外周(0.034)に合わせて指を回す
+    // 握る手。
+    //
+    // ここは「手の形はしているが、帯を握っていない」状態だった。
+    // 手の握り軸はローカルYで、帯は横に寝た円筒なので軸はX。
+    // 元の向き(-0.20, 0, -0.35)だと**その2つが69.9度ずれていて**、
+    // 指が帯を回り込まずに横切る形で閉じていた。
+    // 下の値でずれは8.0度になる（ライフルの支え手が8.9度なので同じ範囲）。
+    //
+    // roll と skew を渡すのも同じ理由。渡さないと真横から握る形になり、
+    // 画面には甲の塊しか出ない（buildHandのrollの説明を参照）。
+    // 握る対象の太さ(gripR 0.031)はライフルの先台と同じなので、
+    // 詰め済みの値をそのまま借りる
     const hand = buildHand(1, {
-      gripR: 0.031, wrap: 0.42, armDir: [0.42, -0.70, 0.90], armLen: 0.58,
+      gripR: 0.031, wrap: 0.62, tip: -0.34, roll: 0.52, skew: 0.22,
+      armDir: [0.42, -0.70, 0.90], armLen: 0.58,
     });
     hand.position.set(0.030, -0.006, 0.004);
-    hand.rotation.set(-0.20, 0, -0.35);
+    hand.rotation.set(-0.10, 0, -Math.PI / 2 + 0.14);
     g.add(hand);
 
     g.position.set(0.10, -0.14, -0.28);
