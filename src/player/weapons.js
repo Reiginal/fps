@@ -3054,12 +3054,23 @@ export class WeaponSystem {
           -0.200 + k * 0.154 + breath + this.swayY * 0.5,
           -0.30 + k * 0.05,
         );
+        // 手首のひねり。往復させる。
+        //
+        // ここは spin をそのまま足していた（0.40 + spin * 0.5）。
+        // spinは巻いている時間に比例して増え続ける値なので、
+        // 手が止まらずに回った。2.4秒巻くと spin は18まで伸びるので、
+        // 掛けた0.5で9ラジアン＝**手が1回転半していた**。
+        // すぐ下のコメントに「手は回さない」と書いてあるのに、この行が回していた。
+        //
+        // 巻く動作は「ひねって、戻して、またひねる」の往復なので、
+        // 増え続ける値ではなく、その sin を使う
         this.bandage.rotation.set(
           -0.35 + Math.sin(spin) * 0.14,
-          0.40 + spin * 0.5,
-          0.20 + breath * 3,
+          0.40 + Math.sin(spin * 0.5) * 0.16,
+          0.20 + breath * 3 + Math.sin(spin * 0.5 + 1.1) * 0.07,
         );
-        // 巻いている間だけ帯をほどく向きへ回す。手は回さない（手首だけ動く）
+        // 帯そのものは回してよい。ほどけていく物なので、増え続ける値が正しい。
+        // 回るのはこの roll だけで、手は上の往復しかしない
         if (this.bandage.userData.roll) this.bandage.userData.roll.rotation.x = spin * 1.6;
         this.bandage.scale.setScalar(1.35 * (0.72 + k * 0.28));
       }
