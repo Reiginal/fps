@@ -361,22 +361,6 @@
   #nmRoom { width: 7em; text-align: center; font-size: 18px; letter-spacing: .45em; text-indent: .45em; }
   .hint { font-size: 10px; line-height: 1.7; color: var(--dim); margin-top: 5px; }
 
-  /* キル音の選択。◀ 名前 ▶ の3つを横に並べる。
-     ここに置く理由: 倒さないと聴けない作りだと、比べるのに毎回敵を殺しに
-     行くことになる。出撃前に何度でも鳴らせる場所が要る */
-  .killpick { display: flex; gap: 6px; }
-  .killbtn, .killname {
-    padding: 9px 11px;
-    font-family: var(--mono); font-size: 13px; letter-spacing: .08em;
-    color: var(--hud); background: rgba(255,255,255,.05);
-    border: 1px solid rgba(255,255,255,.2);
-    cursor: pointer;
-  }
-  .killbtn { width: 42px; flex: none; }
-  .killname { flex: 1; text-align: center; }
-  .killbtn:hover, .killname:hover { background: rgba(99,210,255,.14); border-color: var(--accent); }
-  .killname:active { background: rgba(99,210,255,.26); }
-
   /* つまみ。作った側が音を聴けないので、聴ける側が直接回せる場所を用意する。
      ここが無いと「作る→聴いてもらう→駄目→また作る」を延々やることになる */
   .linkbtn {
@@ -386,21 +370,6 @@
     border: 1px solid rgba(255,255,255,.16); cursor: pointer;
   }
   .linkbtn:hover { color: var(--accent); border-color: var(--accent); }
-  #nmKillTune { margin-top: 9px; }
-  .knob { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
-  .knob .kname { font-size: 10px; letter-spacing: .1em; color: var(--dim); width: 84px; flex: none; }
-  .knob .kval { font-size: 10px; color: var(--accent); width: 44px; flex: none; text-align: right; }
-  .knob input[type=range] {
-    flex: 1; height: 3px; -webkit-appearance: none; appearance: none;
-    background: rgba(255,255,255,.18); cursor: pointer;
-  }
-  .knob input[type=range]::-webkit-slider-thumb {
-    -webkit-appearance: none; appearance: none;
-    width: 13px; height: 13px; background: var(--accent); cursor: pointer;
-  }
-  .knob input[type=range]::-moz-range-thumb {
-    width: 13px; height: 13px; border: 0; background: var(--accent); cursor: pointer;
-  }
 
   /* 文言が出た時にボタンが下へ逃げないよう、2行ぶんの場所を最初から空けておく */
   #nmStatus { font-size: 11px; letter-spacing: .1em; line-height: 1.7; color: var(--accent); min-height: 38px; margin: 6px 0 4px; text-align: left; }
@@ -615,7 +584,6 @@
       <b>R</b><span>リロード</span>
       <b>1 / 2 / 3 / 4</b><span>ライフル / ショットガン / ナイフ / 手榴弾</span>
       <b>F</b><span>包帯を巻く</span>
-      <b>K</b><span>キル音を切り替えて試す</span>
       <b>ESC</b><span>一時停止</span>
     </div>
     <div class="cta" id="cta">クリックで出撃</div>
@@ -643,20 +611,6 @@
       <label class="label" for="nmRoom">合言葉</label>
       <input id="nmRoom" type="text" maxlength="4" autocomplete="off" spellcheck="false">
       <div class="hint">4文字。空のままなら誰でも入れる共通の部屋に入る</div>
-    </div>
-
-    <div class="field">
-      <label class="label">キル音</label>
-      <div class="killpick">
-        <button id="nmKillPrev" class="killbtn" type="button">◀</button>
-        <button id="nmKillPlay" class="killname" type="button">1 / 5　デデン</button>
-        <button id="nmKillNext" class="killbtn" type="button">▶</button>
-      </div>
-      <div class="hint" id="nmKillNote">押すとその場で鳴る</div>
-      <!-- つまみ。出発点を選んでから、ここを回して自分で詰める。
-           動かすたびにその場で鳴る -->
-      <button id="nmKillMore" class="linkbtn" type="button">つまみを開く ▾</button>
-      <div id="nmKillTune" class="hidden"></div>
     </div>
 
     <div id="nmStatus"></div>

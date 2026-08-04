@@ -51,7 +51,7 @@ window.AudioContext = class {
   }
 };
 
-const { AudioEngine, KILL_SOUNDS } = await import('../src/core/audio.js');
+const { AudioEngine } = await import('../src/core/audio.js');
 
 let bad = 0;
 const ok = (name, fn) => {
@@ -96,26 +96,6 @@ ok('explosion', () => a.explosion(at, cam));
 ok('whizBy', () => a.whizBy(1.5));
 ok('click', () => a.click(2800, 0.3, 0.03));
 ok('setEnvironment', () => a.setEnvironment(0.4));
-
-console.log('\n[3] キル音の候補を全部鳴らす');
-// 候補が5つある以上、選ばれていない案が壊れていても普段は気づけない。
-// 切り替えて初めて例外が出るのでは、聴き比べの最中に止まってしまう
-KILL_SOUNDS.forEach((s, i) => {
-  a.killVariant = i;
-  ok(`候補${i + 1} ${s.name}`, () => { a.kill(false); a.kill(true); });
-});
-ok('cycleKillSound で一周する', () => {
-  a.killVariant = 0;
-  for (let i = 0; i < KILL_SOUNDS.length; i++) a.cycleKillSound(1);
-  if (a.killVariant !== 0) throw new Error(`一周して戻らない (${a.killVariant})`);
-});
-ok('cycleKillSound は逆にも回る', () => {
-  a.killVariant = 0;
-  const r = a.cycleKillSound(-1);
-  if (r.index !== KILL_SOUNDS.length - 1) throw new Error(`末尾へ戻らない (${r.index})`);
-  if (!r.name || !r.note) throw new Error('画面に出す名前が空');
-});
-a.killVariant = 0;
 
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);
 process.exit(bad === 0 ? 0 : 1);

@@ -4,7 +4,7 @@ import { buildMaterials, createSky, skyFogColor } from './world/textures.js';
 import { buildLevel } from './world/level.js';
 import { Effects } from './world/effects.js';
 import { Input } from './core/input.js';
-import { AudioEngine, KILL_RANGE } from './core/audio.js';
+import { AudioEngine } from './core/audio.js';
 import { createComposer } from './core/postfx.js';
 import { Capsule } from 'three/addons/math/Capsule.js';
 import { Player } from './player/player.js';
@@ -705,20 +705,6 @@ class Game {
       this._wakeAudio();
       this._joinMatch(opt);
     };
-    // キル音の聴き比べ。dirが0なら今の候補をもう一度鳴らすだけ。
-    // 音を起こすのはここでもやる。この画面のボタンが最初の操作になり得るので、
-    // 起こさずに鳴らそうとしても無音のまま何も分からない
-    menu.onKillSound = (dir) => {
-      this._wakeAudio();
-      return this.audio.cycleKillSound(dir);
-    };
-    // つまみ。作った側が音を聴けないので、聴ける側が直接回せるようにしてある
-    menu.onKillTweak = (key, value) => {
-      this._wakeAudio();
-      return this.audio.tweakKillSound(key, value);
-    };
-    menu.buildKillKnobs(KILL_RANGE);
-    menu.setKillSound(this.audio.killSoundInfo());
     menu.show();
   }
 
@@ -1801,13 +1787,6 @@ class Game {
       }
       if (canAct && input.pressed('KeyR')) {
         if (this.weapons.reload()) this.audio.reload(this.weapons.def.reloadTime);
-      }
-      // キル音の聴き比べ。Kで次の候補へ回して、その場で1回鳴らす。
-      // 倒さないと聴けないと比べようがないので、ここで鳴らせるようにしてある。
-      // 死んでいる間も操作を通すのは、比べるだけなら試合に影響しないため
-      if (input.pressed('KeyK')) {
-        const s = this.audio.cycleKillSound(1);
-        this.hud.banner(`キル音 ${s.index + 1} / ${s.total}`, `${s.name} ／ ${s.note} ／ Kで次へ`, 1.8);
       }
       // 武器の数だけ回す。3で固定していたので、4本目を足しても持ち替えられなかった
       for (let i = 0; canAct && i < this.weapons.weapons.length && i < 9; i++) {

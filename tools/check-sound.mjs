@@ -113,102 +113,42 @@ console.log('\n[1] 測定器の自己検査');
 
 /* ------------------------------------------------------ 実際の音を測る */
 
-const { KILL_SOUNDS, KILL_TUNE } = await import('../src/core/audio.js');
+const { KILL_TUNE } = await import('../src/core/audio.js');
 
-console.log('\n[2] キル音 … 出発点');
+console.log('\n[2] キル音');
 // 下限の根拠:
 //   低音25%以上 … 直す前は0.0〜0.4%で「軽い」と言われた。ここが空だと薄い通知音になる
 //   長さ250ms以上 … 直す前は最短102ms。短いと「ピッ」で終わって手応えが残らない
-//   音量0.55〜0.95 … 聴き比べる時、音量差があると音の質より大きさで選ばれる。
-//                    1.0に届くと波の頭が潰れて割れる
-// 重心には上限を置かない。明るい出発点をわざと1つ入れてあるので、
-// 全部を低い側へ縛ると選ぶ幅がなくなる
-for (let i = 0; i < KILL_SOUNDS.length; i++) {
-  const s = KILL_SOUNDS[i];
-  const m = await capture((a) => { a.killVariant = i; a.killTune = null; a.kill(false); });
+//   重心700Hz以下 … 鐘(747〜931Hz)で「まだ甲高い」と言われた。それより下
+//   音量0.55〜0.95 … 1.0に届くと波の頭が潰れて割れる
+{
+  const m = await capture((a) => a.kill(false));
   ok(
-    m.lowPct > 25 && m.lenMs > 250 && m.peak > 0.55 && m.peak < 0.95,
-    `${s.name} … 低音${m.lowPct.toFixed(0)}% 長さ${m.lenMs.toFixed(0)}ms `
+    m.lowPct > 25 && m.lowPct < 80 && m.lenMs > 250 && m.centroid < 700
+      && m.peak > 0.55 && m.peak < 0.95,
+    `低音${m.lowPct.toFixed(0)}% 長さ${m.lenMs.toFixed(0)}ms `
     + `重心${m.centroid.toFixed(0)}Hz 音量${m.peak.toFixed(2)}`,
   );
-}
-// 出発点は形が違うから並べる意味がある。打点の数が宣言どおりか見る
-for (let i = 0; i < KILL_SOUNDS.length; i++) {
-  const s = KILL_SOUNDS[i];
-  const want = s.cfg.hits ?? KILL_TUNE.hits;
-  const m = await capture((a) => { a.killVariant = i; a.killTune = null; a.kill(false); });
-  ok(m.hits === want, `${s.name} … 打点${m.hits}発（狙いは${want}発）`);
-}
-
-console.log('\n[2b] つまみが本当に効くか');
-// ここが今回の本体。作った側が音を聴けないので、遊ぶ側が自分で回して
-// 決められるようにつまみを付けた。動かないつまみを渡したら本末転倒なので、
-// 「上げた時に狙った向きへ数字が動くか」を1本ずつ確かめる
-const withTune = (tune) => capture((a) => {
-  a.killVariant = 0;
-  a.killTune = tune;
-  a.kill(false);
-});
-const base = await withTune(null);
-
-{
-  const hi = await withTune({ pitch: 2.0 });
-  const lo = await withTune({ pitch: 0.6 });
+  // 「デデン」は低い打点が2つ。帯の取り分や重心だけ見ていても、
+  // 1発しか鳴っていない物と区別が付かない。形そのものを数える
   ok(
-    hi.centroid > base.centroid * 1.3 && lo.centroid < base.centroid * 0.85,
-    `高さ … 上げると高く下げると低い (${lo.centroid.toFixed(0)} ← ${base.centroid.toFixed(0)} → ${hi.centroid.toFixed(0)}Hz)`,
+    m.hits === KILL_TUNE.hits && m.gapMs > 70 && m.gapMs < 220,
+    `打点${m.hits}発 間隔${m.gapMs.toFixed(0)}ms（狙いは${KILL_TUNE.hits}発）`,
+  );
+  // 2発目が本命。圧縮器の戻りが打点の間隔より長かった時は、
+  // 2発目だけ半分の大きさになっていた
+  ok(
+    m.hitLevels[1] > 0.7,
+    `2発目が1発目に潰されていない (1発目${m.hitLevels[0].toFixed(2)} / `
+    + `2発目${m.hitLevels[1].toFixed(2)})`,
   );
 }
 {
-  const wide = await withTune({ gap: 0.28 });
-  const tight = await withTune({ gap: 0.07 });
-  // 詰めた側も2発のままであること。間隔0ms＝2発目が消えて1発になった、を通さない
-  ok(
-    wide.gapMs > base.gapMs * 1.4 && tight.hits === 2 && tight.gapMs < base.gapMs * 0.7,
-    `間隔 … 詰めても2発のまま近づく (${tight.gapMs.toFixed(0)}ms/${tight.hits}発 ← `
-    + `${base.gapMs.toFixed(0)} → ${wide.gapMs.toFixed(0)}ms)`,
-  );
-}
-{
-  const long = await withTune({ tail: 2.5 });
-  const short = await withTune({ tail: 0.35 });
-  ok(
-    long.lenMs > base.lenMs * 1.3 && short.lenMs < base.lenMs * 0.8,
-    `余韻 … 伸ばすと長く詰めると短い (${short.lenMs.toFixed(0)} ← ${base.lenMs.toFixed(0)} → ${long.lenMs.toFixed(0)}ms)`,
-  );
-}
-{
-  const heavy = await withTune({ weight: 1.8 });
-  const light = await withTune({ weight: 0 });
-  ok(
-    heavy.lowPct > base.lowPct && light.lowPct < base.lowPct * 0.62,
-    `低音 … 上げると増え0で消える (${light.lowPct.toFixed(0)} ← ${base.lowPct.toFixed(0)} → ${heavy.lowPct.toFixed(0)}%)`,
-  );
-}
-{
-  const bright = await withTune({ edge: 1.8 });
-  const dull = await withTune({ edge: 0 });
-  ok(
-    bright.centroid > dull.centroid * 1.15,
-    `芯 … 上げると明るくなる (${dull.centroid.toFixed(0)} → ${bright.centroid.toFixed(0)}Hz)`,
-  );
-}
-{
-  const one = await withTune({ hits: 1 });
-  const three = await withTune({ hits: 3, gap: 0.12 });
-  ok(one.hits === 1 && three.hits === 3, `打点の数 … 1発と3発が作れる (${one.hits}発 / ${three.hits}発)`);
-}
-{
-  // どのつまみをどこまで回しても割れないこと。
-  // 遊ぶ側が端まで回した時に音が壊れるなら、渡した意味がない
-  let worst = 0;
-  const ends = [
-    { pitch: 2.2, weight: 1.8, edge: 1.8, drive: 4.5, tail: 2.6, hits: 3 },
-    { pitch: 0.5, weight: 1.8, edge: 1.8, drive: 4.5, hits: 3, gap: 0.06 },
-    { pitch: 1, weight: 1.8, edge: 0, drive: 4.5, tail: 2.6 },
-  ];
-  for (const t of ends) worst = Math.max(worst, (await withTune(t)).peak);
-  ok(worst < 0.99, `つまみを端まで回しても割れない (一番大きい回で ${worst.toFixed(2)})`);
+  // 頭に当てて倒した時は少し高くする。同じ音の音量違いでは差が伝わらない
+  const body = await capture((a) => a.kill(false));
+  const head = await capture((a) => a.kill(true));
+  ok(head.centroid > body.centroid * 1.05,
+    `頭で倒した時は音が上がる (${body.centroid.toFixed(0)} → ${head.centroid.toFixed(0)}Hz)`);
 }
 
 console.log('\n[3] 当たった時の音');
