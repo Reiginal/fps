@@ -4,6 +4,27 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>BLACKOUT — 市街地掃討戦</title>
+
+<!-- LINEやSlackにURLを貼った時に出る要約。
+     これを書いていないと、向こうは本文が無いページだと判断して
+     画面に出ている文字を上から拾い集める。実際、HUDのラベルが並んで
+     「起動中 第1波 残敵 0 0 スコア 0 － 0 相手を待っています…」という
+     意味の通らない要約が出ていた。
+     読む側が知りたいのは「何ができるページか」の1行なので、それを渡す。
+
+     og:image は置いていない。この作りは画像ファイルを1枚も持たず、
+     見た目を全部コードで作っているので、貼るための1枚が存在しない。
+     画像が無くても題と説明は出る（絵の無い小さめの札になる）。
+     入れるなら、遊んでいる画面を撮った物を1枚だけ置くのが早い -->
+<meta name="description" content="ブラウザで開くだけで始まるFPS。1人で波を凌ぐか、URLを送って1対1で撃ち合うか。インストールもアカウントも要りません。">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="BLACKOUT">
+<meta property="og:title" content="BLACKOUT — ブラウザで遊ぶFPS">
+<meta property="og:description" content="開くだけで始まります。1人で波を凌ぐか、URLを送って1対1で撃ち合うか。インストールもアカウントも要りません。">
+<meta property="og:url" content="https://blackout-fps.fly.dev/">
+<meta property="og:locale" content="ja_JP">
+<meta name="twitter:card" content="summary">
+<meta name="theme-color" content="#05070a">
 <style>
   :root {
     --hud: #e8f0f4;
