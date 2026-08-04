@@ -1,0 +1,61 @@
+# Fly.io の設定。
+#
+# なぜ設定をファイルで持つか: クラウドの画面をポチポチして作った設定は
+# どこにも残らないので、後から「なぜこうなっているか」が誰にも分からなくなる。
+# ここに置けば差分で追えるし、消して作り直すのも同じファイルから一発でできる。
+#
+# 初回は手元で以下を打つ（アカウント作成と支払い方法の登録が要る）:
+#   brew install flyctl
+#   fly auth login
+#   fly launch --no-deploy    # この fly.toml を読んで app 名だけ決める
+#   fly deploy
+
+app = "blackout-fps"
+
+# 東京。ここが一番大事な設定。
+# 対戦ゲームは応答の速さがそのまま有利不利になる。
+# 東京なら日本から往復10〜25ms、シンガポールだと70〜90ms、アメリカだと120ms〜。
+# いまLANで遊ぶと「立てた側21ms / 入る側60ms」でホストが有利になっているが、
+# 両者から等距離の東京へ置くとこの不公平が消える
+primary_region = "nrt"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  # httpで来たらhttpsへ回す。ブラウザ側はhttpsのページなら自動でwss://を使う
+  force_https = true
+
+  # 台数は必ず1のまま。
+  # 部屋（試合の状態）がサーバープロセスのメモリの中にしかないので、
+  # 2台に増やすと同じ合言葉を入れても別々の台に振り分けられて別試合になる。
+  # 「勝手に台数を増やして捌く」というクラウドの売りが、この作りでは使えない
+  min_machines_running = 1
+  auto_start_machines = true
+  # 止めない。止めると次に来た人が起動を待つことになるうえ、
+  # 起動のたびに地形を組み直すので2秒余分にかかる
+  auto_stop_machines = "off"
+
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 40
+    hard_limit = 60
+
+  # 死活監視。返らなくなったら落ちたとみなして入れ替えられる。
+  # grace_period を長めに取ってあるのは、地形（三角形20万個）を組み終わってから
+  # ポートを開く作りで、起動に実測2秒かかるため。
+  # ここを短くすると、正常に起動している最中に「失敗した」と誤判定される
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "30s"
+    timeout = "5s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  # 1対1で数試合ぶんなら共有CPU1個で足りる。
+  # 1部屋あたり60Hzのタイマーが1本走るので、部屋が増えるとCPUから先に詰まる。
+  # 足りなくなったら memory と cpus を上げる（台数は増やせない）
+  size = "shared-cpu-1x"
+  memory = "512mb"

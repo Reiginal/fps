@@ -68,6 +68,9 @@ jobs:
       - name: 検査 呼び先とHUDの部品
         run: node tools/check-calls.mjs
 
+      - name: 検査 外へ配る物
+        run: node tools/check-serve.mjs
+
       - name: 検査 HUD
         run: node tools/check-hud.mjs
 

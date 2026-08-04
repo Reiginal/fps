@@ -231,6 +231,9 @@ export class NetClient {
       // 往復を測るのはサーバー。こちらは即返すことだけが仕事
       case Sv.PING: this._send({ t: C.PONG, id: m.id }); break;
       case Sv.FULL: this._fail(m.why || '満員'); break;
+      // サーバーが理由付きで閉じてきた（更新など）。
+      // 「切れた」とだけ出すより、待てば戻ると分かる方が親切
+      case Sv.BYE: this._fail(m.why || 'サーバーが閉じた'); break;
       default: break;
     }
   }

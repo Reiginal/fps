@@ -1,0 +1,13 @@
+# コンテナへ持っていかない物。
+# ここを書かないと node_modules(25MB) や .git を丸ごと送りつけることになって、
+# ビルドが遅くなるうえ、要らない物が中に残る
+node_modules
+.git
+.github
+sounds
+tools
+課題.md
+README.md
+eslint.config.js
+Dockerfile
+.dockerignore

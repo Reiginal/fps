@@ -38,7 +38,17 @@ export class NetMenu {
       killPrev: $('nmKillPrev'), killNext: $('nmKillNext'),
       killPlay: $('nmKillPlay'), killNote: $('nmKillNote'),
       killMore: $('nmKillMore'), killTune: $('nmKillTune'),
+      urlField: $('nmUrlField'), urlToggle: $('nmUrlToggle'),
     };
+
+    // 公開のサーバーに置いた時（httpsで開いている時）は、全員が同じ場所
+    // ＝今開いているページに繋ぐので、接続先の欄そのものが要らない。
+    // 畳んでおいて、押した時だけ出す。
+    //
+    // 畳むもう1つの理由: 前にLANで遊んだブラウザには ws://192.168... が
+    // 保存されたままになっていて、そのままだとHTTPSのページから繋ごうとして
+    // 混在コンテンツで弾かれる。遊ぶ側には原因がまったく見えない
+    this.hosted = location.protocol === 'https:';
 
     // 統合側が差し替える。初期値を空関数にしておくと、繋ぎ忘れても画面が落ちない
     this.onSolo = () => {};
@@ -51,8 +61,17 @@ export class NetMenu {
     this.busy = false;
 
     this.el.name.value = load(SAVE.name, '');
-    // 空で覚えてしまった時も既定へ戻す。接続先が空欄の画面は手掛かりが無い
-    this.el.url.value = load(SAVE.url, '') || defaultUrl();
+    // 空で覚えてしまった時も既定へ戻す。接続先が空欄の画面は手掛かりが無い。
+    // 公開の場所に置いてある時は、覚えている値ではなく必ず今のページを使う
+    this.el.url.value = this.hosted ? defaultUrl() : (load(SAVE.url, '') || defaultUrl());
+    if (this.hosted) {
+      this.el.urlField.classList.add('hidden');
+      this.el.urlToggle.classList.remove('hidden');
+      this.el.urlToggle.onclick = () => {
+        const folded = this.el.urlField.classList.toggle('hidden');
+        this.el.urlToggle.textContent = folded ? '別の場所へ繋ぐ ▾' : '別の場所へ繋ぐ ▴';
+      };
+    }
     this.el.room.value = normalizeRoom(load(SAVE.room, ''));
 
     // addEventListenerではなく代入で持つ。DOMはindex.html側に1組しかないので、
@@ -202,8 +221,11 @@ export class NetMenu {
       return;
     }
     // 口頭で伝わるのはIPだけなので、ws://を書き忘れた形で入ってくる。
-    // 補ったうえで欄にも戻して、次から何を書けばいいか見て分かるようにする
-    if (!/^wss?:\/\//i.test(url)) url = `ws://${url}`;
+    // 補ったうえで欄にも戻して、次から何を書けばいいか見て分かるようにする。
+    // HTTPSのページからは ws:// が混在コンテンツとして弾かれるので、
+    // 補う時も手で打たれた時も wss:// へ寄せる
+    if (!/^wss?:\/\//i.test(url)) url = `${this.hosted ? 'wss' : 'ws'}://${url}`;
+    else if (this.hosted && /^ws:\/\//i.test(url)) url = url.replace(/^ws:\/\//i, 'wss://');
     this.el.url.value = url;
 
     const room = normalizeRoom(this.el.room.value);

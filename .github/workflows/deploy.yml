@@ -1,0 +1,58 @@
+# mainへ入った物を本番へ反映する。
+#
+# 人が本番へ手でコマンドを打たない形にするのがこれの目的。
+# 手で打つ運用だと「今動いているのはどのコミットか」が誰にも分からなくなるし、
+# 打ち間違いも起きる。mainに入った物＝本番、という対応を機械で保つ。
+#
+# 鍵(FLY_API_TOKEN)はGitHubのSecretsに置く。手元にも置かない。
+# 初回だけ以下を打って登録する:
+#   fly tokens create deploy -x 8760h
+#   gh secret set FLY_API_TOKEN --body "<出てきた文字列>"
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  # コミットを増やさずに入れ直したい時のための手動の口。
+  # 本番が変な状態になった時、まずこれを押せば直ることが多い
+  workflow_dispatch:
+
+# デプロイは同時に走らせない。2つ同時に走ると、後から始まった方が
+# 先に終わって、古いコミットが本番に残ることがある。
+# cancel-in-progress は false。途中で切ると中途半端な状態で止まる
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # 出す前にもう一度確かめる。
+      # ブランチ保護で「CIが緑でないとマージできない」ようにはしてあるが、
+      # 検査したのはPRの中身であって、mainへ混ぜた後の状態ではない。
+      # 混ざった結果が壊れている可能性は残るので、出す直前にもう一度通す
+      - name: 静的解析
+        run: npm run lint
+
+      - name: 検査
+        run: npm run check
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # --remote-only はコンテナの組み立てをFly側でやる指定。
+      # GitHubの実行環境でDockerを動かすより速く、依存の取り直しも向こうで使い回される
+      - name: 本番へ出す
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

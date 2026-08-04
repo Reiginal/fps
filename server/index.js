@@ -12,12 +12,13 @@ import { createSocket } from 'node:dgram';
 import { networkInterfaces } from 'node:os';
 import { accessSync, constants } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
-import { extname, join, normalize } from 'node:path';
+import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as THREE from 'three';
 import { WebSocketServer } from 'ws';
 import { buildWorld } from './world.js';
-import { getRoom, roomList } from './room.js';
+import { getRoom } from './room.js';
+import { publicPath } from './serve-rules.js';
 import { WEAPONS, weaponsSource } from './sim.js';
 import {
   C, Sv, decode, encode, normalizeRoom, TIMEOUT_MS,
@@ -43,6 +44,10 @@ const PING_EVERY_MS = 2000;
 // 以前は静的配信だけを行うserve.mjsが別にあって、同じ処理をこちらへ写していた。
 // 「片方を直したらもう片方も直すこと」と注意書きを添える形は必ず片方を忘れるので、
 // 起動口をこのファイル1本に寄せて写しごと消した
+// 配ってよいURLかの判定は serve-rules.js が持つ。
+// このファイルは読み込むとサーバーが起動するので、判定をここに書くと
+// 「絞ったつもり」を試す方法が無くなる（tools/check-serve.mjs が向こうを叩く）
+
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -56,13 +61,23 @@ const TYPES = {
 async function serveStatic(req, res) {
   try {
     const url = decodeURIComponent(req.url.split('?')[0]);
-    // 部屋の一覧だけは覗けるようにしておく。誰がどこに居るか分からないと合言葉を配れない
-    if (url === '/rooms') {
-      res.writeHead(200, { 'content-type': TYPES['.json'] }).end(JSON.stringify(roomList()));
+    // 死活監視の受け口。置き場所によっては定期的にここを叩いて、
+    // 返らなくなったら落ちたとみなして入れ替える。
+    // 地形を組み終わってからlistenする作りなので、返った時点で遊べる状態
+    if (url === '/healthz') {
+      res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }).end('ok');
       return;
     }
-    // ルート外へ抜けるパスは弾く
-    const rel = normalize(url === '/' ? '/index.html' : url).replace(/^(\.\.[/\\])+/, '');
+    // 部屋の一覧を返す口は閉じた。誰でも叩けて、全部屋の合言葉と人数が取れていた。
+    // 合言葉は部屋を分ける唯一の鍵なので、これが漏れると誰でも入れる。
+    // 合言葉は口頭で渡す物という前提に戻す
+
+    // 配ってよい物か。ここを通らない物は、存在していても無いものとして返す
+    const rel = publicPath(req.url);
+    if (!rel) {
+      res.writeHead(404).end('not found');
+      return;
+    }
     const path = join(ROOT, rel);
     if (!path.startsWith(ROOT)) {
       res.writeHead(403).end('forbidden');
@@ -394,6 +409,34 @@ process.on('uncaughtException', (e) => {
 process.on('unhandledRejection', (e) => {
   console.error('[fatal] 拾い損ねた失敗:', e);
 });
+
+/* ------------------------------------------------------ 終了の合図 */
+
+// クラウドへ置くと、更新のたびに終了の合図(SIGTERM)が飛んでくる。
+// 受け取らずに落ちると、遊んでいる人は何の説明も無く切断される。
+// 「回線が落ちた」のか「サーバーが死んだ」のか「更新中」なのかが
+// 区別できないので、まず理由を配ってから閉じる
+let closing = false;
+function shutdown(signal) {
+  if (closing) return;
+  closing = true;
+  console.log(`\n[shutdown] ${signal} を受けた。繋がっている人へ知らせてから閉じる`);
+  const bye = JSON.stringify({ t: Sv.BYE, why: 'サーバーを更新しています。少ししてから入り直してください' });
+  for (const c of wss.clients) {
+    try { c.send(bye); } catch { /* 既に切れている */ }
+  }
+  // 送り終わる間を置いてから閉じる。すぐ閉じると理由が届かない
+  setTimeout(() => {
+    for (const c of wss.clients) {
+      try { c.close(1001, 'server shutdown'); } catch { /* 既に切れている */ }
+    }
+    server.close(() => process.exit(0));
+    // 閉じ切らない接続が残っても、いつかは落ちる
+    setTimeout(() => process.exit(0), 3000).unref();
+  }, 250);
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 server.listen(PORT, async () => {
   // 武器の出どころは必ず出す。退避表で走っていることに気づかないまま
