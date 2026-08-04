@@ -1,0 +1,87 @@
+# push と PR のたびに、手元でやっているのと同じ検査を自動で走らせる。
+#
+# なぜ要るか: このリポジトリの検査(tools/check-*.mjs)は183項目あるが、
+# 走らせるのを忘れたら意味がない。忘れられない場所に置くのがCIの役目。
+#
+# 検査を1本ずつ別のステップに分けてあるのは、まとめて1ステップにすると
+# 最初に落ちた1本で止まって、残りが走らないため。
+# 分けておくと「どれが赤いか」が画面でそのまま見えるし、
+# 1回の実行で壊れている箇所を全部数えられる。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同じブランチに続けてpushした時、古い実行を打ち切る。
+# 3回続けてpushすると3回ぶん並ぶが、見たいのは最後の1回だけ
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    strategy:
+      # 片方が落ちてももう片方は最後まで走らせる。
+      # 「20だけ落ちた」のか「両方落ちた」のかで原因が変わる
+      fail-fast: false
+      matrix:
+        # 手元はv24だが、他の版で動くか一度も確かめていない。
+        # 20はこのリポジトリが動く下限として package.json の engines に書いた版、
+        # 22はその次の長期サポート版
+        node: [20, 22]
+
+    name: Node ${{ matrix.node }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          # package-lock.json を鍵にして依存のダウンロードを使い回す
+          cache: npm
+
+      # ci は install と違って package-lock.json の通りに正確に入れる。
+      # 手元と違う版が入って「CIだけ落ちる」を防ぐ
+      - name: 依存を入れる
+        run: npm ci
+
+      - name: 静的解析
+        run: npm run lint
+
+      # tools/check-*.mjs は import した物しか見ない。
+      # 読み込まれないファイル（src/world/level.js など）の構文の壊れは
+      # ここで拾う
+      - name: 構文チェック
+        run: |
+          fail=0
+          for f in $(find src server tools \( -name '*.js' -o -name '*.mjs' \)); do
+            node --input-type=module --check < "$f" || { echo "構文NG $f"; fail=1; }
+          done
+          exit $fail
+
+      - name: 検査 呼び先とHUDの部品
+        run: node tools/check-calls.mjs
+
+      - name: 検査 HUD
+        run: node tools/check-hud.mjs
+
+      - name: 検査 武器
+        run: node tools/check-weapons.mjs
+
+      - name: 検査 音が例外にならないか
+        run: node tools/check-audio.mjs
+
+      - name: 検査 音のノードが解放されるか
+        run: node tools/check-audio-leak.mjs
+
+      - name: 検査 音の質
+        run: node tools/check-sound.mjs
+
+      - name: 検査 包帯
+        run: node tools/check-heal.mjs
