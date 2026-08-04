@@ -1,5 +1,7 @@
 # BLACKOUT
 
+[![CI](https://github.com/Reiginal/fps/actions/workflows/ci.yml/badge.svg)](https://github.com/Reiginal/fps/actions/workflows/ci.yml)
+
 ThreeJSで作ったブラウザFPS。画像ファイルも音源ファイルも一切持たず、テクスチャと効果音を全部コードで生成している。
 
 ## 遊ぶ
