@@ -88,3 +88,6 @@ jobs:
 
       - name: 検査 包帯
         run: node tools/check-heal.mjs
+
+      - name: 検査 ロビー
+        run: node tools/check-lobby.mjs
