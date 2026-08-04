@@ -308,7 +308,7 @@ export class HUD {
    * @param name 倒した相手の名前。1人用は敵に名前が無いので空でよい
    * @param headshot 頭に当てて倒したか。色を青へ振って格を上げる
    */
-  elimX(name, headshot = false) {
+  elim(name, headshot = false) {
     const el = this.el.elim;
     if (!el) return;
 
