@@ -5,9 +5,9 @@
   "type": "module",
   "description": "ThreeJSで作るブラウザFPS。テクスチャも音も手続き的生成でアセットファイルなし",
   "scripts": {
-    "start": "node serve.mjs",
-    "dev": "node serve.mjs",
-    "server": "node server/index.js"
+    "start": "node server/index.js",
+    "check": "node tools/check-calls.mjs && node tools/check-hud.mjs && node tools/check-weapons.mjs && node tools/check-audio.mjs && node tools/check-audio-leak.mjs && node tools/check-sound.mjs && node tools/check-heal.mjs",
+    "sounds": "node tools/sound-lab.mjs"
   },
   "dependencies": {
     "three": "^0.185.1",

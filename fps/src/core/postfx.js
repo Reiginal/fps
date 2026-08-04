@@ -24,6 +24,14 @@ const aoDim = (w, h) => [
   Math.max(2, Math.round(h * AO_SCALE)),
 ];
 
+// ブルームの作業バッファの解像度。UnrealBloomPassは渡した寸法をさらに半分にしてから
+// ミップを積むので、実際の1段目はこの半分＝画面の1/4になる
+const BLOOM_SCALE = 0.5;
+const bloomDim = (w, h) => [
+  Math.max(4, Math.round(w * BLOOM_SCALE)),
+  Math.max(4, Math.round(h * BLOOM_SCALE)),
+];
+
 // 太陽のグレア(異方性ストリーク＋ゴッドレイ)を作る作業バッファの解像度。
 // にじみは元々低周波なので1/4で足りるし、ここが一番タップ数を食うので落としておく
 const GLARE_SCALE = 0.25;
@@ -39,7 +47,6 @@ const _sunView = new THREE.Vector3();
 const _camFwd = new THREE.Vector3();
 const _camPos = new THREE.Vector3();
 const _proj = new THREE.Vector3();
-const _clearCol = new THREE.Color();
 
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 
@@ -1278,9 +1285,15 @@ export function createComposer(renderer, scene, camera, viewScene, viewCamera) {
   // 絵をぼかす道具なのでなおさら拾えない。これ以上詰めるなら金網のようなアルファテスト
   // 材質側のalphaToCoverage(rtWorldがMSAAなので受け皿は出来ている)か時間方向の蓄積で、
   // どちらもこのファイルの外の話。
-  // 上限を4で切るのは、増やすとこのMSAAの1枚だけ帯域が本数ぶん増えるため。
-  // maxSamplesはハードウェア側の上限で、下回る環境ではそちらに合わせる
-  const samples = Math.min(4, renderer.capabilities.maxSamples || 0);
+  // 上限を2で切るのは、増やすとこのMSAAの1枚だけ帯域が本数ぶん増えるため。
+  // maxSamplesはハードウェア側の上限で、下回る環境ではそちらに合わせる。
+  //
+  // 4から2へ落とす。この1枚はHalfFloatなので、1画素あたり8バイト×本数を
+  // 毎フレーム書いて解決のblitで読み直す。描画面積のわりに一番帯域を食う場所で、
+  // ここだけで半分になる。上の実測どおり買えるのは輪郭の階調だけなので、
+  // 2本でも中間の被覆率は拾えるし、この後にFXAAも通る。
+  // 金網や手すりの線が硬く感じたら、まずここを4へ戻すのが一番効く
+  const samples = Math.min(2, renderer.capabilities.maxSamples || 0);
 
   // 世界を描く先。MSAAを効かせるのはここと武器のrtViewだけにする。
   // EffectComposerは渡したターゲットを複製してping-pongの2枚にするので、
@@ -1329,13 +1342,17 @@ export function createComposer(renderer, scene, camera, viewScene, viewCamera) {
     distanceExponent: 1.0,
     thickness: 1.0,
     scale: 1.0,
-    samples: 16,
+    // 16から8へ半分。解像度(AO_SCALE)のほうは触らない。
+    // 0.75を選んだのは「5cmの段差が5〜6画素残る」という拾える大きさの話で、
+    // ここを削ると出したかった接地の陰りそのものが消える。
+    // 一方タップ数は同じ陰りの滑らかさの話なので、削ってもデノイズが受け持つ
+    samples: 8,
     screenSpaceRadius: false,
   }, {
     // デノイズの半径はそのまま陰りのぼけ幅になる。5だと拾った接地の落ち込みを
     // また塗り潰してしまうので詰める
     lumaPhi: 10, depthPhi: 2, normalPhi: 3,
-    radius: 4, rings: 2, samples: 16, radiusExponent: 2,
+    radius: 4, rings: 2, samples: 8, radiusExponent: 2,
   });
   // 標準の合成(OUTPUT.Default)はハードウェアブレンドの乗算で、元の色を読めない。
   // 日向と日陰を見分けて掛け方を変えたいので、合成は自前のパスでやる。
@@ -1362,7 +1379,7 @@ export function createComposer(renderer, scene, camera, viewScene, viewCamera) {
   };
 
   // GTAOは法線バッファを作るのに renderer.render() をもう一度呼ぶ。そのままだと
-  // 2048pxの影マップまで毎フレーム二度焼きされるので、この間だけ影の更新を止める
+  // 影マップまで毎フレーム二度焼きされるので、この間だけ影の更新を止める
   const aoRender = ao.render.bind(ao);
   ao.render = (r, writeBuffer, readBuffer, dt, maskActive) => {
     const prev = r.shadowMap.autoUpdate;
@@ -1451,7 +1468,18 @@ export function createComposer(renderer, scene, camera, viewScene, viewCamera) {
   // strengthとradiusも切り詰める。閾値を上げても丸いにじみが太いままだと、
   // 太陽の手前を横切る鉄塔の水平梁がグレアに食われて途中で断線する。
   // 太陽を「明るい」と見せる仕事は、この後のSunGlarePassの光条とゴッドレイに移す
-  const bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.22, 0.45, 0.95);
+  //
+  // 作業バッファは画面の半分で作る。UnrealBloomPassは渡した寸法をさらに半分にした所から
+  // 5段のミップを積んで、その各段で横と縦に2回ずつぼかす。渡す寸法を半分にすると
+  // 鎖の全段が1/4の面積になる。滲みは元々低周波な上に強さ0.22・閾値0.95で
+  // 「自分で光っている物」しか通していないので、半分から積んでも画は変わらない
+  const bloom = new UnrealBloomPass(
+    new THREE.Vector2(...bloomDim(size.x, size.y)), 0.22, 0.45, 0.95,
+  );
+  // composerはCSS寸法×倍率で呼んでくるので、こちらでも同じ割合で受け直す。
+  // ここを繋がないと窓を動かした瞬間だけ元の解像度に戻る
+  const bloomSetSize = UnrealBloomPass.prototype.setSize.bind(bloom);
+  bloom.setSize = (w, h) => bloomSetSize(...bloomDim(w, h));
   composer.addPass(bloom);
 
   // 武器は別シーン。深度だけ消してから重ねるので、壁にめり込んでも銃が欠けない。

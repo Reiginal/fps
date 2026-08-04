@@ -4,8 +4,9 @@ import { buildMaterials, createSky, skyFogColor } from './world/textures.js';
 import { buildLevel } from './world/level.js';
 import { Effects } from './world/effects.js';
 import { Input } from './core/input.js';
-import { AudioEngine } from './core/audio.js';
+import { AudioEngine, KILL_RANGE } from './core/audio.js';
 import { createComposer } from './core/postfx.js';
+import { Capsule } from 'three/addons/math/Capsule.js';
 import { Player } from './player/player.js';
 import { WeaponSystem } from './player/weapons.js';
 import { Director } from './ai/enemy.js';
@@ -13,7 +14,9 @@ import { HUD } from './ui/hud.js';
 import { NetMenu, NET_MSG } from './ui/netmenu.js';
 import { NetClient } from './net/client.js';
 import { RemotePlayers } from './net/remote.js';
-import { K, KEY_CODES, S, EV, PART, MATCH, TICK_DT } from './net/protocol.js';
+import {
+  K, KEY_CODES, S, EV, PART, MATCH, TICK_DT, ZONE, NADE, HEAL, outsideZone,
+} from './net/protocol.js';
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
@@ -31,6 +34,29 @@ const SUN_DIR = new THREE.Vector3(-0.78, 0.46, -0.34).normalize();
 // ビューモデルのキーライトが必ず確保する向き（カメラ空間・右上手前）。
 // 太陽追従だけにすると背を向けた時に銃が真っ黒になるので、これへ寄せて下限を作る
 const VIEW_KEY_FIXED = new THREE.Vector3(0.45, 0.72, 0.52).normalize();
+
+/* -------------------------------------------------------------- 描画倍率 */
+
+// 1フレームで塗る画素数の上限。
+//
+// 以前はdevicePixelRatioを2で頭打ちにするだけだったが、これは窓の大きさを見ていない。
+// 4Kディスプレイを「1920x1080に見える」設定で使っていると、CSS上は1920x1080でも
+// 倍率2倍で3840x2160＝830万画素を毎フレーム塗ることになる。
+// この後のポストエフェクト（AO合成・ブルーム・グレード・FXAA・仕上げ）は
+// どれも画面全体を舐めるので、その面積が5〜6回ぶん効いてくる。
+// M1では間に合わずコマ落ちする。
+//
+// 210万画素（1920x1080相当）で頭打ちにする。窓が小さいうちは今まで通り2倍のまま
+// 描けるので、小窓でぼやけることはない
+const MAX_DRAW_PIXELS = 2.1e6;
+
+// CSS寸法から実際の描画倍率を出す。上限は今まで通り2倍、下限は0.75。
+// 下限を置くのは、極端に大きい窓で倍率が落ちすぎて照準もHUDも潰れるため
+function drawScale(w, h) {
+  const want = Math.min(devicePixelRatio, 2);
+  const fit = Math.sqrt(MAX_DRAW_PIXELS / Math.max(1, w * h));
+  return clamp(Math.min(want, fit), 0.75, want);
+}
 
 /* ------------------------------------------------------------------ 影 */
 
@@ -54,8 +80,11 @@ const SHADOW_BIAS_M = 0.0038;
 // ここを実寸で固定すると一番細かい枚で押し出しすぎて足元の接地影が丸ごと消える
 const SHADOW_NORMAL_BIAS_TEXELS = 1.24;
 
-// 影マップの横。縦は下のSHADOW_MAP_MINOR
-const SHADOW_MAP_SIZE = 2048;
+// 影マップの横。縦は下のSHADOW_MAP_MINOR。
+// 2048から1536へ落とす。影マップは下のCASCADESの枚数だけ毎フレーム焼き直すので、
+// ここの面積はそのまま枚数倍で効く。1536でも一番細かい枚のテクセルは1.8cmで、
+// 半影のカーネル上限（20テクセル）が36cmぶん取れるから縁のぼけ方は変わらない
+const SHADOW_MAP_SIZE = 1536;
 
 // 影マップの縦。正方にしない。カスケードの箱は太陽に正対しているので、
 // 縦（＝太陽の側から見た上下）1mは地面の上では 1/sin(仰角) = 2.1m に伸びる。
@@ -82,14 +111,20 @@ const SHADOW_MAX_TEXELS = 20;
 const SHADOW_BLOCKER_TAPS = 12;
 const SHADOW_PCF_TAPS = 16;
 
-// 太陽の影を距離で分割した3枚。radiusは箱の半径(m)。
+// 太陽の影を距離で分割した2枚。radiusは箱の半径(m)。
 // followはカメラに付いていくか、intervalは何フレームに1回焼き直すか。
-// 一番外の1枚は場全体を固定で覆う。動かさないので縁がちらつかず、
-// 中身もほとんど建物なので毎フレーム焼き直す必要がない
+// 外の1枚は場全体を固定で覆う。動かさないので縁がちらつかず、
+// 中身もほとんど建物なので毎フレーム焼き直す必要がない。
+//
+// 以前は12m/30m/90mの3枚で、うち2枚が毎フレーム焼き直しだった。
+// 影マップを1枚焼くのは「シーンの物を全部もう一度描く」ことなので、
+// 本番の描画と合わせるとシーンを毎フレーム3回描いていたことになる。
+// 近い1枚を12→16mへ広げて中間の枚を畳み、毎フレーム描くのを2回に減らす。
+// 外の枚は場内(±42m)を覆えば足りるので90→56mまで詰める。
+// 90mは場外の遠景ビルまで入れていた設定だが、あれは影を落とさない層なので要らなかった
 const CASCADES = [
-  { radius: 12, follow: true, interval: 1 },
-  { radius: 30, follow: true, interval: 1 },
-  { radius: 90, follow: false, interval: 3 },
+  { radius: 16, follow: true, interval: 1 },
+  { radius: 56, follow: false, interval: 3 },
 ];
 
 /**
@@ -237,6 +272,97 @@ ${src.slice(a, b)}
 ` + src.slice(b);
 }
 
+/* ---------------------------------------------------------- ミニマップ */
+
+// ミニマップの下敷きが覆うワールドの半径(m)。場内はbounds=40なので、
+// 外周の壁まで入る44mで焼いておく。対戦は描く時に中央だけを切り出して使う
+const MAP_EXTENT = 44;
+// 焼く解像度。168pxの枠へ最大でも2倍で貼るので、これ以上は見えない
+const MAP_PIXELS = 512;
+
+// 撃った人の点が消えるまでの秒数。銃声が聞こえている間だけ残る長さにする。
+// 長くすると常時レーダーに近づいて、待ち伏せも回り込みも成立しなくなる
+const BLIP_FADE_S = 2.2;
+
+// 投げる時に前方へ足す上向き成分。真っ直ぐ投げると足元へ落ちて自爆する
+const NADE_LOFT = 0.34;
+const _throwOrigin = new THREE.Vector3();
+const _throwDir = new THREE.Vector3();
+
+// 投げる先の弧を何点で描くか。0.045秒刻みなので40点で約1.8秒ぶん
+const ARC_STEPS = 40;
+const _arcPos = new THREE.Vector3();
+const _arcVel = new THREE.Vector3();
+const _arcPrev = new THREE.Vector3();
+const _arcStep = new THREE.Vector3();
+
+/**
+ * 地形を真上から1枚だけ焼いて、2Dキャンバスとして返す。
+ *
+ * 起動時に1回だけ走る。地形は動かないので、毎フレーム上から描き直す理由が無い
+ * （それをやると軽量化したぶんを自分で食い潰す）。
+ *
+ * ゲーム本編のシーンをそのまま使わず、真上からの平行投影の専用シーンへ
+ * 地形を一時的に移して焼く。本編のシーンには空・フォグ・夕方の斜光が入っていて、
+ * そのまま焼くと影が長く伸びて地図として読めない絵になる。
+ */
+function bakeMinimap(renderer, level, environment) {
+  const cam = new THREE.OrthographicCamera(
+    -MAP_EXTENT, MAP_EXTENT, MAP_EXTENT, -MAP_EXTENT, 0.1, 400,
+  );
+  cam.position.set(0, 200, 0);
+  // 真下を向く時、upが(0,1,0)のままだと向きが定まらない。
+  // (0,0,-1)にすると画面の右が+X・下が+Zになる（hud.js側の変換はこれ前提）
+  cam.up.set(0, 0, -1);
+  cam.lookAt(0, 0, 0);
+
+  const flat = new THREE.Scene();
+  flat.background = new THREE.Color(0x0b0e13);
+  // 真上からの平坦な照明。影を作らないので地形の形だけが出る
+  flat.add(new THREE.AmbientLight(0xffffff, 1.15));
+  const top = new THREE.DirectionalLight(0xffffff, 1.05);
+  top.position.set(0.25, 1, 0.35);
+  flat.add(top);
+  // 環境光を外すと金属が真っ黒に沈んで、コンテナや波板の棟が地図から消える
+  flat.environment = environment;
+  flat.environmentIntensity = 0.7;
+
+  const rt = new THREE.WebGLRenderTarget(MAP_PIXELS, MAP_PIXELS);
+  rt.texture.colorSpace = THREE.SRGBColorSpace;
+
+  // 地形を借りる。addは親から外して付け替えるので、焼き終わったら必ず戻す
+  const home = level.root.parent;
+  flat.add(level.root);
+
+  const prevTarget = renderer.getRenderTarget();
+  const prevShadow = renderer.shadowMap.autoUpdate;
+  renderer.shadowMap.autoUpdate = false;
+  renderer.setRenderTarget(rt);
+  renderer.clear();
+  renderer.render(flat, cam);
+  renderer.setRenderTarget(prevTarget);
+  renderer.shadowMap.autoUpdate = prevShadow;
+
+  const buf = new Uint8Array(MAP_PIXELS * MAP_PIXELS * 4);
+  renderer.readRenderTargetPixels(rt, 0, 0, MAP_PIXELS, MAP_PIXELS, buf);
+
+  if (home) home.add(level.root);
+  rt.dispose();
+
+  // WebGLは左下が原点、キャンバスは左上が原点なので行を逆に積む
+  const canvas = document.createElement('canvas');
+  canvas.width = MAP_PIXELS;
+  canvas.height = MAP_PIXELS;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(MAP_PIXELS, MAP_PIXELS);
+  const row = MAP_PIXELS * 4;
+  for (let y = 0; y < MAP_PIXELS; y++) {
+    img.data.set(buf.subarray((MAP_PIXELS - 1 - y) * row, (MAP_PIXELS - y) * row), y * row);
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas;
+}
+
 class Game {
   constructor() {
     this.state = 'loading';   // loading | menu | playing | paused | dead
@@ -290,7 +416,7 @@ class Game {
     const renderer = new THREE.WebGLRenderer({
       canvas, antialias: false, powerPreference: 'high-performance', stencil: false,
     });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setPixelRatio(drawScale(innerWidth, innerHeight));
     renderer.setSize(innerWidth, innerHeight);
     renderer.shadowMap.enabled = true;
     // 半影を自前で作るので、影マップは比較付きではなく素の深度で持つ。
@@ -370,7 +496,7 @@ class Game {
     // 直射と天空光の比。前回1.24倍しか無いと言われて4.6まで振ったら、今度は
     // 日陰が黒く潰れて中間調が消えた。比は保ちつつ、潰さない側へ戻す。
     // 大事なのは「日向/日陰の比」であって「直射の絶対値」ではない。
-    // 太陽そのものは1本だが、影だけは距離で分けた3枚に焼く。1枚で場内±46mを
+    // 太陽そのものは1本だが、影だけは距離で分けた2枚に焼く。1枚で場内±46mを
     // 覆っていた時はその外の物が影を落とさず、遠景だけ影の無い書き割りになっていた。
     // 近くは細かく・遠くは粗く分ければ、範囲と精度を両方取れる。
     // 明るさを載せるのはシェーダー側で1枚目だけ（installCascadedSoftShadow参照）
@@ -503,14 +629,41 @@ class Game {
     this.player.onFootstep = (i) => this.audio.footstep(i, this._footSurface());
     this.player.onLand = (i) => this.audio.land(Math.min(1, i * 1.4), this._footSurface());
     this.weapons.onShot = (s) => this._resolveShot(s);
+    this.weapons.onThrow = () => this._throwNade();
     this.weapons.onEject = (pos, dir) => this.effects.ejectCasing(pos, dir, camera);
     this.effects.onCasingLand = (pos) => this.audio.click(4200, 0.16, 0.05, pos, camera);
     this.director.onEnemyShoot = (...a) => this._enemyShot(...a);
     this.director.onEnemyDeath = (e) => this._onKill(e);
     this.director.onWaveStart = (n, count) => {
-      this.hud.banner(`第${n}波`, `敵 ${count}名 接近中`);
+      // 波が変わる時に体力を戻す。回復手段が1つも無いので、
+      // 1波で削られた分を抱えたまま次の波に入ることになり、
+      // 進むほど「前の波の削られ方」だけで生死が決まっていた。
+      // 全快にするのは、波の切れ目が唯一の立て直しどころだから
+      const healed = n > 1 && this.player.health < this.player.maxHealth;
+      if (healed) {
+        this.player.refill();
+        this.weapons.resetAll();
+      }
+      this.hud.banner(`第${n}波`, healed ? '体力と弾薬を補給した' : `敵 ${count}名 接近中`);
       this.audio.click(600, 0.4, 0.4);
     };
+
+    // ミニマップの下敷き。ここで1回だけ焼く。
+    // fxを作る前にやるのは、合成器が描画先を握った後だと
+    // レンダーターゲットの付け外しが噛み合わなくなるため
+    this.hud.setMinimap(bakeMinimap(renderer, level, scene.environment), MAP_EXTENT);
+    // 撃った人の点。idごとに1つだけ持つ（連射で点が積み上がらない）。
+    // tは1から0へ落ちる残り具合で、そのまま濃さになる
+    this._blips = new Map();
+    this._blipList = [];
+    // 飛んでいる手榴弾の見た目。gidで引く
+    this._nadeMeshes = new Map();
+    // ソロで飛んでいる手榴弾。サーバーがいないので手元で持つ
+    this._soloNades = [];
+    this._soloNadeId = 1;
+    // 毎フレーム作り直さないための入れ物
+    this._mapMe = { x: 0, z: 0, yaw: 0 };
+    this._outsideFor = 0;
 
     setLoad(92, 'シェーダーを準備中');
     await frame();
@@ -552,6 +705,20 @@ class Game {
       this._wakeAudio();
       this._joinMatch(opt);
     };
+    // キル音の聴き比べ。dirが0なら今の候補をもう一度鳴らすだけ。
+    // 音を起こすのはここでもやる。この画面のボタンが最初の操作になり得るので、
+    // 起こさずに鳴らそうとしても無音のまま何も分からない
+    menu.onKillSound = (dir) => {
+      this._wakeAudio();
+      return this.audio.cycleKillSound(dir);
+    };
+    // つまみ。作った側が音を聴けないので、聴ける側が直接回せるようにしてある
+    menu.onKillTweak = (key, value) => {
+      this._wakeAudio();
+      return this.audio.tweakKillSound(key, value);
+    };
+    menu.buildKillKnobs(KILL_RANGE);
+    menu.setKillSound(this.audio.killSoundInfo());
     menu.show();
   }
 
@@ -630,7 +797,7 @@ class Game {
   }
 
   _onMatchEnd({ rows, why }) {
-    this.hud.matchEnd(rows, true, why === 'time' ? '時間切れ' : '規定得点に到達');
+    this.hud.matchEnd(rows, true, `${MATCH.ROUND_WINS}本先取で決着`);
     // 次の試合が始まったら畳む。サーバーはINTERMISSION後に0点を配って再開する。
     // 前のタイマーが残っていると、続けて2試合終わった時に早い方が新しい順位を消す
     clearTimeout(this._endTimer);
@@ -719,13 +886,15 @@ class Game {
     this.score = 0; this.kills = 0; this.headshots = 0;
     this.shotsFired = 0; this.shotsHit = 0;
     this.damageFlash = 0;
-    this.player.health = this.player.maxHealth;
-    this.player.alive = true;
+    this.player.refill();
     this.player.yaw = 0; this.player.pitch = 0;
     this.player.teleport(this.level.playerSpawn);
     this.weapons.resetAll();
     this.director.reset();
     this.effects.clear();
+    // 前の試合で空中に残っていた玉を消す。残すと次の開始直後に爆発する
+    for (const g of this._soloNades) this._dropNade(g.gid);
+    this._soloNades.length = 0;
     this.hud.score(0);
     this.state = 'menu';
   }
@@ -736,12 +905,15 @@ class Game {
     this.camera.updateProjectionMatrix();
     this.viewCamera.aspect = w / h;
     this.viewCamera.updateProjectionMatrix();
+    // 倍率は窓の大きさで決まるので、寸法を入れる前に取り直す。
+    // 順番が逆だと合成器のバッファだけ古い倍率で作られて画がずれる
+    this.renderer.setPixelRatio(drawScale(w, h));
     this.renderer.setSize(w, h);
     this.fx.setSize(w, h);
     this.effects.setPixelScale(this.renderer.getDrawingBufferSize(new THREE.Vector2()).y);
   }
 
-  /* 太陽の3枚を置き直す。近い2枚はカメラに付いていくので毎フレーム動かす */
+  /* 太陽の2枚を置き直す。近い1枚はカメラに付いていくので毎フレーム動かす */
   _updateSunCascades() {
     const center = this._sunCenter;
     for (const c of this.cascades) {
@@ -817,7 +989,8 @@ class Game {
       if (h && h.distance <= def.range && (!enemyHit || h.distance < enemyHit.distance)) enemyHit = h;
     }
 
-    const drawTracer = pellet % 3 === 0;
+    // 近接は弾を飛ばさないので曳光弾も出さない（刃を振るたびに弾が飛んで見えていた）
+    const drawTracer = !def.melee && pellet % 3 === 0;
 
     if (enemyHit && (!worldHit || enemyHit.distance < worldHit.distance)) {
       const d = enemyHit.distance;
@@ -831,6 +1004,9 @@ class Game {
       if (pellet === 0) this.shotsHit++;
 
       this.effects.impact(enemyHit.point, dir.clone().negate(), 'flesh');
+      // 近接は刃が入る音を足す。弾が当たった時と同じ音だと、
+      // 撃ったのか斬ったのかが耳から判別できない
+      if (def.melee) this.audio.stab(enemyHit.point, this.camera, true);
       this.hud.hitmarker(head);
       this.audio.hitmarker(head);
       if (killed) {
@@ -843,8 +1019,16 @@ class Game {
         ? worldHit.face.normal.clone().transformDirection(worldHit.object.matrixWorld)
         : dir.clone().negate();
       const kind = this.kindOf.get(worldHit.object.material) ?? 'concrete';
-      this.effects.impact(worldHit.point, normal, kind);
-      this.audio.impact(kind, worldHit.point, this.camera);
+      // 近接は弾ではない。壁を刃で擦っても火花は散らないし着弾痕も残らない。
+      // ここを素通ししていたせいで、ナイフを振るたびに銃の着弾と同じ
+      // 火花・粉塵・弾痕が壁に出ていた
+      if (!def.melee) {
+        this.effects.impact(worldHit.point, normal, kind);
+        this.audio.impact(kind, worldHit.point, this.camera);
+      } else {
+        // 火花は出さないが、当たった手応えは要る。刃が突き当たって止まる鈍い音
+        this.audio.stab(worldHit.point, this.camera, false);
+      }
       if (drawTracer) this.effects.tracer(muzzle, worldHit.point, 0.03);
     } else if (drawTracer) {
       const far = origin.clone().addScaledVector(dir, def.range);
@@ -862,7 +1046,8 @@ class Game {
 
     this.net.sendShot(origin, dir);
 
-    const drawTracer = pellet % 3 === 0;
+    // 近接は弾を飛ばさないので曳光弾も出さない（刃を振るたびに弾が飛んで見えていた）
+    const drawTracer = !def.melee && pellet % 3 === 0;
     this.raycaster.set(origin, dir);
     this.raycaster.far = def.range;
     const hits = this.raycaster.intersectObjects(this.solidMeshes, false);
@@ -884,8 +1069,13 @@ class Game {
         ? h.face.normal.clone().transformDirection(h.object.matrixWorld)
         : dir.clone().negate();
       const kind = this.kindOf.get(h.object.material) ?? 'concrete';
-      this.effects.impact(h.point, normal, kind);
-      this.audio.impact(kind, h.point, this.camera);
+      // 対戦側も同じ。近接では火花も着弾痕も出さない
+      if (!def.melee) {
+        this.effects.impact(h.point, normal, kind);
+        this.audio.impact(kind, h.point, this.camera);
+      } else {
+        this.audio.stab(h.point, this.camera, false);
+      }
       if (drawTracer) this.effects.tracer(muzzle, h.point, 0.03);
     } else if (drawTracer) {
       this.effects.tracer(muzzle, origin.clone().addScaledVector(dir, def.range), 0.025);
@@ -918,9 +1108,12 @@ class Game {
   _enemyShot(enemy, muzzle, dir, damage, dist) {
     this.effects.muzzle(muzzle, dir);
     this.audio.gunshot(
-      { volume: 0.34, bodyFreq: 560, crackFreq: 3200, bodyDecay: 0.12, tailDecay: 0.4 },
+      { volume: 0.62, bodyFreq: 360, crackFreq: 3000, bodyDecay: 0.17, tailDecay: 0.30, thumpFrom: 105, thumpTo: 42 },
       muzzle, this.camera,
     );
+    // 対戦と同じ扱いで、撃った敵だけミニマップに一瞬出す。
+    // 敵はidを持たないのでオブジェクトそのものを鍵にする
+    this._markBlip(enemy, muzzle);
 
     const player = this.player;
     const playerEye = new THREE.Vector3(
@@ -971,7 +1164,7 @@ class Game {
       if (!player.alive) {
         this.state = 'dead';
         document.exitPointerLock?.();
-        setTimeout(() => this._showDeath(), 700);
+        setTimeout(() => this._showDeath(), 260);
       }
     } else {
       // 外れ弾が耳元を掠める音。これが無いと「撃たれている怖さ」が出ない。
@@ -1003,7 +1196,9 @@ class Game {
     this.kills++;
     // 倒れた場所に血だまりを残す。死体が消えた後も戦闘の痕跡が残る
     this.effects.bloodPool(enemy.collider.start);
-    const head = enemy._killHeadshot;
+    const head = !!enemy._killHeadshot;
+    this.audio.kill(head);
+    this.hud.elim('敵兵', head);
     if (head) this.headshots++;
     const bonus = head ? 250 : 100;
     this.score += bonus;
@@ -1042,9 +1237,12 @@ class Game {
         if (t - (this._lastFireAt.get(ev.id) || 0) < 30) break;
         this._lastFireAt.set(ev.id, t);
         this.audio.gunshot(
-          { volume: 0.34, bodyFreq: 560, crackFreq: 3200, bodyDecay: 0.12, tailDecay: 0.4 },
+          { volume: 0.62, bodyFreq: 360, crackFreq: 3000, bodyDecay: 0.17, tailDecay: 0.30, thumpFrom: 105, thumpTo: 42 },
           r.headPos, this.camera,
         );
+        // 撃った所をミニマップに出す。音で位置が割れるのと同じことを画でも見せる。
+        // 銃声をまとめる判定の後に置く。前に置くと散弾1発ごとに書き直すことになる
+        this._markBlip(ev.id, r.headPos);
         break;
       }
 
@@ -1069,15 +1267,52 @@ class Game {
       }
 
       case EV.KILL: {
+        // 戦域の外で力尽きた回はbyに本人が入っている。倒した人がいないので、
+        // 普通の撃破と同じ行にすると「Xを倒したのはX」という行が流れる
+        // 1対1のラウンド制なので、誰かが倒れた時点でそのラウンドは決まる。
+        // 「戦死」だけ出すと、それで1本落としたのかどうかが画面から読めない
+        if (ev.z || ev.f) {
+          const why = ev.z ? '戦域の外' : '落下';
+          this.hud.kill(`${net.nameOf(ev.id)}が${why}で力尽きた`, false);
+          this.hud.banner(
+            ev.id === me ? 'ラウンドを落とした' : 'ラウンド取得',
+            ev.id === me ? `${why}で力尽きた` : `相手が${why}で力尽きた`, 1.8,
+          );
+          break;
+        }
         const head = !!ev.head;
         this.hud.killVersus(net.nameOf(ev.by), net.nameOf(ev.id), head, ev.by === me, ev.id === me);
         if (ev.by === me && ev.id !== me) {
           this.kills++;
           if (head) this.headshots++;
           this.audio.death(this.remotes?.get(ev.id)?.headPos ?? this.camera.position, this.camera);
+          // 倒れる音（相手の場所で鳴る環境音）とは別に、倒した知らせを耳元で鳴らす
+          this.audio.kill(head);
+          this.hud.elim(net.nameOf(ev.id), head);
+          this.hud.banner('ラウンド取得', '', 1.8);
         }
         if (ev.id === me) {
-          this.hud.banner('戦死', `${net.nameOf(ev.by)}に倒された`, 2.0);
+          this.hud.banner('ラウンドを落とした', `${net.nameOf(ev.by)}に倒された`, 1.8);
+        }
+        break;
+      }
+
+      case EV.NADE:
+        if (Array.isArray(ev.p)) this._syncNade(ev.gid, ev.p);
+        break;
+
+      case EV.BOOM: {
+        this._dropNade(ev.gid);
+        if (!this._vecOf(this._evPos, ev.p)) break;
+        this.effects.explosion?.(this._evPos);
+        this.audio.explosion?.(this._evPos, this.camera);
+        // 近いほど画面を揺らす。爆風の判定はサーバーが持つので、
+        // ここで揺らす量は「見えた距離」だけで決めてよい
+        const d = this._evPos.distanceTo(this.camera.position);
+        const k = Math.max(0, 1 - d / NADE.BLAST_R);
+        if (k > 0) {
+          this.player.addRecoil(0.05 * k, (Math.random() - 0.5) * 0.06 * k);
+          this.damageFlash = Math.min(0.5, this.damageFlash + 0.18 * k);
         }
         break;
       }
@@ -1089,8 +1324,9 @@ class Game {
         this.player.teleport(this._evPos);
         this.player.yaw = Number.isFinite(ev.yaw) ? ev.yaw : 0;
         this.player.pitch = 0;
-        this.player.alive = true;
-        this.player.health = this.player.maxHealth;
+        // 包帯もここで戻す。サーバーは湧き直しで2本に戻しているので、
+        // 手元だけ0のままだとFを押しても手元が断って、一生使えなくなる
+        this.player.refill();
         this.weapons.resetAll();
         this.damageFlash = 0;
         this.net.resetPrediction?.();
@@ -1144,6 +1380,10 @@ class Game {
     list.length = 0;
     for (const st of states) {
       if (st.state & S.DEAD) continue;
+      // 名札は撃った直後だけ出す。常時出していると、遮蔽の陰から動く名前が
+      // 先に見えて奇襲が一切成立しない（壁の裏の相手の居場所まで分かってしまう）。
+      // ミニマップの点と同じ_blipsを見るので、画で光る条件と名前が出る条件が揃う
+      if (!this._blips.has(st.id)) continue;
       const r = this.remotes?.get(st.id);
       if (!r) continue;
       this._toRemote.subVectors(r.headPos, cam.position);
@@ -1163,6 +1403,8 @@ class Game {
         name: this.net.nameOf(st.id),
         hp: st.hp,
         dist,
+        // 発砲からの残り具合。点と同じ速さで消えていく
+        fade: this._blips.get(st.id).t,
       });
     }
     this.hud.nameplates(list);
@@ -1189,8 +1431,16 @@ class Game {
     let bits = 0;
     if (player.alive) {
       for (const [code, bit] of KEY_CODES) if (input.down(code)) bits |= bit;
-      if (input.buttons[0]) bits |= K.FIRE;
-      if (input.buttons[2]) bits |= K.ADS;
+      // 包帯は「巻いている間ずっと」立てる。Fの押し下げを送っていた時の名残で
+      // ここをキーから引くと、手に持っただけでサーバー側の回復が始まる。
+      // healHoldのぶん余分に立て続けるのは、向こうが遅れて巻き終わるため
+      if (player.healing > 0 || player.healHold > 0) bits |= K.HEAL;
+      // 包帯を持っている間は撃たない。持ったまま左クリックすると
+      // こちらでは巻き始めるだけなのに、サーバーには発砲として届く
+      if (input.buttons[0] && !this.weapons.bandageOut && player.healing <= 0) bits |= K.FIRE;
+      // 覗いているかは武器側が持つ入り切りの状態を見る。ボタンの押し下げを送ると、
+      // トグルなのに「押した瞬間だけ覗いた」という入力がサーバーへ流れる
+      if (this.weapons.wantAds) bits |= K.ADS;
     }
 
     this._acc += dt;
@@ -1229,7 +1479,16 @@ class Game {
 
     this.effects.update(dt, this.camera);
     this._commonHud(dt);
-    this.hud.matchInfo(me ? (net.players.get(net.id)?.kills | 0) : 0, MATCH.SCORE_LIMIT, net.timeLeft);
+    // 1対1なので、自分以外の1人がそのまま相手。まだ来ていなければ0-0で出す
+    // players は id をキーにしたMapで、行そのものにidは入っていない
+    let mine = 0;
+    let theirs = 0;
+    for (const [id, r] of net.players) {
+      if (id === net.id) mine = r.rounds | 0;
+      else theirs = r.rounds | 0;
+    }
+    this.hud.matchInfo(mine, theirs, MATCH.ROUND_WINS, net.phase, net.timeLeft);
+    this.hud.roster(net.scoreRows());
     this.hud.scoreboard(net.scoreRows(), input.down('Tab'));
     this.hud.netStatus(net.ping > 220 ? `回線が不安定です (${Math.round(net.ping)}ms)` : '');
     input.endFrame();
@@ -1253,8 +1512,266 @@ class Game {
 
     const w = this.weapons.current;
     this.hud.health(this.player.health, this.player.maxHealth);
-    this.hud.ammo(w.ammo, w.reserve, w.def.name, this.weapons.index, this.weapons.reloading);
+    this.hud.ammo(w.ammo, w.reserve, w.def.name, this.weapons.index, this.weapons.reloading, !!w.def.melee);
+    this.hud.bandage(
+      this.player.bandages, this.player.healing, HEAL.TIME_S,
+      this.weapons.bandageOut, HEAL.PER_ROUND,
+    );
+    this._minimapFrame(dt);
+    this._updateNadeArc();
     this.hud.update(dt);
+  }
+
+  /**
+   * 手榴弾を投げる。向きだけ送って、飛翔も爆発もサーバーに任せる。
+   * 手元で軌道を予測して描くこともできるが、それをやると
+   * 「自分の画面では壁を越えたのにサーバーでは越えていない」がそのまま見えてしまう。
+   * サーバーから届く位置だけを描くほうが、遅れても嘘をつかない
+   */
+  _throwNade() {
+    // ソロにはサーバーがいないので、手元で1つ飛ばして自分で爆発まで面倒を見る。
+    // 対戦と同じNADEの値を使うので、飛び方と爆風の広さは両モードで揃う
+    if (this.mode !== 'versus') { this._throwNadeSolo(); return; }
+    if (!this.net) return;
+    const cam = this.camera;
+    _throwOrigin.setFromMatrixPosition(cam.matrixWorld);
+    // 真っ直ぐ前ではなく少し上へ。水平に投げると足元へ落ちて自爆する
+    _throwDir.set(0, 0, -1).applyQuaternion(cam.quaternion);
+    _throwDir.y += NADE_LOFT;
+    _throwDir.normalize();
+    this.net.sendThrow(_throwOrigin, _throwDir);
+  }
+
+  /**
+   * 手榴弾を持っている間だけ、飛ぶ先の弧を出す。
+   *
+   * 投げてみるまでどこへ落ちるか分からないのは、弧を描く物では致命的に不便。
+   * サーバーと同じ初速・重力で先読みして、地形に当たった所で切る。
+   * 当たり判定はカプセルではなくレイで代用する（見せる線なので、
+   * 数cmの差はどうせ描き分けられない）
+   */
+  _updateNadeArc() {
+    const show = this.state === 'playing' && this.player.alive
+      && !!this.weapons.def.thrown;
+    if (!show) {
+      if (this._arc) this._arc.visible = false;
+      return;
+    }
+    if (!this._arc) {
+      this._arc = new THREE.Line(
+        new THREE.BufferGeometry().setAttribute(
+          'position', new THREE.BufferAttribute(new Float32Array(ARC_STEPS * 3), 3),
+        ),
+        new THREE.LineDashedMaterial({
+          color: 0x63d2ff, transparent: true, opacity: 0.5,
+          dashSize: 0.22, gapSize: 0.16, depthTest: false,
+        }),
+      );
+      this._arc.renderOrder = 900;
+      this._arc.frustumCulled = false;
+      this.scene.add(this._arc);
+    }
+    this._arc.visible = true;
+
+    const cam = this.camera;
+    _throwOrigin.setFromMatrixPosition(cam.matrixWorld);
+    _throwDir.set(0, 0, -1).applyQuaternion(cam.quaternion);
+    _throwDir.y += NADE_LOFT;
+    _throwDir.normalize();
+
+    const pos = _arcPos.copy(_throwOrigin).addScaledVector(_throwDir, NADE.MUZZLE);
+    const vel = _arcVel.copy(_throwDir).multiplyScalar(NADE.SPEED);
+    const arr = this._arc.geometry.attributes.position.array;
+    const dt = 0.045;
+    let n = 0;
+    for (let i = 0; i < ARC_STEPS; i++) {
+      arr[n++] = pos.x; arr[n++] = pos.y; arr[n++] = pos.z;
+      _arcPrev.copy(pos);
+      vel.y -= NADE.GRAVITY * dt;
+      pos.addScaledVector(vel, dt);
+      // 地形に当たったらそこで打ち切る。残りの点は最後の位置で潰す
+      _arcStep.subVectors(pos, _arcPrev);
+      const len = _arcStep.length();
+      if (len > 1e-4) {
+        this.raycaster.set(_arcPrev, _arcStep.divideScalar(len));
+        this.raycaster.far = len;
+        const hit = this.raycaster.intersectObjects(this.solidMeshes, false);
+        if (hit.length) {
+          pos.copy(hit[0].point);
+          for (let k = i + 1; k < ARC_STEPS; k++) {
+            arr[n++] = pos.x; arr[n++] = pos.y; arr[n++] = pos.z;
+          }
+          break;
+        }
+      }
+    }
+    this._arc.geometry.attributes.position.needsUpdate = true;
+    this._arc.computeLineDistances();
+  }
+
+  /** ソロの手榴弾。判定を持つ相手がいないので、飛翔も爆発もここで完結させる */
+  _throwNadeSolo() {
+    const cam = this.camera;
+    _throwOrigin.setFromMatrixPosition(cam.matrixWorld);
+    _throwDir.set(0, 0, -1).applyQuaternion(cam.quaternion);
+    _throwDir.y += NADE_LOFT;
+    _throwDir.normalize();
+
+    const gid = this._soloNadeId++;
+    this._soloNades.push({
+      gid,
+      pos: _throwOrigin.clone().addScaledVector(_throwDir, NADE.MUZZLE),
+      vel: _throwDir.clone().multiplyScalar(NADE.SPEED),
+      fuse: NADE.FUSE_S,
+      cap: new Capsule(new THREE.Vector3(), new THREE.Vector3(), NADE.RADIUS),
+    });
+  }
+
+  /**
+   * ソロの手榴弾を1フレーム進める。
+   * 跳ね返りの割り方はサーバー側(_stepNades)と同じ。初速20m/sだと1フレームで
+   * 0.33m進むのに玉の半径は0.075mしかなく、割らずに動かすと床をすり抜ける
+   */
+  _stepSoloNades(dt) {
+    const list = this._soloNades;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const g = list[i];
+      g.fuse -= dt;
+      g.vel.y -= NADE.GRAVITY * dt;
+
+      const steps = Math.min(8, Math.max(1, Math.ceil((g.vel.length() * dt) / (NADE.RADIUS * 0.5))));
+      const h = dt / steps;
+      let dead = false;
+      for (let s = 0; s < steps; s++) {
+        g.pos.addScaledVector(g.vel, h);
+        if (g.pos.y < -30) { dead = true; break; }
+        g.cap.start.copy(g.pos);
+        g.cap.end.copy(g.pos);
+        const hit = this.level.octree.capsuleIntersect(g.cap);
+        if (!hit) continue;
+        g.pos.addScaledVector(hit.normal, hit.depth);
+        const into = g.vel.dot(hit.normal);
+        if (into < 0) g.vel.addScaledVector(hit.normal, -into * (1 + NADE.BOUNCE));
+        const k = Math.max(0, 1 - NADE.FRICTION * h);
+        g.vel.x *= k; g.vel.z *= k;
+        if (hit.normal.y > 0.5) g.vel.y *= k;
+      }
+
+      if (dead || g.fuse <= 0) {
+        if (!dead) this._explodeSolo(g.pos);
+        this._dropNade(g.gid);
+        list.splice(i, 1);
+        continue;
+      }
+      this._syncNade(g.gid, [g.pos.x, g.pos.y, g.pos.z]);
+    }
+  }
+
+  /** ソロの爆発。敵と自分の両方に入る（足元に落とせば自爆する） */
+  _explodeSolo(pos) {
+    this.effects.explosion(pos);
+    this.audio.explosion(pos, this.camera);
+
+    for (const e of this.director.active) {
+      if (!e.alive) continue;
+      const p = e.collider.start;
+      _throwOrigin.set(p.x, p.y + 0.5, p.z);
+      const d = _throwOrigin.distanceTo(pos);
+      if (d > NADE.BLAST_R) continue;
+      // 爆心から胸へレイを飛ばして、遮る物があれば入らない
+      _throwDir.subVectors(_throwOrigin, pos);
+      const len = _throwDir.length() || 1;
+      _throwDir.divideScalar(len);
+      this.raycaster.set(pos, _throwDir);
+      this.raycaster.far = len;
+      if (this.raycaster.intersectObjects(this.solidMeshes, false).length) continue;
+
+      const dmg = Math.max(NADE.MIN_DMG, NADE.BLAST_DMG * (1 - d / NADE.BLAST_R));
+      if (e.hit(dmg, 'chest')) this._onKill(e);
+    }
+
+    // 自分も巻き込まれる
+    const me = this.player.collider.start;
+    const dm = Math.hypot(me.x - pos.x, me.y + 0.5 - pos.y, me.z - pos.z);
+    if (dm <= NADE.BLAST_R && this.player.alive) {
+      this.player.damage(Math.max(NADE.MIN_DMG, NADE.BLAST_DMG * (1 - dm / NADE.BLAST_R)));
+      this.damageFlash = Math.min(0.6, this.damageFlash + 0.4);
+      if (!this.player.alive) {
+        this.state = 'dead';
+        document.exitPointerLock?.();
+        setTimeout(() => this._showDeath(), 260);
+      }
+    }
+  }
+
+  /** 飛んでいる手榴弾を描く。サーバーから届いた位置に玉を置くだけ */
+  _syncNade(gid, p) {
+    let m = this._nadeMeshes.get(gid);
+    if (!m) {
+      m = new THREE.Mesh(
+        new THREE.SphereGeometry(NADE.RADIUS, 10, 8),
+        new THREE.MeshStandardMaterial({ color: 0x2a2e26, roughness: 0.7, metalness: 0.3 }),
+      );
+      this.scene.add(m);
+      this._nadeMeshes.set(gid, m);
+    }
+    m.position.set(p[0], p[1], p[2]);
+    // 届かなくなった玉を片付けるための最終受信時刻
+    m.userData.at = performance.now();
+  }
+
+  /** 爆発したか、位置が届かなくなった玉を消す */
+  _dropNade(gid) {
+    const m = this._nadeMeshes.get(gid);
+    if (!m) return;
+    this.scene.remove(m);
+    m.geometry.dispose();
+    m.material.dispose();
+    this._nadeMeshes.delete(gid);
+  }
+
+  /** 撃った人をミニマップに出す。同じ人の点は上書きして増やさない */
+  _markBlip(id, pos) {
+    const b = this._blips.get(id);
+    if (b) { b.x = pos.x; b.z = pos.z; b.t = 1; return; }
+    this._blips.set(id, { x: pos.x, z: pos.z, t: 1 });
+  }
+
+  /* ミニマップと、戦闘範囲の外の警告。1人用と対戦で共通 */
+  _minimapFrame(dt) {
+    // 撃った点を時間で薄くする。消えた物はその場で捨てる。
+    // 残したままにすると、試合が長引くほど描く点が増え続ける
+    this._blipList.length = 0;
+    for (const [id, b] of this._blips) {
+      b.t -= dt / BLIP_FADE_S;
+      if (b.t <= 0) this._blips.delete(id);
+      else this._blipList.push(b);
+    }
+
+    const p = this.player.collider.start;
+    const versus = this.mode === 'versus';
+    this._mapMe.x = p.x;
+    this._mapMe.z = p.z;
+    this._mapMe.yaw = this.player.yaw;
+    this.hud.minimap(
+      this._mapMe,
+      this._blipList,
+      versus ? ZONE.RADIUS : 0,
+      // 対戦は戦う範囲の少し外まで。ソロは場内全域
+      versus ? ZONE.RADIUS + 4 : MAP_EXTENT,
+    );
+
+    // 範囲外の警告。判定はサーバーが持つが、表示は自分の位置から出す。
+    // サーバーの返事を待つと、警告が出た時にはもう削られている
+    if (!versus || !this.player.alive) { this.hud.zoneWarn(false); return; }
+    if (!outsideZone(p.x, p.z)) {
+      this._outsideFor = 0;
+      this.hud.zoneWarn(false);
+      return;
+    }
+    this._outsideFor += dt;
+    const left = ZONE.GRACE_S - this._outsideFor;
+    this.hud.zoneWarn(true, left > 0 ? `${Math.ceil(left)}秒で削られる` : '中央へ戻れ');
   }
 
   /* ------------------------------------------------------- ループ */
@@ -1275,11 +1792,30 @@ class Game {
       // 対戦では倒れている間の操作を受け付けない。復帰待ちの3秒に装填や持ち替えを
       // 通すと、湧いた瞬間の弾数がサーバーと食い違う
       const canAct = this.mode !== 'versus' || this.player.alive;
+      // 包帯はFで手に持つだけ。巻き始めるのは左クリックで、そちらはweapons側が見る。
+      // 押した瞬間に巻き始める形をやめたのは、巻いている2.4秒は移動が半分以下に
+      // 落ちるので、指が滑って始まった時の代償が大きすぎるため
+      if (canAct && input.pressed('KeyF')) {
+        const out = this.weapons.toggleBandage(this.player);
+        this.audio.click(out ? 1400 : 1000, 0.28, 0.05);
+      }
       if (canAct && input.pressed('KeyR')) {
         if (this.weapons.reload()) this.audio.reload(this.weapons.def.reloadTime);
       }
-      for (let i = 0; canAct && i < 3; i++) {
+      // キル音の聴き比べ。Kで次の候補へ回して、その場で1回鳴らす。
+      // 倒さないと聴けないと比べようがないので、ここで鳴らせるようにしてある。
+      // 死んでいる間も操作を通すのは、比べるだけなら試合に影響しないため
+      if (input.pressed('KeyK')) {
+        const s = this.audio.cycleKillSound(1);
+        this.hud.banner(`キル音 ${s.index + 1} / ${s.total}`, `${s.name} ／ ${s.note} ／ Kで次へ`, 1.8);
+      }
+      // 武器の数だけ回す。3で固定していたので、4本目を足しても持ち替えられなかった
+      for (let i = 0; canAct && i < this.weapons.weapons.length && i < 9; i++) {
         if (!input.pressed(`Digit${i + 1}`)) continue;
+        // 包帯を持ったまま武器を選んだらしまう。巻いている最中なら中断する。
+        // 数字を押した時点で「戦う」と決めているので、包帯より武器を優先する
+        this.player.cancelHeal();
+        this.weapons.holsterBandage();
         if (this.weapons.switchTo(i) && this.mode === 'versus') this.net?.sendWeapon(i);
       }
 
@@ -1298,7 +1834,16 @@ class Game {
         // 両方のupdateが終わってから姿勢を決め直して1フレームに揃える。
         // weapons側が書き込むplayer.adsFactorの遅れも同時に消える
         this.player._applyCamera();
+        // 落下や自爆で死んだ時にもリザルトへ行く。
+        // 以前は「敵に撃たれた」経路にしか死亡の受け口が無く、高い所から落ちて
+        // 体力が0になっても操作だけ効かないまま画面が動き続けていた
+        if (!this.player.alive && this.state === 'playing') {
+          this.state = 'dead';
+          document.exitPointerLock?.();
+          setTimeout(() => this._showDeath(), 260);
+        }
         this.director.update(dt, this.player, {});
+        this._stepSoloNades(dt);
         this.effects.update(dt, this.camera);
 
         // 走ると視野を少し広げる。速度感が出る

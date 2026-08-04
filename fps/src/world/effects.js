@@ -1061,11 +1061,6 @@ export class Effects {
     this._camPos = new THREE.Vector3();
   }
 
-  /** 粒の陰影に使う太陽の向き（ワールド、太陽へ向かう単位ベクトル） */
-  setSun(dir) {
-    this.sunDir.copy(dir).normalize();
-  }
-
   setPixelScale(height) {
     const s = height * 0.55;
     for (const g of [this.sparks, this.smoke, this.debris]) {
@@ -1325,6 +1320,54 @@ export class Effects {
    * 死体の下に広がる血だまり。腰のワールド位置から真下へ落とす。
    * 弾痕に押し出されない予約スロットを使い、1.5秒かけてじわりと広がる
    */
+  /**
+   * 爆発。閃光・火の粉・煙の3層で作る。
+   * 判定はサーバーが持っているので、ここは見た目だけを受け持つ。
+   * 位置は爆心（サーバーが決めた座標）で、半径は演出上の見かけの大きさ
+   */
+  explosion(pos, radius = 9.5) {
+    const rand = (s) => (Math.random() - 0.5) * s;
+
+    // (1) 閃光。1フレームだけ大きく白く光る。爆発の「瞬間」はこれで決まる
+    this.sparks.spawn({
+      x: pos.x, y: pos.y, z: pos.z, vx: 0, vy: 0, vz: 0,
+      r: 6.0, g: 4.4, b: 2.2, r1: 3.0, g1: 1.2, b1: 0.2,
+      size0: radius * 0.55, size1: radius * 0.2,
+      life: 0.07 + Math.random() * 0.04, fade: FADE_FLASH,
+    });
+
+    // (2) 火の粉。全方向へ飛ばす。上に偏らせると「吹き上がる」に見える
+    for (let i = 0; i < 70; i++) {
+      const sp = 6 + Math.random() * 16;
+      const ux = rand(2), uy = Math.random() * 1.6 - 0.2, uz = rand(2);
+      const l = Math.hypot(ux, uy, uz) || 1;
+      this.sparks.spawn({
+        x: pos.x, y: pos.y, z: pos.z,
+        vx: (ux / l) * sp, vy: (uy / l) * sp + 2, vz: (uz / l) * sp,
+        r: 3.4, g: 1.9 + Math.random() * 0.6, b: 0.4,
+        r1: 1.4, g1: 0.35, b1: 0.05,
+        size0: 0.05 + Math.random() * 0.05, size1: 0.012,
+        life: 0.4 + Math.random() * 0.7, fade: FADE_LINEAR,
+        gravity: 16, drag: 0.9, bounce: 1,
+      });
+    }
+
+    // (3) 煙。遅く広がって長く残る。火の粉が消えた後に爆心を示し続ける
+    for (let i = 0; i < 26; i++) {
+      const sp = 1.5 + Math.random() * 4;
+      const ux = rand(2), uy = Math.random() * 1.2, uz = rand(2);
+      const l = Math.hypot(ux, uy, uz) || 1;
+      this.smoke.spawn({
+        x: pos.x, y: pos.y + 0.2, z: pos.z,
+        vx: (ux / l) * sp, vy: (uy / l) * sp + 1.2, vz: (uz / l) * sp,
+        r: 0.30, g: 0.28, b: 0.26, r1: 0.10, g1: 0.10, b1: 0.10,
+        size0: 0.5 + Math.random() * 0.6, size1: 3.0 + Math.random() * 1.6,
+        life: 1.2 + Math.random() * 1.4, fade: FADE_INOUT,
+        gravity: -0.5, drag: 1.5,
+      });
+    }
+  }
+
   bloodPool(pos, scale = 1.05) {
     const s = scale * (0.85 + Math.random() * 0.35);
     let placed = this._mark(pos.x, pos.y + 0.1, pos.z, 0, -1, 0, 2.6, s, 'bloodPool', POOL_OPTS);
@@ -1354,14 +1397,6 @@ export class Effects {
       });
     }
     return true;
-  }
-
-  /** 倒れながら引きずる血痕。真下の床に小さく1枚落とすだけ */
-  bloodDrip(pos, scale = 0.18) {
-    return this._mark(
-      pos.x, pos.y + 0.1, pos.z, 0, -1, 0, 1.8,
-      scale * (0.7 + Math.random() * 0.6), 'bloodPool', SPLASH,
-    );
   }
 
   /**

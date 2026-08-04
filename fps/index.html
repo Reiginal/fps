@@ -74,6 +74,46 @@
   #healthWrap { display: flex; align-items: baseline; gap: 10px; }
   #health { font-size: 40px; font-weight: 600; line-height: .9; letter-spacing: -.02em; text-shadow: 0 2px 10px rgba(0,0,0,.7); }
   #healthBar { width: 190px; height: 3px; background: rgba(255,255,255,.14); overflow: hidden; }
+  /* 包帯。体力のすぐ下に、状態を1か所へまとめて置く。
+     前は残数と操作の案内を右下の武器の行に、進み具合を左下の体力の下に置いていて、
+     巻いている最中に画面の左下と右下を交互に見ることになっていた。
+     包帯が動かすのは体力なので、体力の隣が正しい置き場になる。
+     幅は固定する。文字が伸び縮みすると、その度に隣の物まで動いて落ち着かない */
+  #healWrap {
+    display: flex; align-items: center; gap: 9px;
+    margin-top: 7px; height: 17px;
+  }
+  /* 医療品の十字。文字より先に目が形を拾うので、何の行かが一瞬で分かる */
+  #healCross { width: 13px; height: 13px; position: relative; flex: none; opacity: .45; }
+  #healCross i { position: absolute; background: #7ee08a; }
+  #healCross i:first-child { left: 5px; top: 0; width: 3px; height: 13px; }
+  #healCross i:last-child { left: 0; top: 5px; width: 13px; height: 3px; }
+  /* 残数は玉で出す。数字より、残り本数が形のまま目に入る */
+  #healPips { display: flex; gap: 4px; flex: none; }
+  #healPips i {
+    width: 7px; height: 7px; border: 1px solid rgba(255,255,255,.3);
+    background: transparent;
+  }
+  #healPips i.on { background: #7ee08a; border-color: #7ee08a; }
+  #healState {
+    font-size: 10px; letter-spacing: .16em; color: var(--dim);
+    min-width: 108px;   /* 文言が変わっても隣が動かないよう場所を先に取る */
+  }
+  #healBar { width: 92px; height: 3px; background: rgba(255,255,255,.14); opacity: 0; }
+  #healFill { height: 100%; width: 0%; background: #7ee08a; }
+  /* 残り0。使えない事がひと目で分かるまで落とす */
+  #healWrap.none #healCross { opacity: .16; }
+  #healWrap.none #healState { color: rgba(255,255,255,.2); }
+  /* 手に持っている。次に何をすればいいかを、ここだけ光らせて示す */
+  #healWrap.out #healCross { opacity: 1; }
+  #healWrap.out #healState { color: #9fe8a8; }
+  #healWrap.out { animation: healPulse 1.1s ease-in-out infinite; }
+  @keyframes healPulse { 0%, 100% { opacity: 1; } 50% { opacity: .62; } }
+  /* 巻いている最中。点滅は止めて、進み具合だけを見せる */
+  #healWrap.busy { animation: none; }
+  #healWrap.busy #healCross { opacity: 1; }
+  #healWrap.busy #healState { color: #9fe8a8; }
+  #healWrap.busy #healBar { opacity: 1; }
   #healthFill { height: 100%; width: 100%; background: var(--hud); transition: width .18s, background .18s; }
   .low #healthFill { background: var(--warn); }
   .low #health { color: var(--warn); }
@@ -90,6 +130,12 @@
 
   /* 武器スロット */
   #slots { display: flex; gap: 6px; margin-top: 8px; }
+  /* 2行目。包帯のように武器でない操作はここに置く。
+     1〜4と同じ見た目にすると武器と混ざるので、枠を点線にして区別する */
+  #slots2 { display: flex; gap: 6px; margin-top: 5px; }
+  #slots2 .slot { border-style: dashed; }
+  #slots2 .slot.ready { border-color: rgba(126,224,138,.7); color: #9fe8a8; }
+  #slots2 .slot.busy { border-color: var(--accent); color: var(--accent); background: rgba(99,210,255,.10); }
   .slot {
     font-size: 10px; letter-spacing: .1em; padding: 3px 8px;
     border: 1px solid rgba(255,255,255,.18); color: var(--dim);
@@ -104,13 +150,47 @@
   #scoreBox { text-align: right; }
   #score { font-size: 22px; letter-spacing: .05em; }
 
-  /* 対戦の得点。波の数は対戦では意味がないので、同じ場所を差し替える */
-  #matchBox { display: none; }
+  /* 対戦の得点。画面の中央上に単独で置く。
+     以前は左上の波数と同じ場所に差し替えていたが、対戦で一番よく見る数字が
+     視線の通り道から外れていた。中央なら撃ち合いの合間に目を動かさず読める */
+  #matchBox {
+    display: none;
+    position: absolute; left: 50%; top: 18px;
+    transform: translateX(-50%);
+    text-align: center;
+  }
   #hud.versus #waveBox { display: none; }
+  /* 対戦中は右上の得点も出さない。ラウンド取得数が中央にあるので、
+     同じ画面に意味の違う数字を2つ置くと どちらが勝敗かが読めなくなる */
+  #hud.versus #scoreBox { display: none; }
   #hud.versus #matchBox { display: block; }
-  #matchScore { font-size: 22px; letter-spacing: .1em; }
-  #matchTime { font-size: 11px; letter-spacing: .18em; color: var(--dim); }
+  #matchScore {
+    font-size: 46px; font-weight: 600; line-height: 1;
+    letter-spacing: .1em;
+    text-shadow: 0 3px 18px rgba(0,0,0,.8);
+  }
+  /* どちらが自分の数字かを色で分ける。左が自分 */
+  #matchScore.lead { color: var(--accent); }
+  #matchScore.behind { color: var(--warn); }
+  #matchTime { font-size: 11px; letter-spacing: .18em; color: var(--dim); margin-top: 5px; }
   #matchTime.urgent { color: var(--warn); }
+
+  /* --------------------------------------------------- 参加者一覧 */
+  /* 右上に常時。「今このサーバーに誰がいるか」が分からないと、
+     1人で待っている時に自分が繋がっているのかすら確信が持てない */
+  #roster {
+    position: absolute; right: 34px; top: 24px;
+    text-align: right;
+    display: none;
+  }
+  #hud.versus #roster { display: block; }
+  #rosterHead { font-size: 10px; letter-spacing: .22em; color: var(--dim); margin-bottom: 5px; }
+  .rname {
+    font-size: 13px; letter-spacing: .08em; line-height: 1.5;
+    text-shadow: 0 2px 8px rgba(0,0,0,.8);
+  }
+  .rname.me { color: var(--accent); }
+  .rname .rw { color: var(--dim); margin-left: 8px; font-size: 11px; }
 
   /* キルログ */
   #killfeed { position: absolute; right: 34px; top: 92px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
@@ -139,6 +219,94 @@
   }
   #bannerMain { font-size: 34px; letter-spacing: .34em; text-shadow: 0 3px 22px rgba(0,0,0,.85); }
   #bannerSub { font-size: 11px; letter-spacing: .3em; color: var(--accent); margin-top: 7px; }
+
+  /* --------------------------------------------------- 撃破バナー */
+  /* 倒した瞬間に、画面中央のやや下へ横帯で一瞬だけ出す。
+     置き場所の理由: 倒した直後も視線はクロスヘアに残っているので、
+     隅に出すと気づかない。かといって中央に重ねると次の敵が見えない。
+     すぐ下へ逃がすと、視線を動かさずに視界の端で拾える。
+     右上のキルログとは役割が別で、あちらは「何が起きたかの記録」、
+     こちらは「今おまえが倒した」という手応えを返すためだけの表示 */
+  #elim {
+    position: absolute; left: 50%; top: 57%;
+    transform: translateX(-50%);
+    opacity: 0;
+    pointer-events: none;
+    display: flex; align-items: center;
+    padding: 8px 22px 8px 13px;
+    white-space: nowrap;
+    /* 左が濃く右へ抜ける帯。四角い箱で囲うより画面に馴染む */
+    background: linear-gradient(90deg, rgba(255,70,50,.34), rgba(255,70,50,.10) 55%, rgba(255,70,50,0));
+    border-left: 3px solid var(--warn);
+    box-shadow: 0 8px 30px rgba(0,0,0,.5);
+  }
+  /* ✕印。2本の棒を交差させるだけ */
+  #elimMark {
+    width: 22px; height: 22px; margin-right: 13px;
+    position: relative; flex: none;
+  }
+  #elimMark i {
+    position: absolute; left: 50%; top: 50%;
+    width: 22px; height: 3px; margin: -1.5px 0 0 -11px;
+    background: var(--warn);
+    box-shadow: 0 0 10px rgba(255,70,50,.9);
+  }
+  #elimMark i:first-child { transform: rotate(45deg); }
+  #elimMark i:last-child { transform: rotate(-45deg); }
+  #elimBody { text-align: left; }
+  #elimText { font-size: 14px; letter-spacing: .3em; color: var(--warn); text-shadow: 0 2px 14px rgba(0,0,0,.9); }
+  #elimName { font-size: 12px; letter-spacing: .1em; color: var(--hud); margin-top: 3px; }
+  #elimName:empty { display: none; }
+  /* 連続撃破とヘッドショットの札。右端に立てる */
+  #elimTag {
+    margin-left: 18px; padding: 3px 9px;
+    font-size: 11px; letter-spacing: .16em;
+    color: #12181c; background: var(--warn);
+  }
+  #elimTag:empty { display: none; }
+  /* ヘッドショットは青に振って格を上げる */
+  #elim.head { border-left-color: var(--accent);
+    background: linear-gradient(90deg, rgba(99,210,255,.34), rgba(99,210,255,.10) 55%, rgba(99,210,255,0)); }
+  #elim.head #elimMark i { background: var(--accent); box-shadow: 0 0 14px rgba(99,210,255,.9); }
+  #elim.head #elimText { color: var(--accent); }
+  #elim.head #elimTag { background: var(--accent); }
+  @keyframes elimPop {
+    0% { opacity: 0; transform: translateX(-50%) translateY(7px) scale(.9); }
+    12% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1.05); }
+    24% { transform: translateX(-50%) translateY(0) scale(1); }
+    74% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+    100% { opacity: 0; transform: translateX(-50%) translateY(-5px) scale(1); }
+  }
+  #elim.on { animation: elimPop 1.7s ease-out forwards; }
+
+  /* --------------------------------------------------- ミニマップ */
+  /* 上のcanvasの一括指定(画面いっぱい)を必ず打ち消す。
+     打ち消さないとミニマップが画面全体に広がって、ゲームが何も見えなくなる。
+     位置は左上だが、波数と得点の行の下に置く（真上に重ねると数字が読めない）*/
+  #minimap {
+    position: absolute; left: 34px; top: 92px;
+    width: 168px; height: 168px;
+    display: block;
+    border-radius: 3px;
+    opacity: .86;
+    box-shadow: 0 2px 16px rgba(0,0,0,.55);
+  }
+  #minimap.hidden { display: none; }
+
+  /* ----------------------------------------- 戦闘範囲の外に出た警告 */
+  /* クロスヘアの下。上に置くと銃を撃つ時に一番見たい所へ被る */
+  #zonewarn {
+    position: absolute; left: 50%; top: 60%;
+    transform: translateX(-50%);
+    text-align: center;
+    color: var(--warn);
+    text-shadow: 0 2px 18px rgba(0,0,0,.9);
+    animation: zonepulse 1.1s ease-in-out infinite;
+  }
+  #zonewarn.hidden { display: none; }
+  #zoneMain { font-size: 20px; letter-spacing: .3em; }
+  #zoneSub { font-size: 11px; letter-spacing: .22em; margin-top: 7px; color: var(--hud); }
+  @keyframes zonepulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
 
   /* --------------------------------------------------- オーバーレイ */
   #overlay {
@@ -188,6 +356,47 @@
   .field input:focus { outline: none; border-color: var(--accent); background: rgba(99,210,255,.07); }
   #nmRoom { width: 7em; text-align: center; font-size: 18px; letter-spacing: .45em; text-indent: .45em; }
   .hint { font-size: 10px; line-height: 1.7; color: var(--dim); margin-top: 5px; }
+
+  /* キル音の選択。◀ 名前 ▶ の3つを横に並べる。
+     ここに置く理由: 倒さないと聴けない作りだと、比べるのに毎回敵を殺しに
+     行くことになる。出撃前に何度でも鳴らせる場所が要る */
+  .killpick { display: flex; gap: 6px; }
+  .killbtn, .killname {
+    padding: 9px 11px;
+    font-family: var(--mono); font-size: 13px; letter-spacing: .08em;
+    color: var(--hud); background: rgba(255,255,255,.05);
+    border: 1px solid rgba(255,255,255,.2);
+    cursor: pointer;
+  }
+  .killbtn { width: 42px; flex: none; }
+  .killname { flex: 1; text-align: center; }
+  .killbtn:hover, .killname:hover { background: rgba(99,210,255,.14); border-color: var(--accent); }
+  .killname:active { background: rgba(99,210,255,.26); }
+
+  /* つまみ。作った側が音を聴けないので、聴ける側が直接回せる場所を用意する。
+     ここが無いと「作る→聴いてもらう→駄目→また作る」を延々やることになる */
+  .killmore {
+    margin-top: 7px; padding: 5px 9px;
+    font-family: var(--mono); font-size: 10px; letter-spacing: .12em;
+    color: var(--dim); background: transparent;
+    border: 1px solid rgba(255,255,255,.16); cursor: pointer;
+  }
+  .killmore:hover { color: var(--accent); border-color: var(--accent); }
+  #nmKillTune { margin-top: 9px; }
+  .knob { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
+  .knob .kname { font-size: 10px; letter-spacing: .1em; color: var(--dim); width: 84px; flex: none; }
+  .knob .kval { font-size: 10px; color: var(--accent); width: 44px; flex: none; text-align: right; }
+  .knob input[type=range] {
+    flex: 1; height: 3px; -webkit-appearance: none; appearance: none;
+    background: rgba(255,255,255,.18); cursor: pointer;
+  }
+  .knob input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 13px; height: 13px; background: var(--accent); cursor: pointer;
+  }
+  .knob input[type=range]::-moz-range-thumb {
+    width: 13px; height: 13px; border: 0; background: var(--accent); cursor: pointer;
+  }
 
   /* 文言が出た時にボタンが下へ逃げないよう、2行ぶんの場所を最初から空けておく */
   #nmStatus { font-size: 11px; letter-spacing: .1em; line-height: 1.7; color: var(--accent); min-height: 38px; margin: 6px 0 4px; text-align: left; }
@@ -306,14 +515,20 @@
       <div id="wave">第1波</div>
       <div id="remain">残敵 0</div>
     </div>
-    <div id="matchBox">
-      <div id="matchScore">0 / 30</div>
-      <div id="matchTime">残り 10:00</div>
-    </div>
     <div id="scoreBox">
       <div id="score">0</div>
       <div class="label">スコア</div>
     </div>
+  </div>
+
+  <div id="matchBox">
+    <div id="matchScore">0 － 0</div>
+    <div id="matchTime">相手を待っています</div>
+  </div>
+
+  <div id="roster">
+    <div id="rosterHead">サーバー</div>
+    <div id="rosterRows"></div>
   </div>
 
   <div id="netstat" class="hidden"></div>
@@ -324,9 +539,25 @@
     <div class="sbtitle">戦績</div>
     <div class="sbrow sbh">
       <div class="c1">順位</div><div class="cn">名前</div>
-      <div class="c">撃破</div><div class="c">戦死</div><div class="cp">応答</div>
+      <div class="c">取得</div><div class="c">撃破</div><div class="cp">応答</div>
     </div>
     <div id="sbRows"></div>
+  </div>
+
+  <canvas id="minimap" class="hidden"></canvas>
+
+  <div id="zonewarn" class="hidden">
+    <div id="zoneMain">戦域の外</div>
+    <div id="zoneSub">中央へ戻れ</div>
+  </div>
+
+  <div id="elim">
+    <div id="elimMark"><i></i><i></i></div>
+    <div id="elimBody">
+      <div id="elimText">撃破</div>
+      <div id="elimName"></div>
+    </div>
+    <div id="elimTag"></div>
   </div>
 
   <div id="banner">
@@ -339,6 +570,12 @@
       <div class="label">体力</div>
       <div id="healthWrap"><div id="health">100</div></div>
       <div id="healthBar"><div id="healthFill"></div></div>
+      <div id="healWrap">
+        <div id="healCross"><i></i><i></i></div>
+        <div id="healPips"><i></i><i></i></div>
+        <div id="healState">F 包帯</div>
+        <div id="healBar"><div id="healFill"></div></div>
+      </div>
     </div>
     <div class="block right">
       <div id="reloading"></div>
@@ -346,8 +583,15 @@
       <div id="ammoWrap"><div id="ammo">30</div><div id="reserve">/ 240</div></div>
       <div id="slots">
         <div class="slot on">1 ライフル</div>
-        <div class="slot">2 短機関銃</div>
-        <div class="slot">3 ショットガン</div>
+        <div class="slot">2 ショットガン</div>
+        <div class="slot">3 ナイフ</div>
+        <div class="slot">4 手榴弾</div>
+      </div>
+      <div id="slots2">
+        <!-- ここは「Fで包帯が出せる」を覚えてもらうための札。
+             状態(持っている/巻いている/進み具合)は体力の隣にまとめてあるので、
+             こちらの文字は最後まで変えない。変えると武器の行ごと横に動く -->
+        <div class="slot" id="slotHeal">F 包帯</div>
       </div>
     </div>
   </div>
@@ -365,7 +609,9 @@
       <b>左クリック</b><span>射撃</span>
       <b>右クリック</b><span>覗き込み（ADS）</span>
       <b>R</b><span>リロード</span>
-      <b>1 / 2 / 3</b><span>武器切り替え</span>
+      <b>1 / 2 / 3 / 4</b><span>ライフル / ショットガン / ナイフ / 手榴弾</span>
+      <b>F</b><span>包帯を巻く</span>
+      <b>K</b><span>キル音を切り替えて試す</span>
       <b>ESC</b><span>一時停止</span>
     </div>
     <div class="cta" id="cta">クリックで出撃</div>
@@ -394,6 +640,20 @@
       <div class="hint">4文字。空のままなら誰でも入れる共通の部屋に入る</div>
     </div>
 
+    <div class="field">
+      <label class="label">キル音</label>
+      <div class="killpick">
+        <button id="nmKillPrev" class="killbtn" type="button">◀</button>
+        <button id="nmKillPlay" class="killname" type="button">1 / 5　デデン</button>
+        <button id="nmKillNext" class="killbtn" type="button">▶</button>
+      </div>
+      <div class="hint" id="nmKillNote">押すとその場で鳴る</div>
+      <!-- つまみ。出発点を選んでから、ここを回して自分で詰める。
+           動かすたびにその場で鳴る -->
+      <button id="nmKillMore" class="killmore" type="button">つまみを開く ▾</button>
+      <div id="nmKillTune" class="hidden"></div>
+    </div>
+
     <div id="nmStatus"></div>
 
     <div class="netbtns">
@@ -409,7 +669,7 @@
     <div class="subtitle">最終順位</div>
     <div class="sbrow sbh">
       <div class="c1">順位</div><div class="cn">名前</div>
-      <div class="c">撃破</div><div class="c">戦死</div><div class="cp">応答</div>
+      <div class="c">取得</div><div class="c">撃破</div><div class="cp">応答</div>
     </div>
     <div id="fbRows"></div>
     <div class="fbnote" id="fbNote"></div>

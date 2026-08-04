@@ -55,8 +55,10 @@ export function buildWorld() {
     octree: level.octree,
     bounds: level.bounds,
     playerSpawn: level.playerSpawn,
-    // 湧き地点は敵用の14箇所を対戦用に流用する。
-    // playerSpawnだけだと全員が同じ場所に出てきて撃ち合いにならない
+    // 湧き地点は対戦用の8箇所。場内の中央（protocol.jsのZONE）に収まっている。
+    // 敵用のenemySpawnsは場内全域に散っていて1つも範囲内に無いので流用できない
+    // （流用すると湧いた瞬間に全員が範囲外で、出てきた端から削られる）
+    arenaSpawns: level.arenaSpawns,
     enemySpawns: level.enemySpawns,
     stats,
   };

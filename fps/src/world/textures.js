@@ -1400,36 +1400,6 @@ function corrugated(u, v, o, seed) {
 
 /* ---------------------------------------------------------- sprite maps */
 
-// 中心が黒く抜けて周囲に放射状のヒビが走る弾痕
-export function bulletHoleTexture(size = 128) {
-  const data = new Uint8Array(size * size * 4);
-  const c = size / 2;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const dx = (x - c) / c, dy = (y - c) / c;
-      const d = Math.hypot(dx, dy);
-      const ang = Math.atan2(dy, dx);
-      const spokes = Math.pow(Math.abs(Math.sin(ang * 6.5 + Math.sin(ang * 3) * 2)), 3);
-      const crackR = 0.34 + spokes * 0.5;
-      const crack = smoothstep(crackR, crackR - 0.3, d) * spokes;
-      const core = smoothstep(0.3, 0.08, d);
-      const rim = smoothstep(0.36, 0.22, d) - core;
-      const dust = smoothstep(0.72, 0.3, d) * 0.35 * (0.6 + fbm(x / size, y / size, 16, 3, 5) * 0.8);
-      const a = clamp01(core + rim * 0.9 + crack * 0.55 + dust);
-      const lum = core > 0.5 ? 0.02 : lerp(0.55, 0.12, clamp01(crack + rim));
-      const i = (y * size + x) * 4;
-      data[i] = lum * 255; data[i + 1] = lum * 250; data[i + 2] = lum * 245;
-      data[i + 3] = a * 255;
-    }
-  }
-  const t = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.minFilter = THREE.LinearMipmapLinearFilter;
-  t.generateMipmaps = true;
-  t.needsUpdate = true;
-  return t;
-}
-
 // 中心が白く飛び、外に向かって減衰する丸。閃光・火花・血しぶきの共通素材
 export function radialTexture(size = 64, power = 2.2, hardness = 0) {
   const data = new Uint8Array(size * size * 4);

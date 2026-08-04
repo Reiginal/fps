@@ -11,6 +11,7 @@ export class Input {
     this.sensitivity = 0.0022;
     this.invertY = false;
     this._pressedThisFrame = new Set();
+    this._clickedThisFrame = new Set();
     this._onLockChange = null;
 
     addEventListener('keydown', (e) => {
@@ -32,6 +33,10 @@ export class Input {
     this.dom.addEventListener('mousedown', (e) => {
       if (!this.locked) return;
       this.buttons[e.button] = true;
+      // 押した瞬間だけ立つ印。押しっぱなしと区別したい操作（覗き込みの切り替え）に使う。
+      // トラックパッドは右クリックを押したまま左クリックができないので、
+      // 「押している間だけ覗く」だと覗きながら撃つ動作そのものが成立しない
+      this._clickedThisFrame.add(e.button);
       e.preventDefault();
     });
     addEventListener('mouseup', (e) => { this.buttons[e.button] = false; });
@@ -51,6 +56,9 @@ export class Input {
   }
 
   pressed(code) { return this._pressedThisFrame.has(code); }
+
+  /** そのフレームで押し込まれたマウスボタン。押しっぱなしでは2度目は立たない */
+  clicked(button) { return this._clickedThisFrame.has(button); }
   down(code) { return this.keys.has(code); }
 
   // 移動入力を -1..1 で返す（斜め移動が速くならないよう正規化する）
@@ -75,5 +83,5 @@ export class Input {
     return { yaw, pitch };
   }
 
-  endFrame() { this._pressedThisFrame.clear(); }
+  endFrame() { this._pressedThisFrame.clear(); this._clickedThisFrame.clear(); }
 }

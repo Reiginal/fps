@@ -8,6 +8,9 @@
 // なので受け取った値は全部その場で範囲を検査して、駄目なら黙って捨てる。
 import './dom-stub.js';
 import { createServer } from 'node:http';
+import { createSocket } from 'node:dgram';
+import { networkInterfaces } from 'node:os';
+import { accessSync, constants } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,8 +26,10 @@ import {
 const PORT = Number(process.env.PORT) || 8080;
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 
-// 押しているキーは10ビットしか定義がない。それ以外のビットは捨てる
-const KEY_MASK = 0x3ff;
+// 押しているキーは11ビットしか定義がない。それ以外のビットは捨てる。
+// protocol.jsのKを増やしたらここも広げること。忘れると増やしたキーだけ
+// サーバーに届かず、手元では効いているのにサーバーでは押していない状態になる
+const KEY_MASK = 0x7ff;
 // 1つの電文に詰めてよい入力の数。INPUT_BATCHは3だが、
 // 取りこぼしの詰め直しで増えることがあるので余裕を持たせる
 const MAX_FRAMES = 32;
@@ -34,8 +39,10 @@ const PING_EVERY_MS = 2000;
 
 /* -------------------------------------------------------- 静的配信 */
 
-// serve.mjsは何もexportせず、読み込むと自分でlistenしてしまうのでimportできない。
-// 同じ動きになるように処理だけ写している（片方を直したらもう片方も直すこと）
+// ゲーム本体の配信はここ1箇所だけが持つ。
+// 以前は静的配信だけを行うserve.mjsが別にあって、同じ処理をこちらへ写していた。
+// 「片方を直したらもう片方も直すこと」と注意書きを添える形は必ず片方を忘れるので、
+// 起動口をこのファイル1本に寄せて写しごと消した
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -184,6 +191,7 @@ function onMessage(conn, raw) {
     case C.JOIN: return onJoin(conn, m);
     case C.INPUT: return onInput(conn, m);
     case C.SHOT: return onShot(conn, m);
+    case C.THROW: return onThrow(conn, m);
     case C.WEAPON: return onWeapon(conn, m);
     case C.PONG: return onPong(conn, m);
     case C.CHAT: return;   // protocol側にサーバー→クライアントのCHATが無いので今は捨てる
@@ -251,6 +259,18 @@ function onShot(conn, m) {
   conn.room.shot(slot, seq, _o, _d);
 }
 
+// 投擲。撃つのと同じで、受け取るのは向きだけ。位置はサーバーが本人の目から作る
+function onThrow(conn, m) {
+  const slot = conn.slot;
+  if (!slot) return;
+  if (!readVec3(m.o, _o, 1e4)) return;
+  if (!readVec3(m.d, _d, 1e4)) return;
+  const len = _d.length();
+  if (len < 1e-6) return;
+  _d.divideScalar(len);
+  conn.room.throwNade(slot, _o, _d);
+}
+
 function onWeapon(conn, m) {
   const slot = conn.slot;
   if (!slot || !isNum(m.i)) return;
@@ -281,21 +301,117 @@ setInterval(() => {
   }
 }, PING_EVERY_MS);
 
+/* ------------------------------------------------ 自分のLANアドレス */
+
+// 相手に渡すURLを組むための、このマシンのLAN側アドレス。
+//
+// os.networkInterfaces()から「内部でない最初のIPv4」を拾う書き方は当てにならない。
+// VPNやThunderbolt Bridge、Docker、仮想NICが同じ条件で何本も並んでいて、
+// 実際にWi-Fiで通じるのとは違うアドレスを先に掴むことがある（このマシンだと4本ある）。
+//
+// なので経路表に聞く。UDPのconnectはパケットを1つも送らず、
+// 「この宛先へ出すならどのインターフェースを使うか」だけを解決するので、
+// 既定の経路に紐づいたアドレスがそのまま出てくる。
+// 相手が同じWi-Fiにいる限り、これが渡すべきアドレスになる
+function lanAddress() {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    let sock;
+    try {
+      sock = createSocket('udp4');
+    } catch { finish(fallbackAddress()); return; }
+    sock.on('error', () => { try { sock.close(); } catch { /* 既に閉じている */ } finish(fallbackAddress()); });
+    // 経路が無い（機内モード等）と応答が返らないことがあるので、待ち続けない
+    const timer = setTimeout(() => { try { sock.close(); } catch { /* 同上 */ } finish(fallbackAddress()); }, 300);
+    try {
+      sock.connect(53, '8.8.8.8', () => {
+        clearTimeout(timer);
+        let addr = null;
+        try { addr = sock.address().address; } catch { /* 取れなければ退避側へ */ }
+        try { sock.close(); } catch { /* 同上 */ }
+        finish(addr || fallbackAddress());
+      });
+    } catch {
+      clearTimeout(timer);
+      finish(fallbackAddress());
+    }
+  });
+}
+
+// cloudflaredが入っているか。入っていない人に入っている前提の案内を出すと、
+// 打った瞬間に command not found で行き止まりになる
+function hasCloudflared() {
+  for (const dir of (process.env.PATH || '').split(':')) {
+    if (!dir) continue;
+    try {
+      accessSync(join(dir, 'cloudflared'), constants.X_OK);
+      return true;
+    } catch { /* この場所には無い */ }
+  }
+  return false;
+}
+
+// 経路表に聞けなかった時の当て推量。169.254(自動割り当て)と内部向けだけは除く
+function fallbackAddress() {
+  for (const list of Object.values(networkInterfaces())) {
+    for (const n of list || []) {
+      if (n.internal) continue;
+      if (n.family !== 'IPv4' && n.family !== 4) continue;
+      if (n.address.startsWith('169.254.')) continue;
+      return n.address;
+    }
+  }
+  return null;
+}
+
 /* --------------------------------------------------- 最後の砦 */
 
 // ここまでで拾いきれなかった例外でプロセスが落ちると、全部屋の試合が同時に終わる。
 // 落とすより、その電文を諦めて走り続ける方が被害が小さい
 process.on('uncaughtException', (e) => {
+  // 待ち受けの失敗だけは握り潰さずに落ちる。
+  // 何も待ち受けていないプロセスが生き残ると、起動した本人には
+  // 「起動したのに繋がらない」としか見えない上に、ターミナルも占領される。
+  // server.on('error')でも拾えるはずだがそちらへは届かなかったので、
+  // 実際に届くこの入口で見る
+  if (e && (e.code === 'EADDRINUSE' || e.syscall === 'listen')) {
+    if (e.code === 'EADDRINUSE') {
+      console.error(`\n  ポート${PORT}は既に使われている。`);
+      console.error('  別のBLACKOUTが動いていないか確認するか、ポートを変えて起動する:');
+      console.error(`    lsof -nP -iTCP:${PORT} -sTCP:LISTEN     # 誰が使っているか`);
+      console.error(`    PORT=8081 npm start                     # 別のポートで立てる\n`);
+    } else {
+      console.error('\n  待ち受けに失敗した:', e.message, '\n');
+    }
+    process.exit(1);
+  }
   console.error('[fatal] 拾い損ねた例外:', e && e.stack);
 });
 process.on('unhandledRejection', (e) => {
   console.error('[fatal] 拾い損ねた失敗:', e);
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   // 武器の出どころは必ず出す。退避表で走っていることに気づかないまま
   // 「ダメージが本番と違う」を追いかけるのが一番時間を溶かす
   console.log(`[sim] 武器の表: ${weaponsSource}（${WEAPONS.map((w) => w.id).join(', ')}）`);
-  console.log(`\n  BLACKOUT 対戦サーバー  →  http://localhost:${PORT}`);
-  console.log(`  WebSocket              →  ws://localhost:${PORT}\n`);
+
+  const lan = await lanAddress();
+  console.log('\n  BLACKOUT');
+  console.log(`\n  自分用            http://localhost:${PORT}`);
+
+  // 「相手に渡すURL」とだけ書くと、Wi-Fiが違う相手にもこれで届くように読める。
+  // 届かないので、渡し先の条件を見出しそのものに入れる
+  if (lan) {
+    console.log(`  同じWi-Fiの相手   http://${lan}:${PORT}`);
+  } else {
+    console.log('  同じWi-Fiの相手   （LAN側アドレスが取れなかった。ネットワークに繋がっていない）');
+  }
+
+  console.log('\n  Wi-Fiが違う相手に渡すURLは、別のターミナルでこれを打つと出る:');
+  console.log(`    ${hasCloudflared() ? '' : 'brew install cloudflared     # 初回のみ\n    '}`
+    + `cloudflared tunnel --url http://localhost:${PORT}`);
+  console.log('    出てきた https://〜.trycloudflare.com をそのまま送る\n');
+  console.log('  どちらの渡し方でも、相手は接続先を書き換えなくていい。名前を入れて押すだけ。\n');
 });

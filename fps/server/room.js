@@ -5,8 +5,10 @@
 // 本人が要求していない前進が積み上がり、走っている間ずっと位置が引き戻される。
 // なので入力が無い刻みは進めずに待ち、本当に途切れた時だけキーを離した扱いにする。
 import './dom-stub.js';
+import * as THREE from 'three';
+import { Capsule } from 'three/addons/math/Capsule.js';
 import {
-  TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS, MATCH,
+  TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS, MATCH, PHASE, ZONE, NADE, HEAL, outsideZone,
   Sv, EV, packPlayer,
 } from '../src/net/protocol.js';
 import { SimPlayer, resolveShot, rewindMs, originVisible } from './sim.js';
@@ -28,11 +30,11 @@ const EVENT_MAX = 256;
 // カメラのバネの揺れは数cmなのでこれで足りる。以前の2.5mは薄い壁を1枚越せてしまい、
 // 曲がり角に隠れたまま壁の向こうへ発射位置を出して撃てた
 const SHOT_ORIGIN_MAX = 0.6;
-// 試合が終わってから次の試合を始めるまで。
-// すぐ0点に戻すと最終順位と0点が同じ1msの間に届いて、必ず0-0が描かれる
-const INTERMISSION_S = 8;
 
 const nowMs = () => performance.now();
+
+// 爆発の距離を測る時の使い回し。1回ごとに作ると毎爆発でごみが出る
+const _nadeTo = new THREE.Vector3();
 
 // 巻き戻しが本当に効いているかを確かめるための逃げ道。
 // 普段は有効。NO_REWIND=1で切ると「当てたのに抜ける」が再現する
@@ -46,9 +48,16 @@ export class Room {
     this.nextId = 1;
     this.tick = 0;
     this.events = [];
-    this.timeLeft = MATCH.TIME_LIMIT_S;
-    this._ending = false;
-    this._intermission = 0;
+    // 局面と、その局面の残り秒。この2つで進行が全部決まる。
+    // 以前は_ending(真偽)と_intermission(秒)の2本立てだったが、
+    // ラウンドが挟まると「試合が終わったのか、ラウンドが終わったのか、
+    // そもそも始まっていないのか」を真偽1つでは表せない
+    this.phase = PHASE.WAIT;
+    this.timeLeft = 0;
+    this.round = 0;
+    // 飛んでいる手榴弾。投げた順に並ぶ
+    this.nades = [];
+    this.nextNadeId = 1;
     this._timer = null;
     this._nextTickAt = nowMs();
     this._scoreTimer = 0;
@@ -59,6 +68,14 @@ export class Room {
 
   get full() { return this.slots.size >= MAX_PLAYERS; }
 
+  /** 空いている一番小さい席番号 */
+  _freeSeat() {
+    const used = new Set([...this.slots.values()].map((s) => s.seat));
+    let n = 0;
+    while (used.has(n)) n++;
+    return n;
+  }
+
   join(conn, name) {
     if (this.full) return null;
     const id = this.nextId++;
@@ -66,6 +83,9 @@ export class Room {
       id,
       name,
       conn,
+      // 定位置の席番号。空いている一番小さい番号を取る。
+      // idをそのまま使うと、抜けて入り直すたびに番号が増えて席が一周する
+      seat: this._freeSeat(),
       sim: new SimPlayer(id, name, this.world),
       pending: new Map(),   // seq -> [bits, yaw, pitch]
       nextSeq: -1,          // 次に食わせるseq
@@ -74,11 +94,20 @@ export class Room {
       lastYaw: 0,
       lastPitch: 0,
       budget: 0,
+      // 戦闘範囲の外に居続けた秒数。猶予を過ぎたぶんだけ体力が減る。
+      // 範囲に戻ったら0に戻す（外に出るたび猶予をやり直す）
+      outsideFor: 0,
+      // 取ったラウンド数。killsとは別物で、画面の上に出る点数はこちら
+      rounds: 0,
+      // 残りの手榴弾。ラウンドの頭で戻す
+      nades: NADE.PER_ROUND,
     };
     this.slots.set(id, slot);
     this._respawn(slot);
     this.push({ e: EV.JOIN, id, name });
     if (!this._timer) this._start();
+    // 揃った瞬間に1ラウンド目を始める。待っている側を待たせ続けない
+    if (this.phase === PHASE.WAIT && this.slots.size >= MATCH.NEEDED) this._startMatch();
     return slot;
   }
 
@@ -88,6 +117,16 @@ export class Room {
     if (this.slots.size === 0) {
       this._stop();
       this.onEmpty?.(this);
+      return;
+    }
+    // 1対1なので、片方が抜けた時点で試合は成立しない。
+    // 点数を持ち越すと、次に入ってきた別人が知らない負けを背負って始まる
+    if (this.slots.size < MATCH.NEEDED) {
+      this.phase = PHASE.WAIT;
+      this.timeLeft = 0;
+      this.round = 0;
+      for (const s of this.slots.values()) { s.rounds = 0; s.sim.kills = 0; s.sim.deaths = 0; }
+      this._sendScore();
     }
   }
 
@@ -157,6 +196,11 @@ export class Room {
     // 撃てる速さだけはサーバーが持たないと押しっぱなしで撃ち放題になる
     if (sim.fireTokens < 1) return;
     sim.fireTokens -= 1;
+    // 撃ったら包帯を中断する。クライアント側も撃った時点で中断するので、
+    // ここで揃えないと、こちらだけ巻き切って体力が食い違う。
+    // 「巻いている間は撃たせない」にはしない。中断の知らせが届くのと
+    // 弾が届くのは同じ回線なので、順番が入れ替わると正当な弾まで消える
+    sim.player.cancelHeal();
 
     // 撃った瞬間は無敵を解く。無敵のまま撃てるのは理不尽
     sim.protectIn = 0;
@@ -211,56 +255,210 @@ export class Room {
     }
   }
 
+  /* ---------------------------------------------------------- 手榴弾 */
+
+  // 投擲の受け口。撃つのと同じで、申告を受けるのは向きだけ。
+  // 位置は本人の目から前へ少し出した所に固定する（好きな場所から出させない）
+  throwNade(slot, origin, dir) {
+    const sim = slot.sim;
+    if (!sim.alive) return;
+    if (this.phase !== PHASE.LIVE) return;
+    if (slot.nades <= 0) return;
+    slot.nades--;
+
+    const eye = sim.eye();
+    const g = {
+      id: this.nextNadeId++,
+      by: slot.id,
+      pos: new THREE.Vector3(
+        eye.x + dir.x * NADE.MUZZLE,
+        eye.y + dir.y * NADE.MUZZLE,
+        eye.z + dir.z * NADE.MUZZLE,
+      ),
+      vel: new THREE.Vector3(dir.x, dir.y, dir.z).multiplyScalar(NADE.SPEED),
+      fuse: NADE.FUSE_S,
+      // 転がっている玉のカプセル。Octreeは点ではなくカプセルで押し返すので、
+      // 長さゼロの（＝球の）カプセルを使い回す
+      cap: new Capsule(new THREE.Vector3(), new THREE.Vector3(), NADE.RADIUS),
+    };
+    this.nades.push(g);
+  }
+
+  // 飛翔と跳ね返り。1刻みぶん進めて、地形に埋まったら押し戻して勢いを削る
+  _stepNades() {
+    for (let i = this.nades.length - 1; i >= 0; i--) {
+      const g = this.nades[i];
+      g.fuse -= TICK_DT;
+
+      g.vel.y -= NADE.GRAVITY * TICK_DT;
+
+      // 1刻みぶんを一気に動かすと床をすり抜ける。
+      // 初速20m/sだと1刻みで0.33m進むのに、玉の半径は0.075mしかない。
+      // 床を跨いだ刻みでは、動かし終わった位置が既に床の0.3m下にあり、
+      // そこに置いたカプセルは床の三角形とどこも重ならないので当たりが取れない。
+      // 1回の移動が半径の半分を超えないところまで割ってから当てにいく
+      const dist = g.vel.length() * TICK_DT;
+      const steps = Math.min(8, Math.max(1, Math.ceil(dist / (NADE.RADIUS * 0.5))));
+      const h = TICK_DT / steps;
+
+      let dead = false;
+      for (let s = 0; s < steps; s++) {
+        g.pos.addScaledVector(g.vel, h);
+
+        // 場外へ抜けた玉は追いかけない。地形の無い所へ落ち続ける
+        if (g.pos.y < -30) { dead = true; break; }
+
+        g.cap.start.copy(g.pos);
+        g.cap.end.copy(g.pos);
+        const hit = this.world.octree.capsuleIntersect(g.cap);
+        if (!hit) continue;
+        // 面から出してから、面に対する速度成分だけ反転させて減らす。
+        // 押し出さずに反転だけすると、次の刻みでまた同じ面に埋まって震える
+        g.pos.addScaledVector(hit.normal, hit.depth);
+        const into = g.vel.dot(hit.normal);
+        if (into < 0) g.vel.addScaledVector(hit.normal, -into * (1 + NADE.BOUNCE));
+        // 面に沿う成分を摩擦で削る。これが無いと転がり続けて止まらない
+        const k = Math.max(0, 1 - NADE.FRICTION * h);
+        g.vel.x *= k; g.vel.z *= k;
+        if (hit.normal.y > 0.5) g.vel.y *= k;
+      }
+      if (dead) { this.nades.splice(i, 1); continue; }
+
+      if (g.fuse <= 0) {
+        this._explode(g);
+        this.nades.splice(i, 1);
+      } else {
+        this.push({ e: EV.NADE, gid: g.id, by: g.by, p: [g.pos.x, g.pos.y, g.pos.z] });
+      }
+    }
+  }
+
+  // 爆発。距離で線形に落ちるダメージを、遮蔽の無い相手にだけ入れる。
+  // 味方はいないので投げた本人も巻き込む（自分の足元に落として道連れが成立する）
+  _explode(g) {
+    this.push({ e: EV.BOOM, gid: g.id, p: [g.pos.x, g.pos.y, g.pos.z] });
+    if (this.phase !== PHASE.LIVE) return;
+
+    for (const s of [...this.slots.values()]) {
+      const sim = s.sim;
+      if (!sim.alive) continue;
+      // 胸の高さを狙う。足元だと段差1つで遮られ、頭だと屈んでも当たる
+      const p = sim.player.collider.start;
+      _nadeTo.set(p.x, p.y + 0.5, p.z);
+      const d = _nadeTo.distanceTo(g.pos);
+      if (d > NADE.BLAST_R) continue;
+      // 爆心と相手の間に地形があるなら入らない。壁越しの爆風を作らない
+      if (!originVisible(this.world.octree, g.pos, _nadeTo)) continue;
+
+      const t = 1 - d / NADE.BLAST_R;
+      const dmg = Math.max(NADE.MIN_DMG, NADE.BLAST_DMG * t);
+      if (sim.protectIn > 0) continue;
+      this.push({
+        e: EV.HIT, id: s.id, by: g.by,
+        dmg: Math.round(dmg * 10) / 10, part: 1, p: [g.pos.x, g.pos.y, g.pos.z],
+      });
+      sim.player.damage(dmg);
+      if (!sim.player.alive) {
+        const killer = this.slots.get(g.by);
+        // 自分で自分を吹き飛ばした回は、相手の取得にする（_killByFallと同じ扱い）
+        if (killer && killer !== s) this._kill(s, killer, 1);
+        else this._killByFall(s);
+      }
+    }
+  }
+
+  /* -------------------------------------------------------- 戦闘範囲 */
+
+  // 範囲の外に居る間だけ体力を削る。判定はサーバーが持つ。
+  // クライアントにやらせると、外に出た人が自分で「出ていない」と言えてしまう。
+  // 逆に警告の表示は各自の画面が自分の位置から出す（往復を待つと手遅れになる）ので、
+  // 半径と猶予はprotocol.jsに置いて両側で同じ値を見る
+  _zone(slot) {
+    const sim = slot.sim;
+    if (!sim.alive) { slot.outsideFor = 0; return; }
+    const p = sim.player.collider.start;
+    if (!outsideZone(p.x, p.z)) { slot.outsideFor = 0; return; }
+
+    const was = slot.outsideFor;
+    slot.outsideFor += TICK_DT;
+    // 猶予を跨いだ刻みは、跨いだ分だけを削る。まるごと1刻み削ると
+    // 猶予の長さが刻みの位相でぶれる
+    const over = slot.outsideFor - ZONE.GRACE_S;
+    if (over <= 0) return;
+    const dt = Math.min(TICK_DT, over - Math.max(0, was - ZONE.GRACE_S));
+    if (dt <= 0) return;
+
+    sim.player.damage(ZONE.DPS * dt);
+    if (!sim.player.alive) this._killByZone(slot);
+  }
+
+  // 範囲外で力尽きた。撃った人はいないが、1対1なので残った側のラウンド取得になる。
+  // ここを引き分け扱いにすると、追い詰められた側が場外へ逃げてラウンドを潰せてしまう
+  _killByZone(slot) {
+    slot.outsideFor = 0;
+    this.push({
+      e: EV.KILL, id: slot.id, by: slot.id,
+      w: slot.sim.weapon, head: false, z: 1,
+    });
+    if (this.phase !== PHASE.LIVE) return;
+    slot.sim.deaths++;
+    this._endRound(this._other(slot), 'zone');
+  }
+
   /* ------------------------------------------------------ 生き死に */
 
   _kill(victim, killer, part) {
-    victim.sim.respawnIn = MATCH.RESPAWN_S;
     this.push({
       e: EV.KILL, id: victim.id, by: killer.id,
       w: killer.sim.weapon, head: part === 0,
     });
-    // 試合が終わってからの撃ち合いは点に入れない。
-    // 入れると画面に出ている最終順位が終了後に動き続ける
-    if (this._ending) return;
+    // ラウンドが動いていない間の撃ち合いは点に入れない。
+    // 入れると画面に出ている点数が決着後にも動き続ける
+    if (this.phase !== PHASE.LIVE) return;
     victim.sim.deaths++;
     killer.sim.kills++;
-    // 決着した回はここでSCOREを配らない。_endMatchが配るのが最終順位になる
-    if (killer.sim.kills >= MATCH.SCORE_LIMIT) this._endMatch();
-    else this._sendScore();
+    this._endRound(killer, 'kill');
   }
 
-  // 湧き地点は生きている他人からSPAWN_MIN_DIST以上離れた所。
-  // 条件を満たす所が無ければ一番遠い所で妥協する（湧いた瞬間に撃たれるよりまし）
-  _pickSpawn(slot) {
-    const spawns = this.world.enemySpawns;
-    const others = [];
-    for (const s of this.slots.values()) {
-      if (s !== slot && s.sim.alive) others.push(s.sim.player.collider.start);
-    }
-    const ok = [];
-    let best = spawns[0];
-    let bestD = -1;
-    for (const sp of spawns) {
-      let min = Infinity;
-      for (const o of others) {
-        const d = Math.hypot(o.x - sp.x, o.z - sp.z);
-        if (d < min) min = d;
-      }
-      if (min > bestD) { bestD = min; best = sp; }
-      if (min >= MATCH.SPAWN_MIN_DIST) ok.push(sp);
-    }
-    // 候補が複数あるならばらけさせる。毎回同じ所に出ると待ち伏せが成立してしまう
-    if (ok.length > 0) return ok[(Math.random() * ok.length) | 0];
-    return best;
+  // 落下で力尽きた。戦域の外と同じ扱いで、残った側のラウンド取得にする
+  _killByFall(slot) {
+    this.push({
+      e: EV.KILL, id: slot.id, by: slot.id,
+      w: slot.sim.weapon, head: false, f: 1,
+    });
+    slot.sim.deaths++;
+    this._endRound(this._other(slot), 'fall');
+  }
+
+  /** 1対1なので「相手」は1人に決まる。いなければnull */
+  _other(slot) {
+    for (const s of this.slots.values()) if (s !== slot) return s;
+    return null;
+  }
+
+  // 席ごとの定位置。1対1なので2人ぶんあればよく、選ぶ余地を残さない。
+  //
+  // 以前は8箇所から「他人からSPAWN_MIN_DIST以上離れた所」を毎回抽選していたが、
+  // ラウンドの頭は2人が同時に湧くので、相手の位置が決まる前に自分の位置を選ぶことになる。
+  // 結果、条件を満たしているつもりで隣同士に出る回があった。
+  // 席で固定すれば、どのラウンドでも必ず対角の35m離れた位置から始まる
+  _spawnFor(slot) {
+    const spawns = this.world.arenaSpawns;
+    return spawns[slot.seat % spawns.length];
   }
 
   _respawn(slot) {
-    const pos = this._pickSpawn(slot);
+    const pos = this._spawnFor(slot);
     // 場外を向いて湧かないよう、必ず中央を向かせる
     const yaw = Math.atan2(pos.x, pos.z);
     slot.sim.spawn(pos, yaw);
     slot.sim.protectIn = MATCH.SPAWN_PROTECT_S;
     slot.starve = 0;
+    slot.outsideFor = 0;
+    slot.nades = NADE.PER_ROUND;
+    // 包帯もラウンドの頭で戻す。持ち越すと、前のラウンドで使い切った側だけ
+    // 立て直す手段が無いまま次のラウンドを戦うことになる
+    slot.sim.player.refill();
     slot.lastYaw = yaw;
     slot.lastPitch = 0;
     this.push({ e: EV.SPAWN, id: slot.id, p: [pos.x, pos.y, pos.z], yaw });
@@ -297,24 +495,37 @@ export class Room {
 
     for (const slot of this.slots.values()) {
       const sim = slot.sim;
-      if (!sim.alive) {
-        sim.respawnIn -= TICK_DT;
-        if (sim.respawnIn <= 0) this._respawn(slot);
-      }
+      // ラウンドの途中では誰も生き返らない。倒れたらそのラウンドは終わりなので、
+      // 復活はラウンドの頭で全員まとめてやる（_startRound）
       // 持ち替え・装填・無敵・連射の残りは実時間の話なので、
       // 入力が届いているかに関係なく毎刻み減らす。
       // 入力任せにすると、送るのを止めるだけで無敵が切れなくなる
       sim.clock(TICK_DT);
       this._feed(slot);
+      // 位置が決まった後で見る。食べる前に見ると1刻み古い位置で判定することになり、
+      // 戻り切った瞬間にもう1回削られる。
+      // 削るのはラウンドが動いている間だけ。人待ちの間や決着後の数秒に
+      // 範囲外で削られると、操作していないのに死ぬ
+      if (this.phase === PHASE.LIVE) this._zone(slot);
+      // 撃たれる以外の死に方（落下）でもラウンドは決まる。
+      // shot()を通った死は_killが拾うが、Playerの中で体力が0になる経路は
+      // ここで拾わないと、倒れたまま誰も勝たずに時間切れまで続く。
+      // _killも_killByZoneも局面をBREAKへ移すので、二重には走らない
+      if (this.phase === PHASE.LIVE && !sim.alive) this._killByFall(slot);
       sim.record(t);
     }
 
-    if (this._ending) {
-      this._intermission -= TICK_DT;
-      if (this._intermission <= 0) this._restart();
-    } else {
+    // 玉はラウンドが動いている間だけ進める。幕間に爆発すると、
+    // 次のラウンドが始まった直後の相手に前のラウンドの爆風が入る
+    if (this.phase === PHASE.LIVE) this._stepNades();
+
+    if (this.phase !== PHASE.WAIT) {
       this.timeLeft -= TICK_DT;
-      if (this.timeLeft <= 0) this._endMatch('time');
+      if (this.timeLeft <= 0) {
+        if (this.phase === PHASE.LIVE) this._endRound(null, 'time');
+        else if (this.phase === PHASE.BREAK) this._startRound();
+        else this._startMatch();
+      }
     }
 
     this._scoreTimer -= TICK_DT;
@@ -384,7 +595,9 @@ export class Room {
     // すでに20Hzで流れている物に数バイト載せるほうが安い
     const left = Math.round(Math.max(0, this.timeLeft) * 10) / 10;
     for (const s of this.slots.values()) {
-      s.conn.send({ t: Sv.SNAPSHOT, tk: this.tick, now, ack: s.lastSeq, left, ps });
+      s.conn.send({
+        t: Sv.SNAPSHOT, tk: this.tick, now, ack: s.lastSeq, left, ph: this.phase, ps,
+      });
     }
     if (this.events.length > 0) {
       const e = this.events;
@@ -393,43 +606,70 @@ export class Room {
     }
   }
 
-  _sendScore() {
+  _rows() {
     const rows = [];
     for (const s of this.slots.values()) {
-      rows.push([s.id, s.sim.kills, s.sim.deaths, Math.round(s.conn.rtt || 0)]);
+      rows.push([s.id, s.sim.kills, s.sim.deaths, Math.round(s.conn.rtt || 0), s.rounds]);
     }
+    return rows;
+  }
+
+  _sendScore() {
+    const rows = this._rows();
     for (const s of this.slots.values()) s.conn.send({ t: Sv.SCORE, rows });
+  }
+
+  /* ------------------------------------------------------ ラウンド進行 */
+
+  // 試合の頭。点数を0に戻して1ラウンド目へ
+  _startMatch() {
+    this.round = 0;
+    for (const s of this.slots.values()) {
+      s.rounds = 0;
+      s.sim.kills = 0;
+      s.sim.deaths = 0;
+    }
+    this._sendScore();
+    this._startRound();
+  }
+
+  // ラウンドの頭。ここで初めて全員が生き返る
+  _startRound() {
+    this.round++;
+    this.phase = PHASE.LIVE;
+    this.timeLeft = MATCH.ROUND_TIME_S;
+    // 前のラウンドで空中に残っていた玉は持ち越さない
+    this.nades.length = 0;
+    for (const s of this.slots.values()) this._respawn(s);
+  }
+
+  // ラウンドの決着。winnerがnullなら時間切れで、どちらの取得にもならない。
+  // 「どちらかが倒れたら終わり」なので、残りの人数を数える必要がない（1対1固定）
+  _endRound(winner, why) {
+    if (this.phase !== PHASE.LIVE) return;
+    if (winner) winner.rounds++;
+    this._sendScore();
+
+    if (winner && winner.rounds >= MATCH.ROUND_WINS) {
+      this._endMatch(why);
+      return;
+    }
+    this.phase = PHASE.BREAK;
+    this.timeLeft = MATCH.ROUND_BREAK_S;
   }
 
   // 最終得点を配ってから、少し置いて次の試合を始める。
   // 終わったまま止めると待っている人が部屋に取り残されるが、
   // その場で0点に戻すと最終順位と0点が1ms差で届いて、順位が読めないまま消える
   _endMatch(why = 'score') {
-    if (this._ending) return;   // 時間切れと点数到達が同じ刻みで重なっても二重に走らせない
-    this._ending = true;
-    this._intermission = INTERMISSION_S;
-    this._sendScore();          // これが「今の試合の結果」
+    this.phase = PHASE.END;
+    this.timeLeft = MATCH.MATCH_BREAK_S;
     // 得点だけを配ると、受け取った側は「これが最終順位なのか途中経過なのか」を
     // 区別できない。次の試合の0点で必ず上書きされるので、専用の電文で名乗る
-    const rows = [];
+    const rows = this._rows();
     for (const s of this.slots.values()) {
-      rows.push([s.id, s.sim.kills, s.sim.deaths, Math.round(s.conn.rtt || 0)]);
+      s.conn.send({ t: Sv.MATCHEND, rows, why, next: MATCH.MATCH_BREAK_S });
     }
-    for (const s of this.slots.values()) {
-      s.conn.send({ t: Sv.MATCHEND, rows, why, next: INTERMISSION_S });
-    }
-  }
-
-  _restart() {
-    this._ending = false;
-    this._intermission = 0;
-    for (const s of this.slots.values()) {
-      s.sim.kills = 0;
-      s.sim.deaths = 0;
-      this._respawn(s);
-    }
-    this.timeLeft = MATCH.TIME_LIMIT_S;
-    this._sendScore();          // 0点に戻ったことを伝えて次の試合へ
   }
 }
 

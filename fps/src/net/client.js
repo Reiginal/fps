@@ -10,7 +10,7 @@
    DOMには触らない。接続画面もスコアボードも別のファイルが作る。 */
 
 import {
-  C, Sv, EV, encode, decode, unpackPlayer, normalizeRoom,
+  C, Sv, EV, PHASE, encode, decode, unpackPlayer, normalizeRoom,
   qPos, qAng, INPUT_BATCH, INTERP_DELAY_MS, TIMEOUT_MS,
 } from './protocol.js';
 
@@ -51,6 +51,8 @@ export class NetClient {
 
     // 試合の残り秒。スナップショットに相乗りして届く
     this.timeLeft = 0;
+    // 人待ちから始まる。繋がった直後にラウンド中の表示を出さない
+    this.phase = PHASE.WAIT;
 
     this.onEvent = null;
     this.onSnapshot = null;
@@ -258,7 +260,7 @@ export class NetClient {
     const id = Array.isArray(p) ? p[0] : p.id;
     if (id == null) return null;
     let row = this.players.get(id);
-    if (!row) { row = { name: '', kills: 0, deaths: 0, ping: 0 }; this.players.set(id, row); }
+    if (!row) { row = { name: '', kills: 0, deaths: 0, ping: 0, rounds: 0 }; this.players.set(id, row); }
     const name = Array.isArray(p) ? p[1] : p.name;
     // 送る時と同じ長さで詰める。長い名前がそのまま来ると名札が画面を横切る
     if (typeof name === 'string' && name) row.name = name.slice(0, 24);
@@ -289,6 +291,7 @@ export class NetClient {
       row.kills = r[1] | 0;
       row.deaths = r[2] | 0;
       row.ping = r[3] | 0;
+      row.rounds = r[4] | 0;
       // 自分の往復遅延はサーバーが測った値を優先する。他人に見えている数字と揃う
       if (r[0] === this.id) this.ping = row.ping;
     }
@@ -322,6 +325,7 @@ export class NetClient {
       out.push({
         id, name: this.nameOf(id),
         kills: r.kills | 0, deaths: r.deaths | 0, ping: r.ping | 0,
+        rounds: r.rounds | 0,
         me: id === this.id,
       });
     }
@@ -340,6 +344,9 @@ export class NetClient {
   _snapshot(m) {
     this._syncClock(m.now);
     if (typeof m.left === 'number') this.timeLeft = m.left;
+    // 局面。timeLeftが「ラウンドの残り」なのか「次が始まるまで」なのかは
+    // これを見ないと分からない
+    if (typeof m.ph === 'number') this.phase = m.ph;
 
     const time = typeof m.now === 'number' ? m.now : (this._snaps.length ? this._snaps[this._snaps.length - 1].time + 50 : 0);
     const last = this._snaps[this._snaps.length - 1];
@@ -517,6 +524,21 @@ export class NetClient {
     this._send({
       t: C.SHOT,
       s: this._seq - 1,
+      o: [qPos(origin.x), qPos(origin.y), qPos(origin.z)],
+      d: [qPos(dx), qPos(dy), qPos(dz)],
+    });
+  }
+
+  // 投擲。撃つのと同じで向きだけを申告する。
+  // 飛翔も跳ね返りも爆発もサーバーが計算するので、着弾点はこちらから指定できない
+  sendThrow(origin, dir) {
+    if (!this.connected) return;
+    this._flushInput();
+    let dx = dir.x, dy = dir.y, dz = dir.z;
+    const len = Math.hypot(dx, dy, dz);
+    if (len > 1e-6) { dx /= len; dy /= len; dz /= len; }
+    this._send({
+      t: C.THROW,
       o: [qPos(origin.x), qPos(origin.y), qPos(origin.z)],
       d: [qPos(dx), qPos(dy), qPos(dz)],
     });

@@ -23,14 +23,21 @@ const FALLBACK_WEAPONS = [
     range: 120, falloffStart: 42, falloffEnd: 95, falloffMin: 0.5,
   },
   {
-    id: 'smg', name: 'VECTOR-9 短機関銃', damage: 18, rpm: 950, pellets: 1,
-    mag: 35, reloadTime: 1.85, adsTime: 0.12,
-    range: 80, falloffStart: 18, falloffEnd: 48, falloffMin: 0.42,
-  },
-  {
     id: 'shotgun', name: 'M870 ショットガン', damage: 13, rpm: 78, pellets: 9,
     mag: 7, reloadTime: 2.9, adsTime: 0.2,
     range: 40, falloffStart: 8, falloffEnd: 26, falloffMin: 0.18,
+  },
+  {
+    id: 'knife', name: 'ナイフ', damage: 70, rpm: 95, pellets: 1,
+    mag: 9999, reloadTime: 0, adsTime: 0.16,
+    range: 1.8, falloffStart: 1.8, falloffEnd: 1.8, falloffMin: 1.0,
+  },
+  {
+    // 手榴弾は撃たないので、当たり判定の値は使われない。
+    // 表の並びをクライアントと揃えるためだけに置く（番号がずれると別の武器になる）
+    id: 'nade', name: '手榴弾', damage: 0, rpm: 40, pellets: 1,
+    mag: 9999, reloadTime: 0, adsTime: 0.16,
+    range: 0, falloffStart: 0, falloffEnd: 0, falloffMin: 1,
   },
 ];
 
@@ -57,6 +64,7 @@ export const weaponDef = (i) => WEAPONS[(i | 0) >= 0 && (i | 0) < WEAPONS.length
 const CODE_BIT = {
   KeyW: K.FWD, KeyS: K.BACK, KeyA: K.LEFT, KeyD: K.RIGHT,
   Space: K.JUMP, ControlLeft: K.CROUCH, ShiftLeft: K.SPRINT, KeyR: K.RELOAD,
+  KeyF: K.HEAL,
 };
 
 const ZERO_LOOK = { yaw: 0, pitch: 0 };
@@ -309,6 +317,13 @@ export class SimPlayer {
     this.input.set(bits);
     p.yaw = yaw;
     p.pitch = pitch < -1.5 ? -1.5 : pitch > 1.5 ? 1.5 : pitch;
+
+    // 包帯。このビットは「Fを押している」ではなく「今まさに巻いている」を表す。
+    // 立ち上がりで開始し、落ちたら中断する。
+    // 中断まで見るのは、向こうで武器を持ち替えて巻くのをやめた時に、
+    // こちらだけ最後まで巻き切って体力が食い違うのを防ぐため
+    if (this.input.pressed('KeyF')) p.startHeal();
+    else if (!this.input.down('KeyF') && p.healing > 0) p.cancelHeal();
 
     p.update(TICK_DT, this.input, false);
 

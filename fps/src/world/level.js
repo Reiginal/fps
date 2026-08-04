@@ -691,8 +691,7 @@ export function buildLevel(mats) {
   root.add(solids);
   root.add(props);
 
-  // 新素材はtextures側と歩調を合わせて使う。まだ差し替わっていない環境でも
-  // 落とさないように、無ければ近い既存素材へ退避する
+  // buildMaterials()は必ず12種すべてを返すので、無かった時の退避は置かない
   const M = {
     concrete: mats.concrete,
     concreteDark: mats.concreteDark,
@@ -701,11 +700,11 @@ export function buildLevel(mats) {
     metalRed: mats.metalRed,
     wood: mats.wood,
     sandbag: mats.sandbag,
-    brick: mats.brick ?? mats.concreteDark,
-    rust: mats.rustMetal ?? mats.metalRed,
-    plaster: mats.plaster ?? mats.concrete,
-    dirt: mats.dirt ?? mats.asphalt,
-    corr: mats.corrugated ?? mats.metal,
+    brick: mats.brick,
+    rust: mats.rustMetal,
+    plaster: mats.plaster,
+    dirt: mats.dirt,
+    corr: mats.corrugated,
   };
 
   // 全材質に頂点カラーを開ける。emit()が個体ごとに±5%の明度を焼き込むので、
@@ -3812,10 +3811,32 @@ export function buildLevel(mats) {
     [-5.8, 22.4, 3.0], [4.4, 24.0, 2.2], [-7.9, 24.8, 2.0],
   ].map(([x, z, r]) => ({ pos: new THREE.Vector3(x, 0, z), radius: r }));
 
+  // 対戦用の湧き地点。対戦は中心から半径20m（protocol.jsのZONE）しか使わないので、
+  // 場内全域に散らしてある上のenemySpawnsは1つも中に入っていない（一番近い所で30m）。
+  //
+  // 座標は目分量ではなく、上で組んだOctreeに対して0.5m刻みで総当たりして、
+  //   ・真上から降ろした地面が高さ1.2m以下（コンテナの屋根や倉庫の2階に湧かせない）
+  //   ・立ち姿のカプセルが地形に食い込まない
+  //   ・頭上90cmに何も無い（低い庇の下で身動きが取れない場所を外す）
+  // を全部満たした2843箇所から、互いに一番離れる8点を選んだもの。
+  // 中心から11〜18mの帯に限っているのは、中央の掩体まわりは奪い合う場所であって、
+  // 出てきた瞬間に立っている場所ではないから。
+  //
+  // 並び順に意味がある。1対1では席番号でそのまま引くので、
+  // 先頭2つが「毎ラウンドの定位置」になる。この2つは中央を挟んで真向かい・35m離れ。
+  // 順番を変えると開始位置が近づくので、入れ替える時は距離を測り直すこと
+  const arenaSpawns = [
+    new THREE.Vector3(-17.5, 0.1, 0), new THREE.Vector3(17.5, 0.1, 0),
+    new THREE.Vector3(0, 0.1, -17.5), new THREE.Vector3(0, 0.1, 17.5),
+    new THREE.Vector3(-12, 0.1, -12), new THREE.Vector3(-12, 0.1, 12),
+    new THREE.Vector3(12, 0.1, 12), new THREE.Vector3(10.5, 0.1, -10.5),
+  ];
+
   return {
     root,
     octree,
     enemySpawns,
+    arenaSpawns,
     coverPoints,
     playerSpawn: new THREE.Vector3(0, 1.2, 26),
     bounds: 40,

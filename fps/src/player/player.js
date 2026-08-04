@@ -7,6 +7,7 @@
 // バネの結果は絶対にcolliderへ戻さない。当たり判定が揺れると撃ち合いが壊れる。
 import * as THREE from 'three';
 import { Capsule } from 'three/addons/math/Capsule.js';
+import { HEAL } from '../net/protocol.js';
 
 const GRAVITY = 22;
 const STAND_H = 1.74;
@@ -41,6 +42,19 @@ const SPRINT_FRICTION = 0.42;
 // という差をここで作る。_sprintHoldが抜けるまで効くので離した後もしばらく滑る
 const SPRINT_STOP_FRICTION = 0.34;
 const JUMP_VEL = 6.6;
+// しゃがみジャンプの倍率。縮こまった姿勢から伸び上がるので立ち跳びより低い。
+// 0.82だと段差の乗り越えには足りるが、立ち跳びの代わりにはならない
+const CROUCH_JUMP_MUL = 0.82;
+
+/* ------------------------------------------------------------ 落下ダメージ */
+
+// これより速く地面に当たると痛い。m/s。
+// 自力のジャンプ(JUMP_VEL 6.6)で落ちてくる速さがちょうど6.6なので、
+// そこを超える12から始める。平地で跳ねているだけでは絶対に減らない
+const FALL_SAFE_SPEED = 13;
+// 即死する落下速度。18m/s＝約16mの高さ。場内で一番高い面が18.1mなので、
+// 屋上から地面へ直に落ちるとほぼ死ぬ
+const FALL_LETHAL_SPEED = 20;
 // 乗り越えられる段差。土嚢1段(0.55)に乗れる高さにしてある
 const STEP_HEIGHT = 0.58;
 // 床から離れた直後の跳躍猶予と、着地直前の入力の取り置き。
@@ -112,10 +126,24 @@ export class Player {
     this.crouching = false;
     this.sprinting = false;
     this.adsFactor = 0;      // 外から武器が書き込む 0..1
+    // 持っている武器から入る移動速度の倍率。武器側が毎フレーム書き込む
+    this.moveMul = 1;
 
-    this.health = 100;
-    this.maxHealth = 100;
+    // 体力を100から130へ。武器のダメージ表は触らない。
+    // ライフルは胴27なので4発→5発、SMGは18で6発→8発になり、
+    // 撃ち合いが「先に当てたほうが勝ち」から「当て続けたほうが勝ち」へ寄る。
+    // 頭は倍率が乗るので、狙える人の速さは落としすぎない
+    this.health = 130;
+    this.maxHealth = 130;
     this.alive = true;
+    // 包帯。巻いている残り秒数と、持っている数
+    this.healing = 0;
+    // 巻き終わった直後だけ立つ印。対戦で「巻いている」意思をサーバーへ
+    // 送り続ける時間を、通信の遅れぶん引き伸ばすために使う
+    this.healHold = 0;
+    this.bandages = HEAL.PER_ROUND;
+    this.onHealDone = null;
+    this.onHealCancel = null;
 
     // 見た目の揺れ（当たり判定には一切影響させない）
     this.bobPhase = 0;
@@ -141,6 +169,7 @@ export class Player {
 
     this.onFootstep = null;
     this.onLand = null;
+    this.onFallDamage = null;
 
     this._probe = new Capsule(new THREE.Vector3(), new THREE.Vector3(), PROBE_R);
     this._wish = new THREE.Vector3();
@@ -213,17 +242,56 @@ export class Player {
     return this._dip.x;
   }
 
+  /**
+   * 包帯を巻き始める。巻いている間は遅くなり、撃つか被弾すると中断する。
+   * 中断した回は数を消費しない（撃たれ得にしない）
+   */
+  startHeal() {
+    if (!this.alive) return false;
+    if (this.healing > 0) return false;
+    if (this.bandages <= 0) return false;
+    if (this.health >= this.maxHealth) return false;
+    this.healing = HEAL.TIME_S;
+    return true;
+  }
+
+  /**
+   * ラウンドの頭と湧き直しで戻す物。
+   *
+   * 体力・包帯・巻いている途中の状態をまとめて1か所にしてあるのは、
+   * 前は呼ぶ側が3行ずつ手で書いていて、湧き直しの経路で書き漏れていたから。
+   * 実際、死んで再開しても包帯が0のままだった。
+   * 対戦ではもっと悪く、サーバー側は2本に戻すのに手元だけ0のままで、
+   * Fを押しても手元が断って、一生使えない状態になっていた
+   */
+  refill() {
+    this.health = this.maxHealth;
+    this.alive = true;
+    this.bandages = HEAL.PER_ROUND;
+    this.healing = 0;
+    this.healHold = 0;
+  }
+
+  /** 巻くのをやめる。撃った時・被弾した時・持ち替えた時に呼ぶ */
+  cancelHeal() {
+    if (this.healing <= 0) return;
+    this.healing = 0;
+    // 中断は即座に相手へ伝える。ここで印を残すと、対戦相手側の
+    // サーバーが中断に気づかず回復だけ通ってしまう
+    this.healHold = 0;
+    this.onHealCancel?.();
+  }
+
   damage(amount) {
     if (!this.alive) return;
+    // 撃たれたら巻くのを中断する。撃ち合いながら回復できると、
+    // 遮蔽へ下がる判断そのものが要らなくなる
+    this.cancelHeal();
     this.health -= amount;
     if (this.health <= 0) {
       this.health = 0;
       this.alive = false;
     }
-  }
-
-  heal(amount) {
-    this.health = Math.min(this.maxHealth, this.health + amount);
   }
 
   _collide() {
@@ -395,7 +463,12 @@ export class Player {
     // 前傾は狙いに直接響くので、こちらは素早く戻す
     this._sprintLean = THREE.MathUtils.damp(this._sprintLean, this.sprinting ? 1 : 0, 8, dt);
 
-    let wishSpeed = this.crouching ? SPEED_CROUCH : this.sprinting ? SPEED_SPRINT : SPEED_WALK;
+    // 武器ごとの倍率。短剣は銃を下ろすぶん身軽で速い。
+    // 持たない武器はmoveMulを書いていないので、その時は1として扱う
+    // 包帯を巻いている間は遅くなる。速いまま巻けると、下がりながら回復できて
+    // 「遮蔽に入って巻く」という判断が消える
+    let wishSpeed = (this.crouching ? SPEED_CROUCH : this.sprinting ? SPEED_SPRINT : SPEED_WALK)
+      * (this.moveMul || 1) * (this.healing > 0 ? HEAL.SLOW : 1);
     wishSpeed *= 1 - this.adsFactor * 0.35;
     if (!this.alive) wishSpeed = 0;
 
@@ -485,14 +558,40 @@ export class Player {
     this._accX = THREE.MathUtils.damp(this._accX, clamp((this.velocity.x - preX) * idt, -60, 60), 13, dt);
     this._accZ = THREE.MathUtils.damp(this._accZ, clamp((this.velocity.z - preZ) * idt, -60, 60), 13, dt);
 
+    /* ------------------------------------------------------ 包帯 */
+    this.healHold = Math.max(0, (this.healHold || 0) - dt);
+    if (this.healing > 0) {
+      // 走り出したら中断する。走れる状態で巻けると遅くする意味が無い
+      if (this.sprinting) {
+        this.cancelHeal();
+      } else {
+        this.healing -= dt;
+        if (this.healing <= 0) {
+          this.healing = 0;
+          this.bandages = Math.max(0, this.bandages - 1);
+          this.health = Math.min(this.maxHealth, this.health + HEAL.AMOUNT);
+          // 巻き終わってからも0.5秒だけ「巻いている」印を残す。
+          // 対戦では自分の入力をサーバーへ送って向こうでも同じ回復を走らせるが、
+          // 向こうは通信の遅れぶん遅れて始まって遅れて終わる。こちらが
+          // 終わった瞬間に意思表示をやめると、向こうが巻き終わる寸前に
+          // 「やめた」と受け取られて、こちらだけ回復した状態になる
+          this.healHold = 0.5;
+          this.onHealDone?.();
+        }
+      }
+    }
+
     /* -------------------------------------------------------- 跳躍 */
     this._airTime = this.onFloor ? 0 : this._airTime + dt;
     this._jumpBuffer = input.pressed('Space')
       ? JUMP_BUFFER
       : Math.max(0, this._jumpBuffer - dt);
+    // しゃがんだままでも跳べる。以前は!this.crouchingで弾いていたので、
+    // Ctrlを押したままだとSpaceが無反応になり「たまにジャンプが出ない」に見えていた。
+    // 跳ぶ勢いだけ落とす（縮こまった姿勢から伸び上がるぶん低い）
     if (this._jumpBuffer > 0 && this._airTime < COYOTE
-      && this.alive && !this.crouching && this.velocity.y < 4) {
-      this.velocity.y = JUMP_VEL;
+      && this.alive && this.velocity.y < 4) {
+      this.velocity.y = this.crouching ? JUMP_VEL * CROUCH_JUMP_MUL : JUMP_VEL;
       this.onFloor = false;
       this._airTime = COYOTE;     // 猶予を使い切って二重跳びを止める
       this._jumpBuffer = 0;
@@ -566,6 +665,21 @@ export class Player {
         this._dip.kick(-impact * 3.6);        // 膝が沈む
         this._sPitch.kick(-impact * 0.55);    // 前へつんのめる
         this.onLand?.(impact);
+      }
+      // 落下ダメージ。速さで測る（高さではなく）。
+      // 高さで測ろうとすると「どこから落ち始めたか」を覚えておく必要があり、
+      // 斜路を駆け下りた場合や段差を連続で降りた場合に何を起点にするかが決まらない。
+      // 着地の瞬間の速さなら、途中で屋根を経由しようが正しく分かれる
+      const fall = -this._fallSpeed;
+      if (fall > FALL_SAFE_SPEED) {
+        const t = (fall - FALL_SAFE_SPEED) / (FALL_LETHAL_SPEED - FALL_SAFE_SPEED);
+        // 二乗で効かせる。線形だと「安全な高さの少し上」が痛すぎて、
+        // コンテナの上から降りるだけで削られる
+        const dmg = this.maxHealth * t * t;
+        if (dmg >= 1) {
+          this.damage(dmg);
+          this.onFallDamage?.(dmg);
+        }
       }
     }
     this._prevOnFloor = this.onFloor;

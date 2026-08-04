@@ -35,11 +35,19 @@ export class NetMenu {
       root: $('netmenu'),
       name: $('nmName'), url: $('nmUrl'), room: $('nmRoom'),
       status: $('nmStatus'), solo: $('nmSolo'), join: $('nmJoin'),
+      killPrev: $('nmKillPrev'), killNext: $('nmKillNext'),
+      killPlay: $('nmKillPlay'), killNote: $('nmKillNote'),
+      killMore: $('nmKillMore'), killTune: $('nmKillTune'),
     };
 
     // 統合側が差し替える。初期値を空関数にしておくと、繋ぎ忘れても画面が落ちない
     this.onSolo = () => {};
     this.onJoin = () => {};
+    // キル音の候補送り。dirが0なら今の候補をもう一度鳴らすだけ。
+    // 戻り値の{index,total,name,note,tune}をそのまま画面へ出す
+    this.onKillSound = () => null;
+    // つまみを1つ動かした時。統合側がAudioEngineへ渡して鳴らす
+    this.onKillTweak = () => null;
     this.busy = false;
 
     this.el.name.value = load(SAVE.name, '');
@@ -69,6 +77,80 @@ export class NetMenu {
     this.el.room.oninput = () => {
       this.el.room.value = normalizeRoom(this.el.room.value);
     };
+
+    // キル音を出撃前に聴き比べる。押した操作が起点になるので、
+    // ブラウザの「操作がないと音を鳴らさない」制限にもここで引っかからない
+    this.el.killPrev.onclick = () => this._killSound(-1);
+    this.el.killNext.onclick = () => this._killSound(1);
+    this.el.killPlay.onclick = () => this._killSound(0);
+    this.el.killMore.onclick = () => {
+      const open = this.el.killTune.classList.toggle('hidden');
+      this.el.killMore.textContent = open ? 'つまみを開く ▾' : 'つまみを閉じる ▴';
+    };
+  }
+
+  /**
+   * つまみを組み立てる。
+   * @param range {キー: {min,max,step,label}}
+   */
+  buildKillKnobs(range) {
+    this._killRange = range;
+    this._knobs = {};
+    const box = this.el.killTune;
+    box.innerHTML = '';
+    for (const [key, r] of Object.entries(range)) {
+      const row = document.createElement('div');
+      row.className = 'knob';
+      const nameEl = document.createElement('div');
+      nameEl.className = 'kname';
+      nameEl.textContent = r.label;
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = r.min; input.max = r.max; input.step = r.step;
+      const valEl = document.createElement('div');
+      valEl.className = 'kval';
+      // 動かしている最中に鳴らす。離すまで待たせると、回している感触が出ない。
+      // ただし連続で動かすと音が重なって団子になるので、少し間引く
+      let last = 0;
+      input.oninput = () => {
+        const v = parseFloat(input.value);
+        valEl.textContent = this._fmt(key, v);
+        const now = performance.now();
+        if (now - last < 140) return;
+        last = now;
+        this.setKillSound(this.onKillTweak(key, v));
+      };
+      row.append(nameEl, input, valEl);
+      box.appendChild(row);
+      this._knobs[key] = { input, valEl };
+    }
+  }
+
+  _fmt(key, v) {
+    if (key === 'gap') return `${Math.round(v * 1000)}ms`;
+    if (key === 'hits') return `${Math.round(v)}発`;
+    return v.toFixed(2);
+  }
+
+  _killSound(dir) {
+    this.setKillSound(this.onKillSound(dir));
+  }
+
+  /** 今の設定を画面に出す。鳴らさずに表示だけ更新する時にも使う */
+  setKillSound(info) {
+    if (!info) return;
+    this.el.killPlay.textContent = `${info.index + 1} / ${info.total}　${info.name}`;
+    this.el.killNote.textContent = `${info.note}　／　押すと鳴る。つまみで自分の好みに詰められる`;
+    // つまみの位置も実際の値に合わせる。出発点を選び直した時にここがずれると、
+    // 表示されている値と鳴っている音が食い違う
+    if (info.tune && this._knobs) {
+      for (const [key, k] of Object.entries(this._knobs)) {
+        const v = info.tune[key];
+        if (v == null) continue;
+        k.input.value = v;
+        k.valEl.textContent = this._fmt(key, v);
+      }
+    }
   }
 
   show() {
@@ -150,5 +232,5 @@ export class NetMenu {
 // そのまま押せて、他人の所へ入る時だけIPを書き換えれば済む
 function defaultUrl() {
   const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
-  return proto + (location.host || 'localhost:5173');
+  return proto + (location.host || 'localhost:8080');
 }

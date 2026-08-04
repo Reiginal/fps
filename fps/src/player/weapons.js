@@ -14,6 +14,20 @@ const _fwd = new THREE.Vector3(0, 0, 1);
 const clamp = (a, b, c) => (a < b ? b : a > c ? c : a);
 const clamp01 = (a) => (a < 0 ? 0 : a > 1 ? 1 : a);
 const lerp = (a, b, t) => a + (b - a) * t;
+// 覗いている時のバースト。3点にするのは、反動パターンが最初の数発で
+// 一番読みやすい形をしているため（4発目から蛇行が始まる）
+const BURST_COUNT = 3;
+// バースト間の間隔。ライフルの連射間隔(0.094秒)の3倍強にして、
+// 押しっぱなしでもフルオートより明確に遅くする
+const BURST_GAP_S = 0.32;
+
+// 近接の振り1回にかける時間。武器のrpm(95=0.63秒に1回)より短くして、
+// 振り終わってから次が出せるようにする
+const SWING_TIME = 0.42;
+// 包帯を巻くのにかかる秒数。protocol.jsのHEAL.TIME_Sと同じ値を持つ
+// （weapons.jsはprotocolを読まないので、ここだけ写す。片方を変えたら両方直すこと）
+const HEAL_TIME = 2.4;
+
 const rand = (s) => (Math.random() - 0.5) * s;
 // pがa..bの区間のどこにいるかを0..1で返す。装填の工程を時間軸に並べるのに使う
 const seg = (p, a, b) => clamp01((p - a) / (b - a));
@@ -2054,6 +2068,152 @@ function buildShotgun() {
 
 /* ---------------------------------------------------------- 武器定義 */
 
+/* ------------------------------------------------------------------ 短剣 */
+
+// 銃と同じ枠に収める。当たり判定を別に作らないのが肝で、
+// 今の射撃は「カメラから前へレイを飛ばして def.range まで見る」作りなので、
+// 射程1.8mの銃として書けば近接になる。壁越しにも当たらない（レイが壁で止まる）。
+//
+// 弾を持たないので mag に大きい数を入れて装填を起こさせない。
+// muzzle/eject/sight の3つは武器側が必ず参照するので、銃が無くても印だけは置く
+function buildKnife() {
+  const g = new THREE.Group();
+
+  // 刃。輪郭を1枚のShapeで描いて押し出す。
+  //
+  // 前は断面を押し出したうえに、峰の黒帯・血抜きの溝・ギザ刃を重ねていた。
+  // 部品が増えるほど「盛った塊」に見えて、ナイフの持つ簡潔さから遠ざかる。
+  // 刃物が刃物に見えるのは輪郭であって表面の装飾ではないので、
+  // 上から見た形（真っ直ぐな峰と、先で合わさる刃）だけを1枚で出す
+  const BL = 0.225;           // 刃渡り
+  const BW = 0.024;           // 根元の半幅
+  const blade = new THREE.Shape();
+  blade.moveTo(-BW, 0);            // 根元・峰側
+  blade.lineTo(-BW, -BL * 0.62);   // 峰は先まで真っ直ぐ
+  blade.lineTo(0, -BL);            // 切っ先
+  blade.lineTo(BW * 0.62, -BL * 0.30);
+  blade.lineTo(BW, 0);             // 根元・刃側
+  blade.closePath();
+  const bladeGeo = new THREE.ExtrudeGeometry(blade, {
+    // 薄く押し出して、面取りで縁だけ落とす。これだけで断面が刃に見える
+    depth: 0.006, bevelEnabled: true,
+    bevelThickness: 0.0022, bevelSize: 0.0030, bevelSegments: 1,
+  });
+  // Shapeは XY 平面に描かれるので、寝かせて前（-Z）へ向ける。
+  // 符号に注意。-90度だと (x, y, 0) → (x, 0, -y) になり、
+  // 上で y を 0〜-BL に取った刃が z の正側＝カメラの後ろへ伸びる。
+  // +90度で (x, y, 0) → (x, 0, y) となり、そのまま前へ出る
+  bladeGeo.rotateX(Math.PI / 2);
+  bladeGeo.translate(0, 0.003, -0.030);
+  g.add(part(bladeGeo, MATS.steel, 0, 0, 0));
+
+  // 鍔と柄。合わせて2つだけ。輪の飾りや柄尻は足さない。
+  // 部品を増やしても情報は増えず、シルエットが濁るだけ
+  g.add(part(cboxG(0.052, 0.016, 0.012), MATS.phosphate, 0, 0.002, -0.030));
+  g.add(part(cylG(0.016, 0.018, 0.100, 10), MATS.polymer, 0, 0.001, 0.028, Math.PI / 2));
+
+  // 銃ではないが、武器側が必ず読む3つの印は置く。
+  // muzzleは閃光と煙の出所（短剣では光らせないので位置だけ）、
+  // sightはADSの寄せ先の逆算に使う（覗いても構えが崩れないよう刃の芯に置く）
+  const muzzle = new THREE.Object3D();
+  muzzle.position.set(0, 0, -0.260);
+  g.add(muzzle);
+  g.userData.muzzle = muzzle;
+  const eject = new THREE.Object3D();
+  eject.position.set(0, 0, 0);
+  g.add(eject);
+  g.userData.eject = eject;
+  const sight = new THREE.Object3D();
+  sight.position.set(0, 0.003, -0.140);
+  g.add(sight);
+  g.userData.sight = sight;
+
+  /* ---- 手。右手だけで逆手に持つ。左手は使わないので画面外へ逃がす */
+  const handR = buildHand(1, {
+    gripR: 0.021, wrap: 0.72, trigger: false, armDir: [0.38, -0.62, 0.92], armLen: 0.62,
+  });
+  handR.position.set(0, -0.001, 0.030);
+  handR.rotation.set(-0.10, 0, 0);
+  g.add(handR);
+  g.userData.handR = handR;
+
+  // 左手は持たない武器なので、画面の外へ置いて出さない。
+  // 消してしまうと、武器を持ち替えた時に左手だけ出てこない不具合の元になる
+  const handL = buildHand(-1, {
+    gripR: 0.024, wrap: 0.55, tip: -0.30, roll: 0.40, skew: 0.20,
+    wrist: [0.046, -0.052, -0.038], armDir: [-0.38, -0.86, -0.78],
+  });
+  handL.position.set(0.34, -0.40, 0.16);
+  handL.rotation.set(-Math.PI / 2 + 0.10, 0, 0.12);
+  handL.visible = false;
+  g.add(handL);
+  g.userData.handL = handL;
+
+  g.userData.holdL = {
+    rest: [[0.34, -0.40, 0.16], [-Math.PI / 2 + 0.10, 0, 0.12]],
+    mag: [[0.34, -0.40, 0.16], [-Math.PI / 2 + 0.10, 0, 0.12]],
+    low: [[0.34, -0.40, 0.16], [-Math.PI / 2 + 0.10, 0, 0.12]],
+    charge: [[0.34, -0.40, 0.16], [-Math.PI / 2 + 0.10, 0, 0.12]],
+  };
+
+  bakeStatic(g);
+  return g;
+}
+
+// 手榴弾。持ち替えると手に持つだけで、左クリックで投げる。
+// 撃つ道具ではないので melee と同じく弾数も装填も持たない
+function buildGrenade() {
+  const g = new THREE.Group();
+  // 胴。上下を潰した円柱を2段にして卵形にする
+  g.add(part(cylG(0.032, 0.036, 0.062, 14), MATS.enamel, 0, 0, 0, Math.PI / 2));
+  g.add(part(cylG(0.026, 0.032, 0.020, 14), MATS.enamel, 0, 0, -0.040, Math.PI / 2));
+  g.add(part(cylG(0.026, 0.032, 0.020, 14), MATS.enamel, 0, 0, 0.040, Math.PI / 2));
+  // 信管の頭と安全レバー
+  g.add(part(cylG(0.013, 0.013, 0.022, 10), MATS.phosphate, 0, 0, -0.062, Math.PI / 2));
+  g.add(part(cboxG(0.010, 0.006, 0.052), MATS.steel, 0.014, 0.004, -0.038));
+  // 安全ピンの輪。薄い円柱で代用する（この縮尺では輪の穴は1画素も見えない）
+  g.add(part(cylG(0.011, 0.011, 0.003, 12), MATS.steel, 0.024, 0.010, -0.060, 0, Math.PI / 2, 0));
+
+  const muzzle = new THREE.Object3D();
+  muzzle.position.set(0, 0, -0.07);
+  g.add(muzzle);
+  g.userData.muzzle = muzzle;
+  const eject = new THREE.Object3D();
+  g.add(eject);
+  g.userData.eject = eject;
+  const sight = new THREE.Object3D();
+  sight.position.set(0, 0, 0);
+  g.add(sight);
+  g.userData.sight = sight;
+
+  const handR = buildHand(1, {
+    gripR: 0.026, wrap: 0.80, trigger: false, armDir: [0.38, -0.62, 0.92], armLen: 0.62,
+  });
+  handR.position.set(0, -0.004, 0.012);
+  handR.rotation.set(-0.12, 0, 0);
+  g.add(handR);
+  g.userData.handR = handR;
+
+  const handL = buildHand(-1, {
+    gripR: 0.024, wrap: 0.55, tip: -0.30, roll: 0.40, skew: 0.20,
+    wrist: [0.046, -0.052, -0.038], armDir: [-0.38, -0.86, -0.78],
+  });
+  handL.position.set(0.34, -0.40, 0.16);
+  handL.rotation.set(-Math.PI / 2 + 0.10, 0, 0.12);
+  handL.visible = false;
+  g.add(handL);
+  g.userData.handL = handL;
+  g.userData.holdL = {
+    rest: [[0.34, -0.40, 0.16], [-Math.PI / 2 + 0.10, 0, 0.12]],
+    mag: [[0.34, -0.40, 0.16], [-Math.PI / 2 + 0.10, 0, 0.12]],
+    low: [[0.34, -0.40, 0.16], [-Math.PI / 2 + 0.10, 0, 0.12]],
+    charge: [[0.34, -0.40, 0.16], [-Math.PI / 2 + 0.10, 0, 0.12]],
+  };
+
+  bakeStatic(g);
+  return g;
+}
+
 export const WEAPONS = [
   {
     id: 'rifle', name: 'MK-4 カービン', build: buildRifle,
@@ -2062,7 +2222,11 @@ export const WEAPONS = [
     spreadHip: 0.030, spreadAds: 0.0016, spreadPerShot: 0.0026, spreadMax: 0.052, spreadRecover: 0.09,
     recoilPitch: 0.0125, recoilYaw: 0.0038, kick: 0.035, adsFov: 46, adsTime: 0.16,
     range: 120, falloffStart: 42, falloffEnd: 95, falloffMin: 0.5,
-    sound: { volume: 0.62, bodyFreq: 640, crackFreq: 3600, bodyDecay: 0.13, tailDecay: 0.45 },
+    // bodyFreq 640は「胴」と呼ぶには高すぎて、クラックと同じ帯で鳴っていた。
+    // さらにthump(腹に来る低音の層)が無く、ショットガンだけが持っていた。
+    // 高音の破裂しか無い音は、耳には乾いた小さい破裂＝軽い音として届く。
+    // 胴を300Hzまで下げ、110→44Hzへ落ちるthumpを足して、減衰も伸ばす
+    sound: { volume: 0.78, bodyFreq: 300, crackFreq: 3600, bodyDecay: 0.20, tailDecay: 0.62, thumpFrom: 110, thumpTo: 44 },
     casing: true,
     reloadKind: 'mag', holdOpen: true,
     // 構え・揺れ・反動のバネを武器ごとに変える。数値の差がそのまま手触りの差になる。
@@ -2084,34 +2248,22 @@ export const WEAPONS = [
     //   一番手前の銃床端でも目から29.5cmあるので、手前の遠近破裂も起きない
     view: {
       scale: 0.86, adsScale: 0.64, adsDist: 0.145,
-      hip: [0.21, -0.16, -0.52], hipRot: [-0.12, 0.13, 0.12],
+      // hipRotのxとyは、当初-0.12と0.13（約7度ずつ）入っていた。
+      // 銃身が下へ7度・左へ7度ぶん向くので、腰だめでは「銃口の指す先」と
+      // 「弾の飛ぶ先（クロスヘア）」が20m先で3.5mずれて見えていた。
+      // 弾は昔からクロスヘアへ真っ直ぐ飛んでいて当たりも正しかったが、
+      // 画がそう見えないせいで狙いの基準が銃身なのか十字なのか読めなかった。
+      // 1度目に抜いた時はまだ3.06度残っていて（20m先で107cm）、
+      // 「ほぼ抜いた」と言いながら見た目には十分ずれていた。
+      // tools/check-weapons.mjs で度数として測れるようにしてから0.87度まで詰めた。
+      // zのロールだけは残す（あれは構えの表情で、狙点をずらさない）
+      hip: [0.21, -0.16, -0.52], hipRot: [-0.008, 0.013, 0.12],
       bob: 1.40, sway: 1.00, kickK: 300, kickD: 21,
       // 跳ね上げの初速[m/s]。このバネ（kickK 300 / kickD 21）だと
       // 1.30で頂点が約3.4cm＝銃口が画面上で20px上がる。歩きのbobが縦39pxなので、
       // 止まって撃てば十分読めて、歩きながらでも揺れに埋もれない大きさ
       kickUp: 1.30, kickSide: 0.45,
       boltTravel: 0.030, boltTime: 0.075, lower: 0.25,
-    },
-  },
-  {
-    id: 'smg', name: 'VECTOR-9 短機関銃', build: buildSMG,
-    damage: 18, headMult: 2.0, rpm: 950, auto: true, pellets: 1,
-    mag: 35, reserve: 280, reloadTime: 1.85,
-    spreadHip: 0.038, spreadAds: 0.0042, spreadPerShot: 0.0020, spreadMax: 0.058, spreadRecover: 0.11,
-    recoilPitch: 0.0072, recoilYaw: 0.0034, kick: 0.024, adsFov: 54, adsTime: 0.12,
-    range: 80, falloffStart: 18, falloffEnd: 48, falloffMin: 0.42,
-    sound: { volume: 0.40, bodyFreq: 780, crackFreq: 4200, bodyDecay: 0.09, tailDecay: 0.3, thumpFrom: 90, thumpTo: 42 },
-    casing: true,
-    reloadKind: 'mag', holdOpen: true,
-    // 軽い銃なので構えが近く、跳ねが速くて小さい。
-    // hipはライフルと同じ比率で作り直す（全長が短いぶんだけ手前に寄せる）
-    view: {
-      scale: 0.915, adsScale: 0.70, adsDist: 0.136,
-      hip: [0.186, -0.145, -0.484], hipRot: [-0.11, 0.135, 0.115],
-      bob: 1.15, sway: 0.78, kickK: 405, kickD: 25,
-      // 950rpmでバネ1周期に5発入るので、1発を小さくしても積み上がって高く上がる
-      kickUp: 0.90, kickSide: 0.40,
-      boltTravel: 0.022, boltTime: 0.048, lower: 0.22,
     },
   },
   {
@@ -2129,11 +2281,65 @@ export const WEAPONS = [
     // 全長がライフルより長いので、同じ縮尺でも銃口はもう一段先へ出る
     view: {
       scale: 0.90, adsScale: 0.56, adsDist: 0.105,
-      hip: [0.205, -0.168, -0.560], hipRot: [-0.115, 0.135, 0.11],
+      hip: [0.205, -0.168, -0.560], hipRot: [-0.008, 0.013, 0.11],
       bob: 1.80, sway: 1.35, kickK: 205, kickD: 17,
       // 1発が重い銃なので大きく蹴り上げる。バネが柔らかい（kickK 205）ぶん戻りも遅い
       kickUp: 2.20, kickSide: 0.70,
       boltTravel: 0, boltTime: 0.10, lower: 0.29,
+    },
+  },
+  {
+    id: 'knife', name: 'ナイフ', build: buildKnife, melee: true,
+    // 胴で2回、頭なら1回。体力130に対して胴70×2＝140。
+    // 1回で倒せると近づくだけで勝ててしまい、銃が要らなくなる
+    // autoをtrueに。長押しで振り続けられないと、近接なのに
+    // 1回ずつ押し直す操作になって間合いを詰める動きと噛み合わない
+    damage: 70, headMult: 2.0, rpm: 95, auto: true, pellets: 1,
+    // 弾を持たない。magを大きく取って装填も空撃ちも起こさせない
+    mag: 9999, reserve: 0, reloadTime: 0,
+    // 振りにばらつきは無い。当たるか当たらないかだけ
+    spreadHip: 0, spreadAds: 0, spreadPerShot: 0, spreadMax: 0, spreadRecover: 1,
+    recoilPitch: 0.012, recoilYaw: 0.004, kick: 0.05, adsFov: 70, adsTime: 0.16,
+    // ここが近接の全て。射程1.8mで、減衰も切る（届く範囲では威力が一定）。
+    // レイは壁で止まるので、壁越しには当たらない
+    range: 1.8, falloffStart: 1.8, falloffEnd: 1.8, falloffMin: 1.0,
+    sound: { volume: 0.30, bodyFreq: 900, crackFreq: 4200, bodyDecay: 0.05, tailDecay: 0.12 },
+    casing: false,
+    reloadKind: 'mag', holdOpen: false,
+    // 持っている間だけ速く走れる。銃を下ろして身軽になるぶん。
+    // 他の武器はこの値を持たないので、読む側は既定を1として扱う
+    moveMul: 1.35,
+    view: {
+      scale: 1.0, adsScale: 0.86, adsDist: 0.20,
+      // 短剣は構えを画面の右下に寄せて、視界を塞がない。
+      // 銃と同じ位置に置くと刃が画面中央に立って前が見えなくなる
+      // 画面の外へ刃先が出ていたので手前へ引いて内側へ寄せる。
+      // zを-0.40から-0.28へ、xも0.235から0.175へ
+      hip: [0.175, -0.185, -0.280], hipRot: [-0.10, 0.16, 0.30],
+      bob: 1.10, sway: 0.80, kickK: 320, kickD: 20,
+      kickUp: 0.60, kickSide: 1.60,
+      boltTravel: 0, boltTime: 0, lower: 0.18,
+    },
+  },
+  {
+    id: 'nade', name: '手榴弾', build: buildGrenade, melee: true, thrown: true,
+    // ダメージはサーバーのNADEが持つ。ここの値は使われないが、
+    // 表の形を揃えないと他の武器と同じ道を通れない
+    damage: 0, headMult: 1, rpm: 40, auto: false, pellets: 1,
+    mag: 9999, reserve: 0, reloadTime: 0,
+    spreadHip: 0, spreadAds: 0, spreadPerShot: 0, spreadMax: 0, spreadRecover: 1,
+    recoilPitch: 0.02, recoilYaw: 0.006, kick: 0.04, adsFov: 70, adsTime: 0.16,
+    range: 0, falloffStart: 0, falloffEnd: 0, falloffMin: 1,
+    sound: { volume: 0.20, bodyFreq: 700, crackFreq: 2600, bodyDecay: 0.04, tailDecay: 0.10 },
+    casing: false,
+    reloadKind: 'mag', holdOpen: false,
+    moveMul: 1.15,
+    view: {
+      scale: 1.0, adsScale: 0.9, adsDist: 0.20,
+      hip: [0.215, -0.190, -0.360], hipRot: [-0.14, 0.12, 0.20],
+      bob: 1.10, sway: 0.85, kickK: 320, kickD: 20,
+      kickUp: 0.40, kickSide: 0.30,
+      boltTravel: 0, boltTime: 0, lower: 0.18,
     },
   },
 ];
@@ -2326,10 +2532,16 @@ export class WeaponSystem {
 
     this.adsFactor = 0;
     this.wantAds = false;
+    // 覗き込みの入り切り。右クリックを押すたびに反転する
+    this.adsHeld = false;
     this.reloading = 0;
     this.switching = 0;
     this.pumping = 0;
     this.fireTimer = 0;
+    // バーストの残り発数。覗いている間だけ使う
+    this.burstLeft = 0;
+    // 近接の振りの残り時間。0で構えに戻っている
+    this.swing = 0;
     this.flashTimer = 0;
     this.flashLife = 0.035;
     this.flashBase = 1;
@@ -2346,6 +2558,14 @@ export class WeaponSystem {
     this.kickPitch = 0; this.kickPitchV = 0;
     this.kickYaw = 0; this.kickYawV = 0;
     this.swayX = 0; this.swayY = 0;
+
+    // 包帯。Fで手に持ち、左クリックで巻く。
+    // ここで作っておかないと、_animate側の「包帯を出す」処理が
+    // this.bandage が undefined のまま素通りして、何も現れない
+    this.bandage = this._buildBandage(viewScene);
+    this.bandageOut = false;
+    this._healBlend = 0;
+    this._wasHealing = false;
     this.idleTime = 0;
     // 撃っている間はスプレッドの回復を止める（連射で開かせるため）
     this.spreadHold = 0;
@@ -2404,6 +2624,83 @@ export class WeaponSystem {
     this.onEject = null;
   }
 
+  /**
+   * 包帯の見た目。巻いている間だけ手元に出す。
+   * 武器とは別に1つだけ持って、使う時に見せる（武器ごとに作らない）
+   */
+  /**
+   * 手に持つ包帯。巻いた帯と、それを握る右手。
+   *
+   * 手を付けるのは見栄えのためだけではない。武器を下ろしている間に
+   * 布の塊だけが浮いていると、画面のどこかに物が置いてあるようにしか見えず、
+   * 「自分が今それを持っている」情報が出ない。
+   */
+  _buildBandage(viewScene) {
+    const g = new THREE.Group();
+    const cloth = new THREE.MeshStandardMaterial({
+      color: 0xd8d2c4, roughness: 0.92, metalness: 0,
+    });
+    // 血の染みた側。無地の白い塊だと医療品に見えず、ただの筒になる
+    const stain = new THREE.MeshStandardMaterial({
+      color: 0x9c4034, roughness: 0.95, metalness: 0,
+    });
+    const roll = new THREE.Group();
+    // 巻いた帯の芯。円筒を横に寝かせる
+    roll.add(part(cylG(0.030, 0.030, 0.052, 14), cloth, 0, 0, 0, 0, 0, Math.PI / 2));
+    // 巻きの層。太さの違う輪を重ねて「巻いてある」ことを出す
+    roll.add(part(cylG(0.034, 0.034, 0.016, 14), cloth, -0.014, 0, 0, 0, 0, Math.PI / 2));
+    roll.add(part(cylG(0.033, 0.033, 0.014, 14), cloth, 0.012, 0, 0, 0, 0, Math.PI / 2));
+    // 赤い帯を1本入れて医療品だと分かるようにする
+    roll.add(part(cylG(0.0345, 0.0345, 0.006, 14), stain, 0.000, 0, 0, 0, 0, Math.PI / 2));
+    // 引き出した端。手前へ垂らす
+    roll.add(part(boxG(0.030, 0.002, 0.075), cloth, 0.012, -0.028, 0.030));
+    g.add(roll);
+    g.userData.roll = roll;
+
+    // 握る手。巻きの外周(0.034)に合わせて指を回す
+    const hand = buildHand(1, {
+      gripR: 0.031, wrap: 0.42, armDir: [0.42, -0.70, 0.90], armLen: 0.58,
+    });
+    hand.position.set(0.030, -0.006, 0.004);
+    hand.rotation.set(-0.20, 0, -0.35);
+    g.add(hand);
+
+    g.position.set(0.10, -0.14, -0.28);
+    g.rotation.set(-0.35, 0.4, 0.2);
+    g.scale.setScalar(1.35);
+    g.visible = false;
+    viewScene.add(g);
+    return g;
+  }
+
+  /**
+   * Fで包帯を出し入れする。出しただけでは回復しない（左クリックで巻く）。
+   *
+   * 押した瞬間に巻き始める形をやめた理由: 巻いている2.4秒は移動が半分以下に
+   * 落ちるので、事故で押した時の代償が大きい。撃つのと同じ「構えてから引く」
+   * 2段階にすると、指が滑って回復が始まることがなくなる。
+   *
+   * @returns 出したか（画面のヒント表示に使う）
+   */
+  toggleBandage(player) {
+    // 巻いている最中は仕舞わせない。途中でしまえると、消費だけして
+    // 回復しない操作が生まれる（中断したいなら撃つか武器を持ち替える）
+    if (player.healing > 0) return true;
+    if (this.bandageOut) { this.bandageOut = false; return false; }
+    if ((player.bandages | 0) <= 0) return false;
+    if (this.switching > 0) return false;
+    this.bandageOut = true;
+    // 構えの状態を引きずらない。覗いたまま包帯を出すと画角だけ狭いままになる
+    this.reloading = 0;
+    this.adsHeld = false;
+    this.burstLeft = 0;
+    this.swing = 0;
+    return true;
+  }
+
+  /** 包帯をしまう。武器を選んだ時と、巻き終わった時に呼ぶ */
+  holsterBandage() { this.bandageOut = false; }
+
   get current() { return this.weapons[this.index]; }
   get def() { return this.current.def; }
 
@@ -2414,11 +2711,18 @@ export class WeaponSystem {
     if (this.switching > 0) return false;
     this.reloading = 0;
     this.switching = 0.42;
+    // 持ち替えを跨いで前の武器の状態を残さない。
+    // 振りの途中でナイフから銃へ替えると、銃が刃の軌道で振り回される
+    this.swing = 0;
+    this.burstLeft = 0;
+    this.adsHeld = false;
     this._pendingIndex = i;
     return true;
   }
 
   reload() {
+    // 近接は装填しない。Rを押すたびに空振りの動作が入るのを止める
+    if (this.def.melee) return false;
     const w = this.current;
     if (this.reloading > 0 || this.switching > 0) return false;
     if (w.ammo >= w.def.mag || w.reserve <= 0) return false;
@@ -2493,13 +2797,24 @@ export class WeaponSystem {
     }
 
     /* ------------------------------------------------------ ADS */
-    this.wantAds = input.buttons[2] && this.reloading <= 0 && this.switching <= 0
+    // 右クリックは「押している間」ではなく「押すたびに入り切り」で扱う。
+    // Macのトラックパッドは右クリックを押したまま左クリックができないので、
+    // 押しっぱなし方式だと覗きながら撃つ動作そのものが物理的に取れない
+    if (input.clicked?.(2)) this.adsHeld = !this.adsHeld;
+    // 包帯を持っている間は武器そのものを下ろしているので、覗くも撃つも無い
+    const busyHealing = this.bandageOut || player.healing > 0;
+    // 近接は覗く物が無い。覗けると刃を目の前に構えて視界を塞ぐだけになる
+    const canAds = !d.melee && !busyHealing && this.reloading <= 0 && this.switching <= 0
       && !player.sprinting && player.alive;
+    if (!canAds) this.adsHeld = false;
+    this.wantAds = this.adsHeld && canAds;
     const adsTarget = this.wantAds ? 1 : 0;
     const adsSpeed = 1 / Math.max(d.adsTime, 0.01);
     this.adsFactor = THREE.MathUtils.damp(this.adsFactor, adsTarget, adsSpeed * 1.6, dt);
     if (Math.abs(this.adsFactor - adsTarget) < 0.002) this.adsFactor = adsTarget;
     player.adsFactor = this.adsFactor;
+    // 移動速度の倍率も武器から渡す。持ち替えた次のフレームから効く
+    player.moveMul = d.moveMul || 1;
 
     /* ---------------------------------------- スプレッドの回復 */
     // 発砲より前で回復させる。後ろに置くと、撃って足した0.0055を同じフレームで削ってから
@@ -2517,6 +2832,7 @@ export class WeaponSystem {
     /* ---------------------------------------------------- 発砲 */
     this.fireTimer -= dt;
     this.pumping = Math.max(0, this.pumping - dt);
+    this.swing = Math.max(0, this.swing - dt);
 
     const trigger = input.buttons[0];
     const triggerEdge = trigger && !this._prevTrigger;
@@ -2524,18 +2840,57 @@ export class WeaponSystem {
     // 指を離したら反動パターンを最初に戻す。押しっぱなしの間だけ積み上がる
     if (!trigger) this.shotIndexInMag = 0;
 
-    const wantFire = d.auto ? trigger : triggerEdge;
-    const canFire = player.alive && this.reloading <= 0 && this.switching <= 0
+    /* -------------------------------------------- 包帯を構えている間 */
+    // Fで手に持ち、左クリックで巻き始める。持っているだけでは回復しない。
+    // 巻き終わるか、途中で撃たれて中断したら、そのまま武器へ戻す。
+    // 手動でしまわせると、中断された次の瞬間に丸腰のまま撃ち合うことになる
+    if (busyHealing) {
+      if (triggerEdge && player.healing <= 0 && player.alive) {
+        // 断られた時にも音を返す。無反応だと壊れているのか使えないのか分からない
+        if (player.startHeal()) ctx.audio?.click(680, 0.30, 0.07);
+        else ctx.audio?.click(2600, 0.16, 0.03);
+      }
+      if (this._wasHealing && player.healing <= 0) this.bandageOut = false;
+    }
+    this._wasHealing = player.healing > 0;
+
+    // 覗いている間は3点バースト。1回引いたら3発は必ず出る（指を離しても止めない）。
+    // フルオートのまま覗くと、一番当たる姿勢のまま一番ばらける撃ち方ができてしまう
+    const burst = this.wantAds && d.auto;
+    if (burst && triggerEdge && this.burstLeft <= 0) this.burstLeft = BURST_COUNT;
+
+    const wantFire = burst ? this.burstLeft > 0 : (d.auto ? trigger : triggerEdge);
+    const canFire = player.alive && !busyHealing && this.reloading <= 0 && this.switching <= 0
       && this.pumping <= 0 && this.fireTimer <= 0 && !player.sprinting;
 
     // 引金に指をかけている状態。指の動きに使う
     this.trigTarget = (trigger && player.alive && this.reloading <= 0
       && this.switching <= 0 && !player.sprinting) ? 1 : 0;
 
-    if (wantFire && canFire) {
+    // 投擲物は撃つのではなく投げる。ここでreturnしてはいけない。
+    // この下には揺れ・手の姿勢・ビューモデルの変形が続いていて、
+    // 抜けると手榴弾だけ画面に貼り付いたまま動かなくなる
+    if (d.thrown) {
+      if (triggerEdge && canFire) {
+        player.cancelHeal?.();
+        this.swing = SWING_TIME;
+        this.onThrow?.();
+        this.fireTimer = 60 / d.rpm;
+      }
+    } else if (wantFire && canFire) {
       if (w.ammo > 0) {
+        // 撃ったら包帯を中断する。撃ちながら巻けると遅くする意味が無い
+        player.cancelHeal?.();
+        // 近接は撃つのではなく振る。刃が通り過ぎる動きを出す
+        if (d.melee) this.swing = SWING_TIME;
         this._fire(player, ctx);
         this.fireTimer = 60 / d.rpm;
+        if (burst) {
+          this.burstLeft--;
+          // 3発撃ち終わったら間を置く。置かないと引金の連打で
+          // フルオートと同じ速さが出て、バーストにした意味が消える
+          if (this.burstLeft <= 0) this.fireTimer = Math.max(this.fireTimer, BURST_GAP_S);
+        }
         if (d.pumpTime) this.pumping = d.pumpTime;
       } else {
         // 空撃ちのカチッ。連打で鳴り続けないよう間隔を空ける
@@ -2573,8 +2928,9 @@ export class WeaponSystem {
 
     // 銃口のビュー空間座標。viewCameraは原点・無回転なのでviewSceneのワールド座標がそのまま使える
     const muzzleView = w.parts.muzzle.getWorldPosition(_v3);
-    // ビューモデル用の発砲光は平行光なので位置を動かさない。強度だけ上げる
-    this.viewMuzzleLight.intensity = 0.9 * (d.pellets > 1 ? 1.5 : 1);
+    // ビューモデル用の発砲光は平行光なので位置を動かさない。強度だけ上げる。
+    // 近接では光らせない（銃口が無いので光る場所そのものが無い）
+    if (!d.melee) this.viewMuzzleLight.intensity = 0.9 * (d.pellets > 1 ? 1.5 : 1);
 
     // 銃口のワールド座標（ビューモデルはカメラ空間にいるので変換する）。
     // 画角の違いを先に潰しておくこと。_v3はここから書き換わる
@@ -2638,27 +2994,39 @@ export class WeaponSystem {
     this.spreadHold = 0.12;
 
     /* ------------------------------------------------ 見た目と音 */
-    // 板の寿命。_updateFlashで毎フレーム大きさと濃さを更新する。
-    // 出しっぱなしにすると60fpsで全く同じ絵が3枚並んで、発砲に時間が無くなる。
-    // 逆に長すぎてもいけない。0.055秒だと60fpsで3.3フレームあり、
-    // ライフルの連射間隔5.6フレームの6割を占めるので「光る／戻る」が10Hzで往復する。
-    // 2フレームに詰めて、光っていない時間のほうを長くする
-    this.flashLife = 0.035;
-    this.flashTimer = this.flashLife;
-    w.flash.visible = true;
-    // 毎発ぐるぐる回すと、形の違いではなく「同じシールが回っている」ようにしか見えない。
-    // 横長の主板の向きは保ったまま、ゆらぎとして±0.25radだけ振る
-    w.flash.rotation.z = rand(0.5);
-    this.flashBase = (0.75 + Math.random() * 0.6) * (1 - this.adsFactor * 0.35);
-    w.flash.scale.setScalar(this.flashBase);
-    // 残留煙。連射で濃くなりすぎないよう上限を付ける
-    this.smokeTimer = Math.min(0.34, (this.smokeTimer || 0) + 0.24);
-    this.smokeSeed = Math.random() * Math.PI * 2;
-    this.muzzleLight.intensity = 26 * (d.pellets > 1 ? 1.6 : 1);
-    this.muzzleLight.position.copy(muzzleWorld);
+    // 銃の見た目と音の一式。近接はここへ一切入らない。
+    //
+    // 以前は effects.muzzle() だけを近接から外していたが、それは3つあるうちの1つで、
+    // 板の閃光(w.flash)・残留煙・マズルライトはガードの外に置いたままだった。
+    // 「ナイフを振ると火花が散る」の正体はこの板。個別に条件を足すと
+    // 必ずどれかを取りこぼすので、丸ごと囲う
+    if (!d.melee) {
+      // 板の寿命。_updateFlashで毎フレーム大きさと濃さを更新する。
+      // 出しっぱなしにすると60fpsで全く同じ絵が3枚並んで、発砲に時間が無くなる。
+      // 逆に長すぎてもいけない。0.055秒だと60fpsで3.3フレームあり、
+      // ライフルの連射間隔5.6フレームの6割を占めるので「光る／戻る」が10Hzで往復する。
+      // 2フレームに詰めて、光っていない時間のほうを長くする
+      this.flashLife = 0.035;
+      this.flashTimer = this.flashLife;
+      w.flash.visible = true;
+      // 毎発ぐるぐる回すと、形の違いではなく「同じシールが回っている」ようにしか見えない。
+      // 横長の主板の向きは保ったまま、ゆらぎとして±0.25radだけ振る
+      w.flash.rotation.z = rand(0.5);
+      this.flashBase = (0.75 + Math.random() * 0.6) * (1 - this.adsFactor * 0.35);
+      w.flash.scale.setScalar(this.flashBase);
+      // 残留煙。連射で濃くなりすぎないよう上限を付ける
+      this.smokeTimer = Math.min(0.34, (this.smokeTimer || 0) + 0.24);
+      this.smokeSeed = Math.random() * Math.PI * 2;
+      this.muzzleLight.intensity = 26 * (d.pellets > 1 ? 1.6 : 1);
+      this.muzzleLight.position.copy(muzzleWorld);
 
-    ctx.effects?.muzzle(muzzleWorld, forward);
-    ctx.audio?.gunshot(d.sound, null, null);
+      ctx.effects?.muzzle(muzzleWorld, forward);
+      ctx.audio?.gunshot(d.sound, null, null);
+
+    } else {
+      // 刃は空気を切る音だけ
+      ctx.audio?.swing?.();
+    }
 
     if (d.casing) {
       const ejectWorld = this._viewToWorld(w.parts.eject.getWorldPosition(_v3));
@@ -2830,22 +3198,85 @@ export class WeaponSystem {
     }
     // 持ち替え中も下げる
     const switchT = this.switching > 0 ? Math.sin(clamp(this.switching / 0.42, 0, 1) * Math.PI) : 0;
-    const lower = Math.max(reloadT, switchT);
+    // 包帯を手に持っている間は武器を下ろす。持っているのに銃を構えたままだと、
+    // 何をしているのか画から読めないうえ、撃てそうに見えて誤解を生む。
+    // 出し入れは0.25秒で滑らかに（Fを押した瞬間に瞬間移動させない）
+    const using = player.healing > 0;
+    const healT = this.bandageOut || using ? 1 : 0;
+    this._healBlend = THREE.MathUtils.damp(this._healBlend, healT, 14, dt);
+    // 包帯そのものの見せ方。「持っているだけ」と「巻いている」で動きを変える。
+    // 同じ動きにすると、Fを押しただけなのか回復が始まったのかが画から読めない
+    if (this.bandage) {
+      this.bandage.visible = this._healBlend > 0.02;
+      if (this.bandage.visible) {
+        const k = this._healBlend;
+        // 巻く動き。手首をひねる往復を、巻いている時間に合わせて回す
+        const spin = using ? (HEAL_TIME - player.healing) * 7.5 : 0;
+        // 持っているだけの時は呼吸ぶんだけ上下させる。完全に静止させると
+        // 画面に貼り付いた絵に見えて、手に持っている物に見えない
+        const breath = Math.sin(this.idleTime * 1.7) * 0.006;
+        // 画面のどこに来るかは、この3つの数字と下のscaleでほぼ決まる。
+        // 目分量で置くと枠から出るので、投影して測った上で詰めてある
+        // （tools/check-weapons.mjs の[3.6]がその測定）。
+        // kが0の間は画面の下に沈めておいて、持つと同時に持ち上がる形にする
+        this.bandage.position.set(
+          0.048 - k * 0.014 + this.swayX * 0.5,
+          -0.200 + k * 0.154 + breath + this.swayY * 0.5,
+          -0.30 + k * 0.05,
+        );
+        this.bandage.rotation.set(
+          -0.35 + Math.sin(spin) * 0.14,
+          0.40 + spin * 0.5,
+          0.20 + breath * 3,
+        );
+        // 巻いている間だけ帯をほどく向きへ回す。手は回さない（手首だけ動く）
+        if (this.bandage.userData.roll) this.bandage.userData.roll.rotation.x = spin * 1.6;
+        this.bandage.scale.setScalar(1.35 * (0.72 + k * 0.28));
+      }
+    }
+    const lower = Math.max(reloadT, switchT, this._healBlend);
 
+    // 近接の振り。0→1で「引く→振り下ろす→戻る」の1周期を作る。
+    // 銃と同じ反動(kick)では表せない。反動は「その場で跳ねて戻る」動きで、
+    // 振りは「腕ごと右上から左下へ通り抜ける」動きだから、軌道が別物になる
+    let swingP = 0, swingY = 0, swingR = 0, swingZ = 0;
+    if (this.swing > 0) {
+      const k = 1 - clamp01(this.swing / SWING_TIME);   // 0→1で進む
+      if (k < 0.22) {
+        // 振りかぶり。ゆっくり引いて溜める
+        const a = k / 0.22;
+        swingP = -a * 0.55; swingY = a * 0.42; swingR = -a * 0.5; swingZ = -a * 0.10;
+      } else {
+        // 振り抜き。速く通り過ぎて、行き過ぎた所から戻る
+        const a = (k - 0.22) / 0.78;
+        const e = Math.sin(a * Math.PI);
+        swingP = -0.55 + (0.55 + 1.25) * Math.min(1, a * 2.2) - e * 0.25;
+        swingY = 0.42 - 1.15 * Math.min(1, a * 2.2);
+        swingR = -0.5 + 1.5 * Math.min(1, a * 2.2);
+        swingZ = -0.10 + 0.30 * e;
+        // 最後は素の構えへ戻す
+        const back = Math.max(0, (a - 0.55) / 0.45);
+        swingP *= 1 - back; swingY *= 1 - back; swingR *= 1 - back; swingZ *= 1 - back;
+      }
+    }
+
+    // 巻いている間は武器を大きく下げて画面の外へ寄せる。
+    // lowerだけでは足りない（装填の下げ幅は「見えたまま傾く」量なので）
+    const healDrop = this._healBlend * 0.30;
     model.position.set(
-      base.x + bobX + swX + breathX + sp * 0.05 + this.kickX,
-      base.y + bobY + swY + breathY - sp * 0.05 - lower * v.lower + this.kickY,
-      base.z + this.kickZ - sp * 0.02,
+      base.x + bobX + swX + breathX + sp * 0.05 + this.kickX + this._healBlend * 0.10,
+      base.y + bobY + swY + breathY - sp * 0.05 - lower * v.lower + this.kickY + swingZ * 0.5 - healDrop,
+      base.z + this.kickZ - sp * 0.02 + swingZ,
     );
     // kickPitch/kickYawは反動なのでADSでも残す。ADSの減衰は_fireで
     // (1 - adsFactor*0.32)を1回だけ掛けてあるので、ここで重ねない
     model.rotation.set(
       THREE.MathUtils.lerp(w.hipRot.x, w.adsRot.x, t) + this.kickPitch + swY * 1.6
-        + sp * 0.22 + reloadT * 0.42 + switchT * 0.7,
+        + sp * 0.22 + reloadT * 0.42 + switchT * 0.7 + swingP,
       THREE.MathUtils.lerp(w.hipRot.y, w.adsRot.y, t) + this.kickYaw + swX * 2.2
-        + sp * 0.55 + reloadT * 0.30,
+        + sp * 0.55 + reloadT * 0.30 + swingY,
       THREE.MathUtils.lerp(w.hipRot.z, w.adsRot.z, t) - sp * 0.30 + reloadT * 0.20
-        + player.roll * 1.5 * (1 - this.adsFactor),
+        + player.roll * 1.5 * (1 - this.adsFactor) + swingR,
     );
 
     // 覗いている間はFOVを絞る。ビューモデルのFOVは本編より狭くしておくと
@@ -3017,6 +3448,15 @@ export class WeaponSystem {
     this.switching = 0;
     this.pumping = 0;
     this.adsFactor = 0;
+    // 包帯を持ったまま死ぬと、湧き直した所でも持ったままになっていた
+    this.bandageOut = false;
+    this._healBlend = 0;
+    this._wasHealing = false;
+    if (this.bandage) this.bandage.visible = false;
+    // ラウンドを跨いで覗きっぱなし・バースト途中が残らないようにする
+    this.adsHeld = false;
+    this.wantAds = false;
+    this.burstLeft = 0;
     this.shotIndexInMag = 0;
     this.boltCycle = 0;
     this.magWob = 0; this.magWobV = 0;

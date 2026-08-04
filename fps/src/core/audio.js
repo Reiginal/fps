@@ -21,9 +21,73 @@ const SURFACES = {
   gravel:   { lp: 1150, thump: 80,  decay: 0.05,  grit: 0.8,  gritFreq: 3200, gritQ: 0.8, ring: 0,    partials: null,             vol: 1.0 },
   asphalt:  { lp: 1700, thump: 96,  decay: 0.042, grit: 0.34, gritFreq: 3800, gritQ: 1.1, ring: 0,    partials: null,             vol: 0.95 },
   concrete: { lp: 1900, thump: 104, decay: 0.04,  grit: 0.3,  gritFreq: 4200, gritQ: 1.3, ring: 0.08, partials: [820, 1970],      vol: 0.95 },
-  metal:    { lp: 2800, thump: 118, decay: 0.085, grit: 0.24, gritFreq: 5400, gritQ: 1.8, ring: 0.62, partials: [186, 471, 1237], vol: 1.1 },
+  // ringを0.62から0.10へ、倍音も3本から2本の低い所へ落とす。
+  // 前は186/471/1237Hzという調律された倍音を長い余韻付きで鳴らしていて、
+  // これは「叩かれた金属の棒」＝鉄琴の作り方そのものだった。
+  // 実際の鉄板は踏むと鳴るのではなく「ぼこっ」と凹んで軋む。
+  // 余韻を削って、倍音を濁った近い2本にすると打楽器に聞こえなくなる
+  metal:    { lp: 1900, thump: 124, decay: 0.062, grit: 0.30, gritFreq: 4200, gritQ: 1.1, ring: 0.10, partials: [173, 268], vol: 0.95 },
   wood:     { lp: 1400, thump: 128, decay: 0.055, grit: 0.22, gritFreq: 2100, gritQ: 1.2, ring: 0.34, partials: [243, 617, 1490], vol: 0.9 },
 };
+
+/**
+ * 倒した合図の候補。遊びながらKキーで切り替えて聴き比べる。
+ *
+ * なぜ候補を並べるのか: 「気持ちよくない」と言われるたびに1案ずつ作り直して
+ * 5回外した。こちらは音を聴けないので、1往復で1案しか試せないやり方だと
+ * いつまでも当たらない。質感の方向が違う案を先に並べて、その場で比べてもらう。
+ *
+ * 5案は3つの軸で振り分けてある。
+ *   ・倍音が整数比か非整数比か … 整数比は楽器の音程に、非整数比は金属や鐘になる
+ *   ・音程を持たせるか否か     … ノイズ主体にすると音程感が消えて打撃寄りになる
+ *   ・低音を混ぜるか           … 低音は重さになるが、混ぜすぎると歯切れが鈍る
+ *
+ * どの案も共通で守っている所は3つ。立ち上がりを1ms以下にする（鈍ると
+ * 弾いた感じが消える）、主な成分を2〜6kHzに置く（銃声は低音が主役なので、
+ * ここに置くと撃ち合いの中でも埋もれない）、350ms以内に終わらせる。
+ */
+/**
+ * 倒した合図のつまみ。
+ *
+ * ここに至った経緯: 「軽い」「甲高い」「デデンにして」と何度も作り直して、
+ * 6回とも外した。こちらは音を聴けないので、良し悪しの判定ができない。
+ * 遊ぶ側は判定できるが、数字を触れない。だからいつまでも往復が終わらない。
+ *
+ * 判定できる人が直接つまみを回せるようにすれば、その往復が消える。
+ * ロビーの「キル音」からその場で回して鳴らせる。
+ *
+ * 各つまみが何を動かすか:
+ *   hits   … 打点の数。1でドン、2でデデン、3でデデデン
+ *   pitch  … 全体の高さ。下げるほど重く、上げるほど鋭くなる
+ *   gap    … 打点の間隔(秒)。詰めるほど1発に近づく
+ *   tail   … 最後の打点の余韻。伸ばすと鳴り物、詰めると打楽器に寄る
+ *   weight … 低い所の量。これが「重さ」。0にすると軽い通知音になる
+ *   edge   … 上の芯の量。「甲高い⇔こもる」はここで決まる
+ *   drive  … 歪みの量。上げると倍音が増えて太くなるが、行きすぎると割れた音になる
+ */
+export const KILL_TUNE = {
+  hits: 2, pitch: 1, gap: 0.155, tail: 1, weight: 1, edge: 0.3, drive: 2.8, level: 1,
+};
+
+// つまみの範囲。画面のスライダーと、値の丸めに使う
+export const KILL_RANGE = {
+  hits: { min: 1, max: 3, step: 1, label: '打点の数' },
+  pitch: { min: 0.5, max: 2.2, step: 0.05, label: '高さ' },
+  gap: { min: 0.06, max: 0.30, step: 0.005, label: '間隔' },
+  tail: { min: 0.3, max: 2.6, step: 0.1, label: '余韻' },
+  weight: { min: 0, max: 1.8, step: 0.05, label: '低音' },
+  edge: { min: 0, max: 1.8, step: 0.05, label: '芯（明るさ）' },
+  drive: { min: 1.2, max: 4.5, step: 0.1, label: '歪み' },
+};
+
+// 出発点にする組み合わせ。ここから回して詰める
+export const KILL_SOUNDS = [
+  { name: 'デデン', note: '低い2発', cfg: {} },
+  { name: 'ドン', note: '1発だけ・短い', cfg: { hits: 1, tail: 0.8, pitch: 0.95 } },
+  { name: 'デデン 明るめ', note: '芯を強く・少し高く', cfg: { edge: 1.1, pitch: 1.3, weight: 0.7 } },
+  { name: 'デデーン', note: '余韻を長く', cfg: { tail: 2.0 } },
+  { name: 'デデデン', note: '3発', cfg: { hits: 3, gap: 0.12 } },
+];
 
 export class AudioEngine {
   constructor() {
@@ -37,14 +101,61 @@ export class AudioEngine {
     // 同時発音が増えすぎた時に層を間引くための負荷カウンタ
     this._load = 0;
     this._loadAt = 0;
+    // 鳴らし終わって切り離す順番待ち。まとめて片付けるための待ち行列
+    this._graveyard = [];
+    this._reaper = null;
+
+    // 選んだキル音は端末に覚えさせる。決まった後に遊び直すたび
+    // 1番へ戻ると、せっかく選んだ意味がない
+    this.killVariant = 0;
+    // つまみで動かした値。出発点(KILL_SOUNDS)の上に重ねる
+    this.killTune = null;
+    try {
+      const saved = parseInt(localStorage.getItem('blackout.killPick'), 10);
+      if (saved >= 0 && saved < KILL_SOUNDS.length) this.killVariant = saved;
+      const tune = JSON.parse(localStorage.getItem('blackout.killTune') || 'null');
+      if (tune && typeof tune === 'object') this.killTune = tune;
+    } catch { /* localStorageが使えない環境ではそのまま既定値 */ }
   }
 
-  init() {
+  /**
+   * 音を起こす。ブラウザは操作を起点にしないとWebAudioを動かしてくれない。
+   * @param ambience 環境音を流すか。測定(tools/sound-lab.mjs)ではfalseにする
+   */
+  init({ ambience = true } = {}) {
     if (this.ctx) return;
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) { this.enabled = false; return; }
     const ctx = new Ctx();
     this.ctx = ctx;
+
+    // 出口の頭打ち。ここへ来た波の頭を丸めて、1.0を絶対に超えさせない。
+    //
+    // なぜ要るか: 効果音の素材ノイズには「突発の山」をわざと混ぜてあり、
+    // 鳴らすたびに素材のどこから読み始めるかを乱数で変えている。
+    // 山を引いた回だけ音が跳ね上がり、実測すると同じ銃声が0.70〜1.12まで
+    // 揺れていた。1.0を超えた回は波の頭が平らに切られて「バリッ」と割れる。
+    // 全体の音量を下げて逃げると、割れない代わりに常時痩せた音になる。
+    // 曲線で丸めれば、普段の音はそのままで、跳ねた回だけが抑えられる。
+    //
+    // 0.72までは素通し。そこから上を滑らかに寝かせて0.97へ漸近させる
+    const limiter = ctx.createWaveShaper();
+    {
+      const n = 2048;
+      const c = new Float32Array(n);
+      const KNEE = 0.72, CEIL = 0.97;
+      for (let i = 0; i < n; i++) {
+        const x = (i / (n - 1)) * 2 - 1;
+        const a = Math.abs(x);
+        const y = a <= KNEE
+          ? a
+          : KNEE + (CEIL - KNEE) * Math.tanh((a - KNEE) / (CEIL - KNEE));
+        c[i] = Math.sign(x) * y;
+      }
+      limiter.curve = c;
+      limiter.oversample = '4x';
+    }
+    limiter.connect(ctx.destination);
 
     // 突発的な銃声で音が割れないよう最後に軽く潰す
     const comp = ctx.createDynamicsCompressor();
@@ -52,8 +163,11 @@ export class AudioEngine {
     comp.knee.value = 24;
     comp.ratio.value = 8;
     comp.attack.value = 0.002;
-    comp.release.value = 0.18;
-    comp.connect(ctx.destination);
+    // 戻りを速くする。0.18秒は打点を2つ続けて鳴らす音（デデン）の間隔155msより
+    // 長く、1発目で沈んだまま2発目が来て、2発目だけ半分の大きさになっていた。
+    // 出口に頭打ちを入れたので、ここは強く掛ける必要がなくなっている
+    comp.release.value = 0.09;
+    comp.connect(limiter);
 
     // 被弾時に世界の音だけを丸めるための段。耳鳴りや心音はこれを迂回して
     // 素通しで鳴らす（実際、爆発の直後は外の音だけが遠のいて耳鳴りは近い）
@@ -119,7 +233,11 @@ export class AudioEngine {
     this.ready = true;
     this._loadAt = ctx.currentTime;
     this.setEnvironment(this.openness);
-    this._startAmbience();
+    // 環境音と息づかいは鳴りっぱなしなので、1つの効果音を測りたい時は邪魔になる。
+    // tools/sound-lab.mjs がここをfalseで呼ぶ。
+    // 切り忘れたまま測った時は、5案とも「長さ2000ms・低音22%」というそっくりな
+    // 数字が出た。測っていたのは環境音のうなりだった
+    if (ambience) this._startAmbience();
   }
 
   resume() {
@@ -226,6 +344,9 @@ export class AudioEngine {
     } else {
       input.connect(g);
     }
+    // 途中に挟んだノードも後で切り離す。返り値だけ切っても、
+    // その手前のpannerやフィルタはinputに繋がったまま残る
+    if (panner) this._reap([panner], 3.2);
     // 遠い音は空気に高域を食われる
     if (dist > 12) {
       const lp = ctx.createBiquadFilter();
@@ -234,23 +355,69 @@ export class AudioEngine {
       const out = ctx.createGain();
       g.connect(lp);
       lp.connect(out);
+      this._reap([g, lp], 3.2);
       return out;
     }
     return g;
   }
 
-  _out(node, wet = 0.35, slap = 0) {
+  /**
+   * 鳴らし終わった音を出力へ繋ぐ。
+   *
+   * 繋いだノードは必ず後で切り離す。WebAudioはstop()したソースこそ自動で片付くが、
+   * その下流のGainやBiquadFilterはmasterに繋がったまま残り続ける。
+   * 実測すると1試合ぶん（銃声1200・足音3000・被弾300）で67,295個が生き残っていた。
+   * 増え続けるとブラウザのノード上限に当たってcreateGain()が失敗し始め、
+   * そこから先は何も鳴らなくなる。「遊んでいると音が消える」の正体がこれ。
+   *
+   * lifeは切り離すまでの秒数。鳴り終わる前に切ると音が途中で欠けるので、
+   * 一番長い尾（残響2.6秒）より余裕を持たせた既定にしてある
+   */
+  _out(node, wet = 0.35, slap = 0, life = 3.2) {
+    const dead = [node];
     node.connect(this.master);
     const send = this.ctx.createGain();
     send.gain.value = wet;
     node.connect(send);
     send.connect(this.reverbSend);
+    dead.push(send);
     if (slap > 0) {
       const s2 = this.ctx.createGain();
       s2.gain.value = slap;
       node.connect(s2);
       s2.connect(this.slapSend);
+      dead.push(s2);
     }
+    this._reap(dead, life);
+  }
+
+  /**
+   * 指定秒後にノードを切り離す。
+   * setTimeoutを1本ずつ持つと同時発音の数だけタイマーが並ぶので、
+   * 期限つきの待ち行列に積んで1本のタイマーでまとめて片付ける
+   */
+  _reap(nodes, life) {
+    const at = (this.ctx.currentTime + life) * 1000;
+    this._graveyard.push({ at, nodes });
+    if (this._reaper) return;
+    this._reaper = setInterval(() => {
+      const now = this.ctx ? this.ctx.currentTime * 1000 : Infinity;
+      let i = 0;
+      while (i < this._graveyard.length) {
+        const e = this._graveyard[i];
+        if (e.at > now) { i++; continue; }
+        for (const n of e.nodes) {
+          try { n.disconnect(); } catch { /* 既に切れている */ }
+        }
+        // 末尾を詰めて削る。spliceだと同時発音が多い時に毎回配列を作り直す
+        this._graveyard[i] = this._graveyard[this._graveyard.length - 1];
+        this._graveyard.pop();
+      }
+      if (this._graveyard.length === 0) {
+        clearInterval(this._reaper);
+        this._reaper = null;
+      }
+    }, 500);
   }
 
   /* ------------------------------------------------------ 環境（空間） */
@@ -326,9 +493,17 @@ export class AudioEngine {
       const hp = ctx.createBiquadFilter();
       hp.type = 'highpass';
       hp.frequency.value = crackFreq * rnd(0.9, 1.12) * lerp(1, 0.45, step(2, 30, dist));
+      // 上にも蓋をする。ハイパスだけだとノイズが20kHzまで平らに伸びて、
+      // 測ると7kHz以上だけで全体の35%を占めていた。この帯が主役になった音は
+      // 銃声ではなく「サーッ」という雨や砂嵐に聞こえる。
+      // 実際の発砲音も8kHzより上は空気に食われてすぐ落ちる
+      const hlp = ctx.createBiquadFilter();
+      hlp.type = 'lowpass';
+      hlp.frequency.value = rnd(7600, 9400);
+      hlp.Q.value = 0.6;
       const crackGain = ctx.createGain();
-      crack.connect(hp); hp.connect(crackGain); crackGain.connect(bus);
-      this._env(crackGain, t, 0.9 * wCrack, 0.0005, rnd(0.026, 0.042));
+      crack.connect(hp); hp.connect(hlp); hlp.connect(crackGain); crackGain.connect(bus);
+      this._env(crackGain, t, 0.49 * wCrack, 0.0005, rnd(0.026, 0.042));
       crack.start(t, Math.random() * 1.5); crack.stop(t + 0.25);
     }
 
@@ -343,7 +518,7 @@ export class AudioEngine {
     const bodyGain = ctx.createGain();
     body.connect(bp); bp.connect(bodyGain); bodyGain.connect(bus);
     // ごく僅かに遅らせる。クラックと完全同時だと1枚の板に潰れる
-    this._env(bodyGain, t + rnd(0.0005, 0.004), 1.0 * wBody, 0.0015, bodyDecay * jDecay);
+    this._env(bodyGain, t + rnd(0.0005, 0.004), 0.96 * wBody, 0.0015, bodyDecay * jDecay);
     body.start(t, Math.random() * 1.5); body.stop(stopAt);
 
     // 3. 尾。距離が伸びるほど主役になり、開けた場所ほど長く伸びる。
@@ -357,7 +532,7 @@ export class AudioEngine {
       const tailGain = ctx.createGain();
       tail.connect(tf); tf.connect(tailGain); tailGain.connect(bus);
       const tailLen = tailDecay * jDecay * lerp(0.6, 1.7, this.openness) * lerp(1, 1.9, step(8, 50, dist));
-      this._env(tailGain, t + rnd(0.004, 0.022), 0.45 * wTail, 0.006, tailLen);
+      this._env(tailGain, t + rnd(0.004, 0.022), 0.38 * wTail, 0.006, tailLen);
       tail.start(t, Math.random() * 1.5); tail.stop(stopAt);
     }
 
@@ -369,7 +544,7 @@ export class AudioEngine {
       osc.frequency.exponentialRampToValueAtTime(thumpTo * rnd(0.9, 1.1), t + 0.09);
       const oscGain = ctx.createGain();
       osc.connect(oscGain); oscGain.connect(bus);
-      this._env(oscGain, t, 0.7 * wSub, 0.002, 0.075 * jDecay);
+      this._env(oscGain, t, 0.78 * wSub, 0.002, 0.085 * jDecay);
       osc.start(t); osc.stop(t + 0.2);
 
       // サブベース。閃光の一瞬だけ床が鳴るような圧を足す。
@@ -381,7 +556,7 @@ export class AudioEngine {
       const subGain = ctx.createGain();
       sub.connect(subGain); subGain.connect(bus);
       // 出しすぎるとコンプが低音に反応して他の音まで毎発沈むので控えめに
-      this._env(subGain, t, 0.42 * wSub, 0.006, 0.13);
+      this._env(subGain, t, 0.44 * wSub, 0.006, 0.14);
       sub.start(t); sub.stop(t + 0.32);
     }
 
@@ -489,11 +664,33 @@ export class AudioEngine {
   /* ---------------------------------------------------------- リロード */
 
   // マガジンリリース。指で押すボタンの小さいカチッ＋バネ
+  // ここも鳴り物になっていた。2450/3980Hzを余韻0.35で鳴らすと鈴になる。
+  // 弾倉止めは金属の爪が外れる音で、音程を持たない「カチッ」。
+  // 倍音を低く濁らせて余韻をほぼ消し、代わりに粒立ちを上げる
   _magRelease(t) {
     this._metal(t, {
-      partials: [2450, 3980], vol: 0.28, decay: 0.016,
-      ring: 0.35, noiseFreq: 3600, noiseQ: 3.0, wet: 0.12,
+      partials: [880, 1310], vol: 0.30, decay: 0.010,
+      ring: 0.05, noiseFreq: 2800, noiseQ: 1.2, wet: 0.05,
     });
+  }
+
+  /**
+   * 機械が止まる時の低い一撃。装填のカチャカチャが軽く聞こえるのは、
+   * 高い倍音と擦れの音しか鳴らしていないから。実物は重い金属の塊が動いて
+   * 止まるので、必ず低い所が一緒に鳴る。測ると装填音は30〜250Hzの取り分が
+   * 0.7%しかなく、重心は5420Hzにあった＝上だけで鳴っていた
+   */
+  _thunk(t, f0, f1, vol, decay) {
+    const ctx = this.ctx;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(f0 * rnd(0.92, 1.08), t);
+    o.frequency.exponentialRampToValueAtTime(f1, t + decay);
+    const g = ctx.createGain();
+    o.connect(g);
+    this._env(g, t, vol, 0.002, decay);
+    this._out(g, 0.08, 0.05);
+    o.start(t); o.stop(t + decay * 4 + 0.1);
   }
 
   // マガジン抜去。金属が擦れて滑り、抜けきった所で軽く鳴る
@@ -513,24 +710,27 @@ export class AudioEngine {
     src.stop(t + 0.4);
     this._metal(t + rnd(0.075, 0.1), {
       partials: [640, 1490, 2380], vol: 0.22, decay: 0.03,
-      ring: 0.55, noiseFreq: 1900, noiseQ: 1.4, wet: 0.18,
+      ring: 0.09, noiseFreq: 1900, noiseQ: 1.1, wet: 0.08,
     });
   }
 
   // 挿入。重い塊が入って止まる音。低い倍音を厚めに、最後に嵌るカチッ
   _magIn(t) {
+    this._thunk(t, 118, 68, 0.62, 0.06);
     this._metal(t, {
-      partials: [172, 383, 908], vol: 0.5, decay: 0.05,
-      ring: 0.7, noiseFreq: 900, noiseQ: 0.9, noiseType: 'lowpass', wet: 0.22,
+      // 弾倉が座る音。ring 0.7は「鳴らす」量で、実物は詰まって止まるだけ
+      partials: [148, 262], vol: 0.5, decay: 0.038,
+      ring: 0.10, noiseFreq: 900, noiseQ: 0.9, noiseType: 'lowpass', wet: 0.10,
     });
     this._metal(t + rnd(0.03, 0.045), {
-      partials: [1320, 2870], vol: 0.26, decay: 0.014,
-      ring: 0.4, noiseFreq: 3100, noiseQ: 2.6, wet: 0.14,
+      partials: [760, 1090], vol: 0.26, decay: 0.010,
+      ring: 0.06, noiseFreq: 3100, noiseQ: 1.3, wet: 0.06,
     });
   }
 
   // ボルト。バネがジャッと鳴ってから、前進して硬く止まる
   _bolt(t) {
+    this._thunk(t + 0.055, 146, 82, 0.70, 0.055);
     const ctx = this.ctx;
     const src = this._noiseSource(rnd(1.1, 1.4));
     const f = ctx.createBiquadFilter();
@@ -546,8 +746,10 @@ export class AudioEngine {
     src.stop(t + 0.3);
     // 前進して閉鎖。ここが一番硬い音になる
     this._metal(t + rnd(0.05, 0.07), {
-      partials: [296, 1490, 3120, 5240], vol: 0.55, decay: 0.028,
-      ring: 0.62, noiseFreq: 2600, noiseQ: 1.2, wet: 0.24,
+      // 4本の高い倍音をring 0.62で鳴らすと、閉鎖ではなく金属の鐘になる。
+      // 閉鎖は重い塊が受けに当たって止まる音なので、低い2本を短く切る
+      partials: [268, 640], vol: 0.55, decay: 0.020,
+      ring: 0.08, noiseFreq: 2600, noiseQ: 1.0, wet: 0.10,
     });
   }
 
@@ -610,6 +812,31 @@ export class AudioEngine {
     this._env(g, t, vol * s.grit * (1 + (weight - 1) * 0.4), 0.002, s.decay * (1 + weight * 0.3));
     src.start(t, Math.random() * 1.5);
     src.stop(t + 0.5);
+
+    // 爪先が擦れて抜ける音。踵が着いた少し後に鳴る。
+    //
+    // これが無いと1歩が「1点」で鳴って、機械が刻んでいるように聞こえる。
+    // 実際の1歩は踵が着いてから爪先で蹴り出すまでに幅があり、
+    // その2つの間隔が歩き方そのものになる。走るほど間隔が詰まって擦れが強い。
+    // 走りの足音が安っぽかったのは、速く鳴らしているだけで
+    // 「蹴り出している」音が1つも入っていなかったため
+    // 間隔は短く、量は控えめに。前は最大6cm近く遅れて音量も0.42倍あり、
+    // 1歩が「タッ・シャッ」と2回鳴って別の生き物の足音になっていた。
+    // 実際の1歩は2つの音が重なって聞こえるくらいの近さで、
+    // 擦れは踏み込みに混ざって聞こえるだけ
+    const scuff = 0.016 + (2.1 - weight) * 0.008 + rnd(0, 0.006);
+    const ssrc = this._noiseSource(rnd(0.35, 0.6));
+    const sf = ctx.createBiquadFilter();
+    sf.type = 'bandpass';
+    sf.frequency.setValueAtTime(s.gritFreq * 0.55, t + scuff);
+    sf.frequency.exponentialRampToValueAtTime(s.gritFreq * 0.22, t + scuff + 0.09);
+    sf.Q.value = 0.7;
+    const sg = ctx.createGain();
+    ssrc.connect(sf); sf.connect(sg); sg.connect(bus);
+    // 重い着地ほど強く擦る。歩きでは薄く、走りと着地でしっかり出る
+    this._env(sg, t + scuff, vol * 0.20 * weight, 0.004, s.decay * 1.1);
+    ssrc.start(t + scuff, Math.random() * 1.5);
+    ssrc.stop(t + scuff + 0.35);
 
     const out = this._place(bus, position, camera, 5);
     this._out(out, surface === 'metal' ? 0.34 : 0.18, surface === 'metal' ? 0.3 : 0.12);
@@ -719,31 +946,480 @@ export class AudioEngine {
 
   /* ------------------------------------------------------------ 通知 */
 
-  // 命中通知。短いサイン波。頭に当たったら高く鳴らす
+  /**
+   * 命中通知。当たった瞬間に耳元で鳴らす短い打点。
+   *
+   * 頭に当てた時は「高く」ではなく「鈍く」鳴らす。
+   * 前は矩形波の1750→2400Hzを追い打ちで足していて、これは電子音の作り方
+   * そのもの（矩形波は倍音が全部残るので、高い所で鳴らすと一番耳に刺さる）。
+   * 頭に当たった手応えとして欲しいのは高さではなく重さなので、
+   * 胴体より低い所へ落として、下へ滑らせ、低音を1枚敷く。
+   */
   hitmarker(headshot = false) {
     if (!this.ready || !this.enabled) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
+    // 矩形波1150Hzは電子的すぎて「当たった」より「通知が来た」に聞こえる。
+    // 短い木を叩く音に寄せる。三角波を素早く下げると打点が出る
     const o = ctx.createOscillator();
-    o.type = 'square';
-    o.frequency.value = headshot ? 1750 : 1150;
+    // 頭に当てた方はサイン波にする。三角波は3倍・5倍の倍音を持つので、
+    // 620Hzで鳴らすと1860Hzと3100Hzが一緒に出て、そこが鈍さを消していた。
+    // 胴の方は輪郭が欲しいので三角波のまま
+    o.type = headshot ? 'sine' : 'triangle';
+    o.frequency.setValueAtTime(headshot ? 620 : 900, t);
+    o.frequency.exponentialRampToValueAtTime(headshot ? 190 : 430, t + (headshot ? 0.09 : 0.055));
     const g = ctx.createGain();
     o.connect(g);
-    this._env(g, t, 0.11, 0.001, 0.035);
+    this._env(g, t, headshot ? 0.22 : 0.24, 0.001, headshot ? 0.075 : 0.05);
     // 通知音は耳鳴りの向こうでも聞こえるべきなので、被弾フィルタを迂回する
     g.connect(this.postBus);
-    o.start(t); o.stop(t + 0.12);
-    if (headshot) {
-      const o2 = ctx.createOscillator();
-      o2.type = 'square';
-      o2.frequency.setValueAtTime(1750, t + 0.045);
-      o2.frequency.setValueAtTime(2400, t + 0.06);
-      const g2 = ctx.createGain();
-      o2.connect(g2);
-      this._env(g2, t + 0.045, 0.09, 0.001, 0.04);
-      g2.connect(this.postBus);
-      o2.start(t + 0.045); o2.stop(t + 0.18);
+    this._reap([g], 1.0);
+    o.start(t); o.stop(t + 0.2);
+
+    // 胴に当てた時の低音。測ると、当たった音は30〜250Hzの取り分が0.2%しかなく、
+    // 音量も山が0.12と、キル音の6分の1しか出ていなかった。
+    // 一番よく聞く音がこれでは、当てた手応えが最初から存在しない。
+    //
+    // ただし長くはできない。ライフルは0.094秒に1発なので、100msを超えると
+    // 次の当たり音と重なって団子になる。短いまま重さだけ足す
+    if (!headshot) {
+      const lo = ctx.createOscillator();
+      lo.type = 'sine';
+      lo.frequency.setValueAtTime(210, t);
+      lo.frequency.exponentialRampToValueAtTime(112, t + 0.055);
+      const lg = ctx.createGain();
+      lo.connect(lg); lg.connect(this.postBus);
+      this._env(lg, t, 0.30, 0.0015, 0.048);
+      this._reap([lg], 1.0);
+      lo.start(t); lo.stop(t + 0.2);
+      // 芯。低音だけ足すと輪郭が消えて「ボッ」になるので、上に点を打つ
+      const tick = this._noiseSource(1.3);
+      const bpf = ctx.createBiquadFilter();
+      bpf.type = 'bandpass';
+      bpf.frequency.value = 1750;
+      bpf.Q.value = 1.1;
+      const tg = ctx.createGain();
+      tick.connect(bpf); bpf.connect(tg); tg.connect(this.postBus);
+      this._env(tg, t, 0.13, 0.0006, 0.015);
+      this._reap([tg, bpf], 1.0);
+      tick.start(t, Math.random()); tick.stop(t + 0.1);
     }
+    if (headshot) {
+      // 重さのぶん。サイン波を190→95Hzへ落とす。倍音が無いので
+      // 音程としてではなく「ドッ」という圧として聞こえる
+      const lo = ctx.createOscillator();
+      lo.type = 'sine';
+      lo.frequency.setValueAtTime(190, t);
+      lo.frequency.exponentialRampToValueAtTime(95, t + 0.09);
+      const lg = ctx.createGain();
+      lo.connect(lg); lg.connect(this.postBus);
+      this._env(lg, t, 0.24, 0.0015, 0.085);
+      this._reap([lg], 1.0);
+      lo.start(t); lo.stop(t + 0.3);
+      // 潰れる質感。低い所で切ったノイズを一瞬だけ。
+      // 高い所を残すと結局「チッ」と鳴って鈍さが消えるので2.2kHzで蓋をする
+      const th = this._noiseSource(0.55);
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 1300;
+      // 2段重ねる。1段だと1オクターブで12dBしか落ちず、蓋をしたつもりでも
+      // 2.5〜7kHzが22%残って「鈍く」ならなかった
+      const lp2 = ctx.createBiquadFilter();
+      lp2.type = 'lowpass';
+      lp2.frequency.value = 1300;
+      const tg = ctx.createGain();
+      th.connect(lp); lp.connect(lp2); lp2.connect(tg); tg.connect(this.postBus);
+      this._env(tg, t, 0.22, 0.001, 0.055);
+      this._reap([tg, lp, lp2], 1.0);
+      th.start(t, Math.random()); th.stop(t + 0.2);
+    }
+  }
+
+  /* ------------------------------------------ 倒した合図（5案の作り） */
+
+  /**
+   * 倒した合図は「軽い」と何度も言われて作り直した。
+   * 5回目までは勘で直していたが、tools/sound-lab.mjs で波形を書き出して
+   * 測ったら、軽さの正体がはっきり数字で出た。
+   *
+   *   これまでの5案 … 30〜250Hzの取り分が 0.0〜0.4%、長さ100〜315ms、山2〜4本
+   *   爆発          … 同じ帯が 42%、長さ2000ms
+   *
+   * つまり低い音がまったく入っていなかった。人が「重い」「迫力がある」と
+   * 感じるのはこの帯で、ここが空だと上で何を鳴らしても薄い通知音にしかならない。
+   * 加えて、純粋なサイン波は倍音が1本しか無いので、何本重ねても密度が出ない。
+   *
+   * 作り直しでは3つを土台にした。
+   *   1. サブベース … 80Hz付近から40Hzへ落とす層。歪ませない（濁ると汚れになる）
+   *   2. 歪み       … 中高域だけを軽く潰して倍音を増やす。同じ音量で密度が上がる
+   *   3. 尾         … 300〜700msの余韻。短く切ると「ピッ」で終わって手応えが残らない
+   */
+
+  // 歪ませる曲線。tanhで軽く潰す。潰すほど倍音が増えて密度が出るが、
+  // やりすぎると割れた音になるだけなので、係数は2〜3の範囲で使う
+  _satCurve(k = 2.4) {
+    const n = 1024;
+    const c = new Float32Array(n);
+    const norm = Math.tanh(k);
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1;
+      c[i] = Math.tanh(x * k) / norm;
+    }
+    return c;
+  }
+
+  /**
+   * 倒した合図の土台。各案の声はここが返す入口へ繋ぐ。
+   *   ・入口は歪み器。通った音は倍音が増えて太くなる
+   *   ・同時に低音の層を1枚敷く。これが「重さ」そのもの
+   * 低音を歪み器に通さないのは、潰すと輪郭が濁って重さではなく汚れになるため
+   */
+  _killBed(t, { sub = 1, subF0 = 86, subF1 = 41, subLen = 0.22, satK = 2.4, level = 0.5 } = {}) {
+    const ctx = this.ctx;
+    const shaper = ctx.createWaveShaper();
+    shaper.curve = this._satC || (this._satC = this._satCurve(satK));
+    // 歪ませた後に必ず蓋をする。tanhで潰すと倍音が上へ無限に伸びるので、
+    // 掛けっぱなしだと音の重心が3kHzより上へ持って行かれて、
+    // 低音を足したのに「シャリシャリして軽い」という妙な音になる。
+    // 潰してから削るのが順番で、逆にすると密度だけ落ちる
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 4200;
+    lp.Q.value = 0.7;
+    const out = ctx.createGain();
+    out.gain.value = level;
+    shaper.connect(lp); lp.connect(out);
+    // 耳鳴りのフィルタを迂回する。倒した知らせが被弾で埋もれると、
+    // 撃ち合いの真っ最中＝一番知りたい時に限って聞こえない
+    out.connect(this.postBus);
+    this._reap([out, lp], 2.0);
+
+    if (sub > 0) {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(subF0, t);
+      o.frequency.exponentialRampToValueAtTime(subF1, t + subLen);
+      const g = ctx.createGain();
+      o.connect(g); g.connect(this.postBus);
+      this._env(g, t, 0.50 * sub, 0.002, subLen);
+      this._reap([g], 2.0);
+      o.start(t); o.stop(t + subLen * 4 + 0.2);
+      // 低音だけだと聞こえない環境（ノートPCの内蔵スピーカー等）がある。
+      // 2倍の所に薄く重ねると、低音が出ない機械でも重さの手掛かりが残る
+      const o2 = ctx.createOscillator();
+      o2.type = 'sine';
+      o2.frequency.setValueAtTime(subF0 * 2, t);
+      o2.frequency.exponentialRampToValueAtTime(subF1 * 2, t + subLen);
+      const g2 = ctx.createGain();
+      o2.connect(g2); g2.connect(shaper);
+      this._env(g2, t, 0.30 * sub, 0.002, subLen * 0.8);
+      this._reap([g2], 2.0);
+      o2.start(t); o2.stop(t + subLen * 4 + 0.2);
+    }
+    return shaper;
+  }
+
+  /**
+   * 倒した合図の1音ぶん。
+   * @param bend 1以外を渡すと、鳴っている間にその倍率まで音程を滑らせる
+   * @param dest 繋ぎ先。省略すると歪みを通さずそのまま出る
+   */
+  _killTone(t, freq, level, attack, decay, type = 'sine', bend = 1, dest = null) {
+    const o = this.ctx.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (bend !== 1) o.frequency.exponentialRampToValueAtTime(freq * bend, t + decay);
+    const g = this.ctx.createGain();
+    o.connect(g); g.connect(dest || this.postBus);
+    this._env(g, t, level, attack, decay);
+    this._reap([g], 1.6);
+    o.start(t); o.stop(t + attack + decay * 3 + 0.05);
+  }
+
+  /**
+   * 倒した合図のノイズ層。帯域で切り出して打点を作る。
+   * bandpassだと帯の中心が鳴って「チッ」に、highpassだと上が全部残って
+   * 「シャッ」になる。前者は硬い物、後者は空気の抜けに聞こえる
+   */
+  _killNoise(t, level, decay, { hp = 0, bp = 0, q = 1, rate = 1.4 } = {}, dest = null) {
+    const src = this._noiseSource(rate);
+    const f = this.ctx.createBiquadFilter();
+    if (bp) { f.type = 'bandpass'; f.frequency.value = bp; f.Q.value = q; }
+    else { f.type = 'highpass'; f.frequency.value = hp; }
+    const g = this.ctx.createGain();
+    src.connect(f); f.connect(g); g.connect(dest || this.postBus);
+    this._env(g, t, level, 0.0006, decay);
+    this._reap([g, f], 1.6);
+    src.start(t, Math.random()); src.stop(t + decay * 4 + 0.05);
+  }
+
+  /**
+   * 打点を1つ。低い所で叩いて、音程を下へ落とす。
+   *
+   * 「デン」と聞こえるのは音程が下がるから。上げると「ディン」＝撞いた音になる。
+   * 層は3つで、低音が重さ、胴が輪郭、頭の一瞬が打った感触を作る。
+   */
+  _killBeat(t, dest, {
+    f0 = 120, f1 = 62, body = 220, bodyTo = 140,
+    level = 1, len = 0.10, subLen = 0.09, edge = 0, punch = 700, weight = 1,
+  }) {
+    // 低音のつまみは、敷く低音の量だけでなく胴の落ち方も動かす。
+    // 量だけ絞っても、胴が下まで滑り落ちるぶんの低い音が残って、
+    // 0まで下げても3割しか軽くならなかった。落とす幅も一緒に縮める
+    const fall = 0.45 + 0.55 * Math.min(1.4, weight);
+    bodyTo = body - (body - bodyTo) * fall;
+    const ctx = this.ctx;
+    // 低音。歪ませずにpostBusへ直に出す。潰すと重さではなく濁りになる
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.exponentialRampToValueAtTime(f1, t + subLen);
+    const g = ctx.createGain();
+    o.connect(g); g.connect(this.postBus);
+    this._env(g, t, 0.40 * level * weight, 0.0015, subLen);
+    this._reap([g], 2.0);
+    o.start(t); o.stop(t + subLen * 4 + 0.3);
+
+    // 胴。三角波を歪ませて倍音を詰める。ここが無いと低音だけの唸りになって、
+    // 何が鳴ったのか輪郭が読めない
+    this._killTone(t, body, 0.56 * level, 0.001, len, 'triangle', bodyTo / body, dest);
+    this._killTone(t + 0.002, body * 1.5, 0.26 * level, 0.001, len * 0.7, 'sine', bodyTo / body, dest);
+
+    // 叩いた頭の一瞬。上を残すと甲高くなるので、低い所で切って厚みだけ足す
+    this._killNoise(t, 0.30 * level, 0.014, { bp: punch, q: 0.8 }, dest);
+    // 抜けを良くしたい時だけ、上に細い芯を置く
+    if (edge > 0) this._killNoise(t, 0.16 * edge * level, 0.012, { bp: 2600, q: 1.6 }, dest);
+  }
+
+  /**
+   * 倒した合図。打点をいくつか並べて鳴らす。最後の打点が本命で余韻を持つ。
+   * 実際の値は KILL_TUNE と、選んだ出発点(KILL_SOUNDS の cfg)を混ぜた物。
+   */
+  _killShot(t, head, cfg = {}) {
+    const c = { ...KILL_TUNE, ...cfg, ...(this.killTune || {}) };
+    const n = clamp(Math.round(c.hits), 1, 3);
+    // 頭に当てた時だけ全体を長3度上げる。同じ音の音量違いでは差が伝わらない
+    const p = c.pitch * (head ? 1.26 : 1);
+    const bed = this._killBed(t, { sub: 0, satK: c.drive, level: 0.62 * c.level });
+
+    for (let i = 0; i < n; i++) {
+      const last = i === n - 1;
+      const at = t + c.gap * i;
+      // 最後だけ低く長く大きく。手前は短い助走にする
+      const k = last ? 1 : 0.62 + i * 0.06;
+      // 手前の打点は、間隔より長く鳴らすと次の打点に被って1発に聞こえる。
+      // 間隔を一番詰めた時に実際そうなって、2発目が消えていた
+      const lead = Math.min(0.085, c.gap * 0.55);
+      this._killBeat(at, bed, {
+        f0: (last ? 112 : 132) * p, f1: (last ? 52 : 74) * p,
+        body: (last ? 300 : 360) * p, bodyTo: (last ? 205 : 268) * p,
+        level: (last ? 1.30 : 0.60) * k / (last ? 1 : 0.62),
+        len: last ? 0.24 * c.tail : lead,
+        subLen: last ? 0.20 * c.tail : lead * 0.82,
+        weight: c.weight, edge: c.edge,
+        punch: (last ? 850 : 980) * p,
+      });
+    }
+
+    // 最後の打点の余韻。完全5度で重ねると濁らずに伸びる。
+    // これが無いと叩いて終わりで、「ン」の残りが出ない
+    const end = t + c.gap * (n - 1);
+    this._killTone(end + 0.01, 190 * p, 0.26 * c.weight, 0.004, 0.40 * c.tail, 'sine', 0.88, bed);
+    this._killTone(end + 0.01, 285 * p, 0.20 * c.weight, 0.004, 0.32 * c.tail, 'sine', 0.88, bed);
+    this._killNoise(end + 0.03, 0.06, 0.32 * c.tail, { bp: 700 * p, q: 0.7 }, bed);
+    // 芯を上げた時だけ、上に伸びる余韻も足す。ここが「抜け」を作る
+    if (c.edge > 0.05) {
+      this._killNoise(end + 0.02, 0.05 * c.edge, 0.26 * c.tail, { bp: 3200 * p, q: 1.1 }, bed);
+    }
+  }
+
+  /** 今のつまみの値を差し替える。ロビーのスライダーから呼ぶ */
+  setKillTune(tune) {
+    this.killTune = { ...(this.killTune || {}), ...tune };
+    try {
+      localStorage.setItem('blackout.killTune', JSON.stringify(this.killTune));
+    } catch { /* 覚えられないだけ */ }
+  }
+
+  kill(headshot = false) {
+    if (!this.ready || !this.enabled) return;
+    const i = clamp(this.killVariant | 0, 0, KILL_SOUNDS.length - 1);
+    this._killShot(this.ctx.currentTime, headshot, KILL_SOUNDS[i].cfg);
+  }
+
+  /** 今の設定。鳴らさずに値だけ取る（画面の初期表示用） */
+  killSoundInfo() {
+    const i = clamp(this.killVariant | 0, 0, KILL_SOUNDS.length - 1);
+    const s = KILL_SOUNDS[i];
+    return {
+      index: i, total: KILL_SOUNDS.length, name: s.name, note: s.note,
+      // 出発点の上につまみの値を重ねた、実際に鳴る設定
+      tune: { ...KILL_TUNE, ...s.cfg, ...(this.killTune || {}) },
+    };
+  }
+
+  /**
+   * 出発点を選び直す。つまみで動かした値は捨てる。
+   * 残したままだと、どの出発点を選んでも同じ音が鳴って選ぶ意味が消える
+   */
+  pickKillSound(i) {
+    const n = KILL_SOUNDS.length;
+    this.killVariant = ((i % n) + n) % n;
+    this.killTune = null;
+    try {
+      localStorage.setItem('blackout.killPick', String(this.killVariant));
+      localStorage.removeItem('blackout.killTune');
+    } catch { /* 覚えられないだけ */ }
+    this.kill(false);
+    return this.killSoundInfo();
+  }
+
+  /** 出発点を1つ送る。0を渡すと今の物をもう一度鳴らすだけ */
+  cycleKillSound(dir = 1) {
+    if (dir === 0) { this.kill(false); return this.killSoundInfo(); }
+    return this.pickKillSound((this.killVariant | 0) + dir);
+  }
+
+  /** つまみを1つ動かして、その場で鳴らす */
+  tweakKillSound(key, value) {
+    this.setKillTune({ [key]: value });
+    this.kill(false);
+    return this.killSoundInfo();
+  }
+
+  /**
+   * 爆発。銃声と同じ3層の作りだが、比率が逆になる。
+   * 銃声は高いクラックが主役で低音が支え。爆発は低音が主役で、
+   * 高域は「立ち上がりの割れ」として一瞬だけ乗る。
+   * ここを銃声と同じ比率で作ると、ただの大きい銃声になって爆発に聞こえない
+   */
+  explosion(position, camera) {
+    if (!this.ready || !this.enabled) return;
+    const ctx = this.ctx;
+    const dist = this._dist(position, camera);
+    // 音は光より遅い。近いと同時、遠いと遅れて届く
+    const t = ctx.currentTime + Math.min(0.6, dist / SOUND_SPEED);
+
+    // (1) 低音の押し。90Hzから20Hzへ落として腹に来る成分を作る
+    const sub = ctx.createOscillator();
+    sub.type = 'sine';
+    // 低音を1本から2本に。62Hzと94Hzをずらして重ねると唸りが出て太くなる。
+    // 1本だと音程のはっきりした「ボン」になって、玩具の破裂音に近づく
+    sub.frequency.setValueAtTime(rnd(58, 70), t);
+    sub.frequency.exponentialRampToValueAtTime(16, t + 0.85);
+    const sg = ctx.createGain();
+    sub.connect(sg);
+    this._env(sg, t, 0.66, 0.004, 0.75);
+    this._out(this._place(sg, position, camera, 30, dist), 0.5, 0.5);
+    sub.start(t); sub.stop(t + 1.6);
+
+    // 2本目の低音。1本目とわずかにずらして唸りを作る。
+    // 同じ周波数を重ねても音量が増えるだけだが、ずらすと「うねる」ぶん体積が出る
+    const sub2 = ctx.createOscillator();
+    sub2.type = 'sine';
+    sub2.frequency.setValueAtTime(rnd(88, 104), t);
+    sub2.frequency.exponentialRampToValueAtTime(24, t + 0.6);
+    const sg2 = ctx.createGain();
+    sub2.connect(sg2);
+    this._env(sg2, t, 0.42, 0.004, 0.5);
+    this._out(this._place(sg2, position, camera, 28, dist), 0.5, 0.5);
+    sub2.start(t); sub2.stop(t + 1.2);
+
+    // (2) 割れ。立ち上がりの一瞬だけ高域を通す
+    const crack = this._noiseSource(rnd(0.9, 1.1));
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(2200, t);
+    bp.frequency.exponentialRampToValueAtTime(400, t + 0.18);
+    bp.Q.value = 0.8;
+    const cg = ctx.createGain();
+    crack.connect(bp); bp.connect(cg);
+    this._env(cg, t, 0.48, 0.002, 0.20);
+    this._out(this._place(cg, position, camera, 22, dist), 0.45, 0.6);
+    crack.start(t, Math.random()); crack.stop(t + 0.6);
+
+    // (3) 尾。低く長く引いて空間の広さを出す
+    const tail = this._noiseSource(0.35);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(900, t);
+    lp.frequency.exponentialRampToValueAtTime(160, t + 1.1);
+    const tg = ctx.createGain();
+    tail.connect(lp); lp.connect(tg);
+    this._env(tg, t + 0.03, 0.42, 0.02, 1.5);
+    this._out(this._place(tg, position, camera, 26, dist), 0.7, 0.8);
+    tail.start(t, Math.random()); tail.stop(t + 2.0);
+  }
+
+  /**
+   * 刃が物に当たった音。火花を消したぶん、手応えが完全に無くなっていたので置く。
+   * 金属を叩く音ではなく「重い物が突き刺さって止まる」音にする。
+   * 帯域を低く取って余韻をほぼ切ると、鈍い衝突として聞こえる
+   */
+  stab(position, camera, flesh = false) {
+    if (!this.ready || !this.enabled) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+
+    // 突き当たりの芯。硬い物ほど高く短い
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(flesh ? 160 : 240, t);
+    o.frequency.exponentialRampToValueAtTime(flesh ? 70 : 110, t + 0.05);
+    const og = ctx.createGain();
+    o.connect(og);
+    this._env(og, t, 0.30, 0.002, flesh ? 0.07 : 0.05);
+
+    // 擦れ。刃が入って止まるまでの短いノイズ
+    const src = this._noiseSource(rnd(0.5, 0.8));
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = flesh ? 700 : 1600;
+    const g = ctx.createGain();
+    src.connect(f); f.connect(g);
+    this._env(g, t, flesh ? 0.26 : 0.16, 0.002, 0.06);
+
+    const bus = ctx.createGain();
+    og.connect(bus); g.connect(bus);
+    this._out(this._place(bus, position, camera, 8), 0.2, 0.1);
+    o.start(t); o.stop(t + 0.3);
+    src.start(t, Math.random()); src.stop(t + 0.3);
+  }
+
+  /** 刃を振る音。空気を切る「ヒュッ」だけ。金属は鳴らさない（振っただけでは鳴らない） */
+  swing() {
+    if (!this.ready || !this.enabled) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const src = this._noiseSource(rnd(1.1, 1.4));
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    // 通り過ぎる間に帯域が上がって下がる。これが「横切った」に聞こえる
+    bp.frequency.setValueAtTime(700, t);
+    bp.frequency.exponentialRampToValueAtTime(2600, t + 0.06);
+    bp.frequency.exponentialRampToValueAtTime(900, t + 0.16);
+    bp.Q.value = 1.4;
+    const g = ctx.createGain();
+    src.connect(bp); bp.connect(g);
+    this._env(g, t, 1.30, 0.010, 0.12);
+    this._out(g, 0.12, 0.05);
+    src.start(t, Math.random()); src.stop(t + 0.4);
+
+    // 押しのける空気。帯域を絞ったシュッという音だけだと、
+    // measureで低音の取り分が0.6%しかなく、細い糸のような音になっていた。
+    // 速く動く物は必ず低い所の空気も動かす
+    const air = this._noiseSource(rnd(0.35, 0.5));
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(260, t);
+    lp.frequency.exponentialRampToValueAtTime(620, t + 0.07);
+    lp.frequency.exponentialRampToValueAtTime(200, t + 0.18);
+    lp.Q.value = 0.8;
+    const ag = ctx.createGain();
+    air.connect(lp); lp.connect(ag);
+    this._env(ag, t, 1.45, 0.014, 0.15);
+    this._out(ag, 0.10, 0.04);
+    air.start(t, Math.random()); air.stop(t + 0.45);
   }
 
   /* -------------------------------------------------- 被弾・耳鳴り・生体 */
@@ -831,6 +1507,7 @@ export class AudioEngine {
     o.frequency.exponentialRampToValueAtTime(31, t + 0.1);
     const g = ctx.createGain();
     o.connect(g); g.connect(this.postBus);
+    this._reap([g], 1.2);
     this._env(g, t, vol, 0.008, 0.07);
     o.start(t); o.stop(t + 0.3);
   }
@@ -851,21 +1528,24 @@ export class AudioEngine {
     f.frequency.value = rnd(320, 440);
     const g = ctx.createGain();
     src.connect(f); f.connect(g); g.connect(this.postBus);
+    this._reap([g, f], 1.2);
     this._env(g, t, 0.4 + amt * 0.3, 0.002, 0.16);
     src.start(t, Math.random()); src.stop(t + 0.5);
 
     // 世界の音を落とす。戻す時定数を重さで変えると、軽い被弾は一瞬で復帰する
     const ef = this.earFilter.frequency;
     ef.cancelScheduledValues(t);
-    ef.setValueAtTime(Math.max(ef.value, 1200), t);
-    ef.linearRampToValueAtTime(lerp(5200, 850, amt), t + 0.02);
-    ef.setTargetAtTime(20000, t + 0.06, 0.45 + amt * 1.5);
+    // こもらせる量も戻る速さも控えめにする。
+    // 3460Hzまで落として時定数1秒で戻す形だと、連射を受けている間ずっと
+    // こもったままになり、被弾が続く＝一番音を聴きたい場面で何も聞こえなくなる。
+    // 一瞬だけ落として素早く戻す（撃たれた実感は出るが情報は失わない）
+    ef.setValueAtTime(Math.max(ef.value, 3000), t);
+    ef.linearRampToValueAtTime(lerp(9000, 4200, amt), t + 0.02);
+    ef.setTargetAtTime(20000, t + 0.05, 0.10 + amt * 0.22);
 
-    const rg = this.ringGain.gain;
-    rg.cancelScheduledValues(t);
-    rg.setValueAtTime(Math.max(rg.value, 0.0001), t);
-    rg.linearRampToValueAtTime(0.02 + amt * 0.055, t + 0.025);
-    rg.setTargetAtTime(0.0001, t + 0.06, 0.6 + amt * 1.7);
+    // 耳鳴り（キーン）は鳴らさない。撃たれるたびに高い正弦波が数秒残るのは
+    // 情報を1つも足さないうえ、次の撃ち合いの音を聴き取る邪魔にしかならない。
+    // 「撃たれた」の実感は上の earFilter（世界の音がこもる）だけで足りる
   }
 
   death(position, camera) {
@@ -887,25 +1567,72 @@ export class AudioEngine {
 
   /* ---------------------------------------------------------- 環境音 */
 
-  // 遠くの銃声と風。無音だと戦場に見えないので薄く敷く
+  // 遠くの銃声と風。無音だと戦場に見えないので薄く敷く。
+  //
+  // 以前は「1本のノイズをローパスに通して0.07Hzで揺らす」だけだった。
+  // 帯域が1つしかないので、耳が数秒で慣れて「ずっと同じ音」になる。
+  // 自然界の風がそう聞こえないのは、低い唸り・中域のさざめき・高域の擦れが
+  // それぞれ別の速さで動いているから。層を3つに分けて、揺らす周期を
+  // 互いに素にならない程度にずらす（同じ周期だと3層が揃って脈打つ）
   _startAmbience() {
     const ctx = this.ctx;
-    const wind = this._noiseSource(0.25);
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.value = 420;
-    const g = ctx.createGain();
-    g.gain.value = 0.035;
-    wind.connect(lp); lp.connect(g); g.connect(this.master);
-    wind.start();
 
-    // 風の強さをゆっくり揺らす
-    const lfo = ctx.createOscillator();
-    lfo.frequency.value = 0.07;
-    const lfoGain = ctx.createGain();
-    lfoGain.gain.value = 0.02;
-    lfo.connect(lfoGain); lfoGain.connect(g.gain);
-    lfo.start();
+    // 層を1つ作る。rateは再生速度＝ざらつきの細かさ、
+    // freqはローパスの高さ、lfoHzは強弱の揺れる速さ
+    const layer = (rate, type, freq, q, level, lfoHz, depth) => {
+      const src = this._noiseSource(rate);
+      const f = ctx.createBiquadFilter();
+      f.type = type;
+      f.frequency.value = freq;
+      if (q) f.Q.value = q;
+      const g = ctx.createGain();
+      g.gain.value = level;
+      src.connect(f); f.connect(g); g.connect(this.master);
+      src.start();
+
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = lfoHz;
+      const lg = ctx.createGain();
+      lg.gain.value = depth;
+      lfo.connect(lg); lg.connect(g.gain);
+      lfo.start();
+      return { f, g };
+    };
+
+    // 低い唸り。建物の間を抜ける風の芯。一番ゆっくり動く
+    layer(0.16, 'lowpass', 150, 0, 0.020, 0.043, 0.012);
+    // 中域のさざめき。ここが「屋外にいる」感を作る
+    // 中域は一番耳につく帯。0.020は流しっぱなしだと「サー」として残り続けるので半分に
+    layer(0.30, 'bandpass', 520, 0.9, 0.009, 0.071, 0.007);
+    // 高域の擦れ。金網や砂が鳴る帯。速く動かすと落ち着かないので浅く
+    // 高域は完全に落とす。2.6kHz以上のノイズは音量を絞っても不快さだけが残る
+    layer(0.85, 'lowpass', 1400, 0, 0.004, 0.113, 0.003);
+
+    // 遠くの金属が軋む音。風の層とは無関係に、思い出したように鳴る。
+    // 周期的な物が1つも無いと、耳は全体を「ノイズ」として1枚に畳んでしまう。
+    // たまに輪郭のある音が入ると、そのたびに空間の広さを聞き直すことになる
+    const creak = () => {
+      if (!this.ctx) return;
+      if (this.enabled && Math.random() < 0.55) {
+        const t = ctx.currentTime;
+        const o = ctx.createOscillator();
+        o.type = 'sawtooth';
+        const base = rnd(70, 150);
+        o.frequency.setValueAtTime(base, t);
+        // ゆっくり上げると「重い物が撓む」に聞こえる。下げると崩れる音になる
+        o.frequency.exponentialRampToValueAtTime(base * rnd(1.15, 1.5), t + rnd(0.5, 1.1));
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.value = rnd(300, 700);
+        bp.Q.value = 3.5;
+        const g = ctx.createGain();
+        o.connect(bp); bp.connect(g); g.connect(this.master);
+        this._env(g, t, rnd(0.010, 0.022), 0.35, rnd(0.6, 1.2));
+        o.start(t); o.stop(t + 2.0);
+      }
+      setTimeout(creak, rnd(14000, 34000));
+    };
+    setTimeout(creak, rnd(4000, 9000));
 
     // 遠景の撃ち合い。distanceを渡して遠距離帯の合成に乗せる。
     // 単発と連射を混ぜると「別の場所で戦闘が続いている」ように聞こえる
