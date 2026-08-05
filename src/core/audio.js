@@ -735,6 +735,32 @@ export class AudioEngine {
     this._bolt(t + duration * 0.86);
   }
 
+  /**
+   * 1発だけ押し込む音。ショットガンのように1発ずつ入れる武器で、
+   * 弾が1つ増えるたびに鳴らす。
+   *
+   * reload() を短くした物ではない。あれは「抜く→落とす→差す→引く」の
+   * 4工程を時間の中に並べた物で、1発ずつ入れる動作にはその工程が無い。
+   * ここは「布に包まれた物が受けに当たって止まる」1回だけ。
+   * 硬すぎると弾倉を差した音に聞こえるので、低い方へ寄せて余韻を切る
+   */
+  shell() {
+    if (!this.ready || !this.enabled) return;
+    const t = this.ctx.currentTime;
+    // 掴んで運ぶ所の擦れ。これが無いと、何もない所から急に音が出る
+    this._metal(t, {
+      partials: [520, 810], vol: 0.10, decay: 0.014,
+      ring: 0.04, noiseFreq: 2200, noiseQ: 1.1, wet: 0.05,
+    });
+    // 押し込んで止まる所。1発ずつの装填はここが本体
+    const at = t + rnd(0.045, 0.065);
+    this._thunk(at, 132, 76, 0.34, 0.045);
+    this._metal(at, {
+      partials: [186, 305], vol: 0.30, decay: 0.026,
+      ring: 0.07, noiseFreq: 1100, noiseQ: 0.9, noiseType: 'lowpass', wet: 0.08,
+    });
+  }
+
   /* ------------------------------------------------------------ 足音 */
 
   /**
