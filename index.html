@@ -538,14 +538,24 @@
   /* margin:auto はflexの中央寄せと重ねてある。画面が縦に溢れた時、
      align-items:center だけだと上へはみ出た分を掴めなくなるが、
      margin:auto なら溢れた時に上下の余白が潰れて全部見える */
-  .lbpanel { width: min(560px, 90vw); margin: auto; text-align: center; }
-  .lbpanel .title { font-size: 34px; }
+  .lbpanel { width: min(880px, 94vw); margin: auto; text-align: center; }
+  .lbpanel .title { font-size: 28px; }
   /* 始まらない理由がここに出る。出ていない時も場所を空けておかないと、
      理由が出た瞬間に席の絵が下へずれて、押そうとしていた席が動く */
-  .lbpanel .subtitle { margin-bottom: 24px; min-height: 16px; color: var(--warn); }
+  .lbpanel .subtitle { margin-bottom: 14px; min-height: 16px; color: var(--warn); }
+  /* 席と見た目を左右に分ける。
+     縦1列だと、題名+席4つ+240x300の姿+候補6つ+ボタンで1000pxを超える。
+     高さ900pxの窓（ノートPCの普通の大きさ）で下のボタンが画面の外へ出ていた。
+     左右に割ると一番高い列でも340px前後に収まる。
+     狭い窓では横に並べる意味が無いので1列へ戻す */
+  .lbgrid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 20px; align-items: start; margin-bottom: 12px;
+  }
+  @media (max-width: 700px) { .lbgrid { grid-template-columns: 1fr; } }
   /* 席は1列。チーム分けが無いので左右に割らない。
      2人なら1対1、4人なら1対1対1対1で、座った人全員が互いに敵になる */
-  .lbteam { border: 1px solid rgba(255,255,255,.14); padding: 12px 10px; margin-bottom: 18px; }
+  .lbteam { border: 1px solid rgba(255,255,255,.14); padding: 12px 10px; margin-bottom: 10px; }
   .lbhead { font-size: 12px; letter-spacing: .24em; color: var(--dim); margin-bottom: 10px; }
   .lbseats { display: flex; flex-direction: column; gap: 7px; }
   /* 席1つ。空席は押せる、埋まっている席は押せない。
@@ -576,7 +586,7 @@
      いま出しているのは迷彩の色の四角と名前だけで、3Dの姿は出していない。
      出すには別の場面とカメラをもう1組動かすことになり、ロビーにいる間ずっと
      描き続ける形になる。選べることを先に作って、見せ方は後から足せる */
-  .lbchars { margin-bottom: 12px; }
+  .lbchars { margin-bottom: 0; }
   .lbchead { font-size: 10px; letter-spacing: .22em; color: var(--dim); margin-bottom: 7px; text-align: left; }
   /* 選んだ兵士の姿。ロビーにいる間だけ描く。
      色の四角と名前だけでは、どんな兵士なのかが分からない。
@@ -584,7 +594,8 @@
      描く画素数まで変わって、狭い端末ほど重くなる */
   #lbView {
     display: block; margin: 0 auto 9px;
-    width: 240px; height: 300px;
+    width: 220px; height: 270px;
+    max-width: 100%;
     background: linear-gradient(180deg, rgba(20,26,34,.9), rgba(6,9,13,.9));
     border: 1px solid rgba(255,255,255,.1);
   }
@@ -601,7 +612,7 @@
   /* 迷彩の色の四角。名前だけだとどれがどれか読まないと分からない */
   .lbswatch { width: 13px; height: 13px; flex: none; border: 1px solid rgba(0,0,0,.5); }
   .lbchar.on { border-color: var(--accent); color: var(--accent); background: rgba(99,210,255,.1); }
-  .lbstand { font-size: 11px; color: var(--dim); letter-spacing: .1em; min-height: 30px; margin-bottom: 10px; }
+  .lbstand { font-size: 11px; color: var(--dim); letter-spacing: .1em; min-height: 30px; margin-bottom: 0; }
   #netmenu.busy .field input { opacity: .45; pointer-events: none; }
 
   /* ----------------------------------------------------- スコアボード */
@@ -826,16 +837,22 @@
   <div class="lbpanel">
     <div class="title">ロビー</div>
     <div class="subtitle" id="lbWhy"></div>
-    <div class="lbteam">
-      <div class="lbhead">席（2〜4人）</div>
-      <div class="lbseats" id="lbSeats"></div>
+    <!-- 席と見た目を左右に並べる。縦1列に積むと1000pxを超えて、
+         高さ900pxの窓では下のボタンが画面の外に出る（実際に出ていた） -->
+    <div class="lbgrid">
+      <div>
+        <div class="lbteam">
+          <div class="lbhead">席（2〜4人）</div>
+          <div class="lbseats" id="lbSeats"></div>
+        </div>
+        <div class="lbstand" id="lbStand"></div>
+      </div>
+      <div class="lbchars">
+        <div class="lbchead">見た目</div>
+        <canvas id="lbView" width="220" height="270"></canvas>
+        <div class="lbcrow" id="lbChars"></div>
+      </div>
     </div>
-    <div class="lbchars">
-      <div class="lbchead">見た目</div>
-      <canvas id="lbView" width="240" height="300"></canvas>
-      <div class="lbcrow" id="lbChars"></div>
-    </div>
-    <div class="lbstand" id="lbStand"></div>
     <div class="netbtns">
       <button id="lbLeave" class="netbtn" type="button">ホームへ戻る</button>
       <button id="lbStandUp" class="netbtn" type="button">席を降りる</button>

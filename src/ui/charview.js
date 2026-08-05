@@ -41,7 +41,7 @@ export class CharView {
       canvas: this.canvas, antialias: true, alpha: true,
     });
     // 端末の画素密度をそのまま使うと、Retinaで4倍の画素を描くことになる。
-    // 240×300の小さい絵なので2倍で足りる
+    // 220×270の小さい絵なので2倍で足りる
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     this.renderer.setSize(this.canvas.width, this.canvas.height, false);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
