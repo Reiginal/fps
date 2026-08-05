@@ -545,6 +545,25 @@
      押しても見た目が変わらないと、押せたのかどうかが分からず何度も押す */
   .netbtn.on { border-color: var(--ok); color: var(--ok); background: rgba(125,219,138,.12); }
   .netbtn:disabled { opacity: .3; cursor: default; pointer-events: none; }
+  /* 見た目を選ぶ所。
+     いま出しているのは迷彩の色の四角と名前だけで、3Dの姿は出していない。
+     出すには別の場面とカメラをもう1組動かすことになり、ロビーにいる間ずっと
+     描き続ける形になる。選べることを先に作って、見せ方は後から足せる */
+  .lbchars { margin-bottom: 12px; }
+  .lbchead { font-size: 10px; letter-spacing: .22em; color: var(--dim); margin-bottom: 7px; text-align: left; }
+  .lbcrow { display: flex; gap: 6px; flex-wrap: wrap; }
+  .lbchar {
+    flex: 1 1 30%; min-width: 96px;
+    display: flex; align-items: center; gap: 7px;
+    padding: 7px 8px; font-family: var(--mono); font-size: 10px; letter-spacing: .06em;
+    color: var(--dim); background: transparent;
+    border: 1px solid rgba(255,255,255,.14); cursor: pointer;
+    text-align: left;
+  }
+  .lbchar:hover { color: var(--hud); border-color: rgba(255,255,255,.34); }
+  /* 迷彩の色の四角。名前だけだとどれがどれか読まないと分からない */
+  .lbswatch { width: 13px; height: 13px; flex: none; border: 1px solid rgba(0,0,0,.5); }
+  .lbchar.on { border-color: var(--accent); color: var(--accent); background: rgba(99,210,255,.1); }
   .lbstand { font-size: 11px; color: var(--dim); letter-spacing: .1em; min-height: 30px; margin-bottom: 10px; }
   #netmenu.busy .field input { opacity: .45; pointer-events: none; }
 
@@ -773,6 +792,10 @@
         <div class="lbhead">B</div>
         <div class="lbseats" id="lbSeatsB"></div>
       </div>
+    </div>
+    <div class="lbchars">
+      <div class="lbchead">見た目</div>
+      <div class="lbcrow" id="lbChars"></div>
     </div>
     <div class="lbstand" id="lbStand"></div>
     <div class="netbtns">

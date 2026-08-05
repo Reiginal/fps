@@ -17,7 +17,7 @@ import { Chat } from './ui/chat.js';
 import { NetClient } from './net/client.js';
 import { RemotePlayers } from './net/remote.js';
 import {
-  K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, outsideZone,
+  K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, outsideZone, CHARACTERS,
 } from './net/protocol.js';
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -29,6 +29,15 @@ const DEATH_FALL_S = 1.3;
 
 // 自己ベスト。localStorageは設定次第で読み書きどちらも例外を投げるので、
 // 覚えられないだけで遊べなくなることのないよう握り潰す（netmenu.jsと同じ作法）
+// 選んだ見た目。覚えておかないと、入るたびに選び直すことになる
+const CHAR_KEY = 'blackout.char';
+function loadChar() {
+  try { return Math.max(0, Math.min(CHARACTERS.length - 1, (localStorage.getItem(CHAR_KEY) | 0))); } catch { return 0; }
+}
+function saveChar(i) {
+  try { localStorage.setItem(CHAR_KEY, String(i | 0)); } catch { /* 覚えられないだけ */ }
+}
+
 const BEST_KEY = 'blackout.best';
 function loadBest() {
   try {
@@ -717,6 +726,11 @@ class Game {
     this.lobby = lobby;
     lobby.onSeat = (team, seat) => this.net?.sendSeat(team, seat);
     lobby.onReady = (on) => this.net?.sendReady(on);
+    lobby.onChar = (i) => {
+      // 選んだ物は覚えておく。毎回選び直させると、決まっている人ほど面倒になる
+      saveChar(i);
+      this.net?.sendChar(i);
+    };
 
     // 発言。ロビーでも試合中でも同じ物を使う
     const chat = new Chat();
@@ -804,6 +818,9 @@ class Game {
     // 前の顔ぶれを忘れてから入る。持ち越すと、2回目に入った時に
     // 「前にいた人」が新顔として数えられて、入った瞬間に鳴る
     this._lobbyIds = null;
+    // 前に選んだ見た目をサーバーへ伝える。伝えないと、覚えていても
+    // 相手からは既定の姿に見える（サーバーは0番のまま持っている）
+    net.sendChar(loadChar());
     // 繋がっただけでは操作を握らない。ここでロックを取ると、席を選ぶ前に
     // マウスが画面へ吸われて、ロビーのボタンが押せなくなる
     this.lobby.show(net.id);
@@ -1665,6 +1682,12 @@ class Game {
 
     const states = net.stateAt();
     this._lastStates = states;
+    // 誰がどの見た目かを渡す。姿を組むのは相手が初めて画面に出る時だけなので、
+    // 毎フレーム作り直すことにはならない
+    this._charMap ??= new Map();
+    this._charMap.clear();
+    for (const [id, row] of net.players) this._charMap.set(id, row.chr | 0);
+    this.remotes.setChars(this._charMap);
     this.remotes.sync(states, net.id, this.camera.position);
     this._updatePlates(states);
 

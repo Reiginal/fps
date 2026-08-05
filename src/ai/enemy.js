@@ -536,44 +536,73 @@ const HEAD_DOME = 0, HEAD_BOONIE = 1, HEAD_CAP = 2, HEAD_BARE = 3;
 // 武器。正面シルエットの横棒が全員同じなのも「同じ人が並んでいる」の原因
 const WEP_RIFLE = 0, WEP_SMG = 1, WEP_LMG = 2;
 
-function pick(arr) { return arr[(Math.random() * arr.length) | 0]; }
+/* 種から乱数を作る。同じ種からは必ず同じ並びが出るので、同じ兵士が組み上がる。
+   キャラクター選択は「どの種で作るか」を選ぶ形にしてあり、
+   選んだ番号だけを相手に送れば、向こうでも同じ姿が組み上がる。
+   姿を丸ごと送る必要が無いので、電文は数値1つで済む */
+function seededRandom(seed) {
+  // 種はよく混ぜてから使う。
+  // 線形合同法に 1,2,3 のような小さい種をそのまま入れると、
+  // **最初の1個目がどれもほぼ同じ値になる**。実際、種を1〜16で回しても
+  // 迷彩が全部同じ（1個目で選んでいるため）になった。
+  // 混ぜる段を2つ通すと、隣り合った種でもまったく違う並びになる
+  let s = (seed >>> 0) + 0x9e3779b9;
+  return () => {
+    s = (s + 0x9e3779b9) >>> 0;
+    let z = s;
+    z = Math.imul(z ^ (z >>> 16), 0x21f0aaad) >>> 0;
+    z = Math.imul(z ^ (z >>> 15), 0x735a2d97) >>> 0;
+    return ((z ^ (z >>> 15)) >>> 0) / 4294967296;
+  };
+}
 
-function makeVariant() {
-  const camo = CAMO[(Math.random() * CAMO.length) | 0];
-  const headGear = pick([HEAD_DOME, HEAD_DOME, HEAD_DOME, HEAD_BOONIE, HEAD_CAP, HEAD_BARE]);
+/**
+ * 兵士1人ぶんの個体差を作る。
+ * seedを渡すと必ず同じ物が出る。渡さないと毎回違う（1人用の敵はこちら）
+ */
+function makeVariant(seed) {
+  // 種があればそこから、無ければ普通の乱数から引く。
+  // 中で使う乱数を1本に束ねておかないと、種を渡しても一部だけ毎回変わる
+  const rnd = seed == null ? Math.random : seededRandom(seed);
+  const pickR = (arr) => arr[(rnd() * arr.length) | 0];
+  const randR = (s) => (rnd() - 0.5) * s;
+
+  const camo = CAMO[(rnd() * CAMO.length) | 0];
+  const headGear = pickR([HEAD_DOME, HEAD_DOME, HEAD_DOME, HEAD_BOONIE, HEAD_CAP, HEAD_BARE]);
   return {
+    seed: seed ?? null,
     // 身長差は±7%だと人の目には映らない。シルエットで分かる幅まで広げる
-    scale: 0.90 + Math.random() * 0.22,
+    scale: 0.90 + rnd() * 0.22,
     // 肩幅を広げすぎると支持手が銃に届かなくなるので、この範囲までにする
-    width: 0.88 + Math.random() * 0.26,
+    width: 0.88 + rnd() * 0.26,
     /* 個体差を色と小物だけに入れても、10m以上では輪郭が同じなので同型に見える。
        姿勢そのものを振る。stanceは構えの高さ、staggerは足の前後の割り、
        neckTilt/slouchは首と背中の癖 */
-    stance: pick(['high', 'low', 'patrol']),
-    stagger: (Math.random() < 0.5 ? -1 : 1) * (0.035 + Math.random() * 0.045),
-    neckTilt: rand(0.14),
-    slouch: rand(0.10),
+    stance: pickR(['high', 'low', 'patrol']),
+    stagger: (rnd() < 0.5 ? -1 : 1) * (0.035 + rnd() * 0.045),
+    neckTilt: randR(0.14),
+    slouch: randR(0.10),
     camo,
-    skin: SKIN[(Math.random() * SKIN.length) | 0],
-    hue: rand(0.045),
-    lum: rand(0.09),
+    skin: SKIN[(rnd() * SKIN.length) | 0],
+    hue: randR(0.045),
+    lum: randR(0.09),
     // アルベドのUVをずらして個体差を出す。色を個体ごとに乗算すると
     // 「同じ服の色違い」にしかならないが、柄がずれると別の服に見える
-    uvOff: new THREE.Vector2(Math.random(), Math.random()),
+    uvOff: new THREE.Vector2(rnd(), rnd()),
     headGear,
     // 露出した顔は作り込んだ個体だけにする。残りは覆面で肌を隠す。
     // 全員の顔を作り込むのは高いので、これが一番安いAAA近似になる
-    faceCover: headGear === HEAD_BARE ? 1 : (Math.random() < 0.45 ? 1 : 0),
-    plateCarrier: Math.random() < 0.5,       // 分厚いプレートキャリアか薄いチェストリグか
-    weapon: pick([WEP_RIFLE, WEP_RIFLE, WEP_SMG, WEP_LMG]),
-    pouches: 2 + ((Math.random() * 2) | 0),
-    pack: Math.random() < 0.62,
-    radio: Math.random() < 0.5,
-    chevron: Math.random() < 0.45,
-    canteen: Math.random() < 0.6,
-    holster: Math.random() < 0.45,
-    optic: Math.random() < 0.6,
-    coverHelmet: Math.random() < 0.5,
+    faceCover: headGear === HEAD_BARE ? 1 : (rnd() < 0.45 ? 1 : 0),
+    plateCarrier: rnd() < 0.5,       // 分厚いプレートキャリアか薄いチェストリグか
+    weapon: pickR([WEP_RIFLE, WEP_RIFLE, WEP_SMG, WEP_LMG]),
+    pouches: 2 + ((rnd() * 2) | 0),
+    pack: rnd() < 0.62,
+    radio: rnd() < 0.5,
+    chevron: rnd() < 0.45,
+    canteen: rnd() < 0.6,
+    holster: rnd() < 0.45,
+    optic: rnd() < 0.6,
+    coverHelmet: rnd() < 0.5,
   };
 }
 
@@ -1263,7 +1292,9 @@ export class Enemy {
   constructor(level, opts = {}) {
     this.level = level;
     this.octree = level.octree;
-    this.variant = makeVariant();
+    // 種を渡すと決まった姿になる。対戦で「相手が選んだキャラ」を組む時に使う。
+    // 渡さない時は今まで通り毎回違う（1人用の敵はこちら）
+    this.variant = makeVariant(opts.seed);
     this.parts = buildSoldier(this.variant);
     this.root = this.parts.root;
     // 影の入り切りを毎回traverseで探すと無駄なので、生成時に1回だけ集める
