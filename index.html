@@ -464,6 +464,21 @@
   /* 接続中に連打されると同じ部屋へ何本も繋ぎにいく */
   #netmenu.busy .netbtn { opacity: .35; cursor: default; pointer-events: none; }
 
+  /* ------------------------------------------------------- 手掛かり */
+  /* 右上に小さく出す。普段は出ない。
+     出た時は「今これができない状態です」と本人に伝わることが目的なので、
+     開発者向けの文字列ではなく、遊ぶ側が読める言葉で書く */
+  #diag {
+    position: fixed; right: 16px; top: 16px; z-index: 30;
+    max-width: min(360px, 46vw);
+    padding: 9px 11px; pointer-events: none;
+    font-family: var(--mono); font-size: 11px; line-height: 1.7;
+    letter-spacing: .04em; color: var(--warn);
+    background: rgba(8,12,18,.88); border: 1px solid rgba(255,70,50,.5);
+    white-space: pre-wrap; word-break: break-word;
+  }
+  #diag.hidden { display: none; }
+
   /* --------------------------------------------------------- 発言 */
   /* 左下に置く。右下は弾数、中央下は体力なので、遊ぶのに要る数字と重ならない。
      普段は触れない（pointer-events: none）。打つ時だけ入力欄が触れるようになる */
@@ -551,6 +566,16 @@
      描き続ける形になる。選べることを先に作って、見せ方は後から足せる */
   .lbchars { margin-bottom: 12px; }
   .lbchead { font-size: 10px; letter-spacing: .22em; color: var(--dim); margin-bottom: 7px; text-align: left; }
+  /* 選んだ兵士の姿。ロビーにいる間だけ描く。
+     色の四角と名前だけでは、どんな兵士なのかが分からない。
+     canvasの大きさは固定にしてある。画面幅に合わせて伸ばすと、
+     描く画素数まで変わって、狭い端末ほど重くなる */
+  #lbView {
+    display: block; margin: 0 auto 9px;
+    width: 240px; height: 300px;
+    background: linear-gradient(180deg, rgba(20,26,34,.9), rgba(6,9,13,.9));
+    border: 1px solid rgba(255,255,255,.1);
+  }
   .lbcrow { display: flex; gap: 6px; flex-wrap: wrap; }
   .lbchar {
     flex: 1 1 30%; min-width: 96px;
@@ -774,6 +799,12 @@
 <!-- 発言。ロビーでも試合中でも同じ物を使う。
      2つ作ると、片方だけ直して見た目がずれる。
      試合中はマウスを掴んでいるので、Enterで開いてEnterで送る形にしてある -->
+<!-- 手掛かり。何かがおかしい時だけ出る。
+     Windowsの人から「Fが効かない」「武器が変えられない」と言われた時、
+     こちらには何も情報が無く、何回試してもらっても推測しか増えなかった。
+     遊ぶ側が読める言葉で状態を出して、次の1回で原因が分かる形にする -->
+<div id="diag" class="hidden"></div>
+
 <div id="chat" class="hidden">
   <div id="chatLog"></div>
   <input id="chatInput" type="text" maxlength="80" autocomplete="off" spellcheck="false" class="hidden">
@@ -795,6 +826,7 @@
     </div>
     <div class="lbchars">
       <div class="lbchead">見た目</div>
+      <canvas id="lbView" width="240" height="300"></canvas>
       <div class="lbcrow" id="lbChars"></div>
     </div>
     <div class="lbstand" id="lbStand"></div>

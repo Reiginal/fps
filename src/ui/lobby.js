@@ -41,9 +41,14 @@ export class Lobby {
     // 自分が準備完了を立てているか。押す時に「今の逆」を送るために持つ
     this.meReady = false;
 
+    // ロビーで押す物はどれも「人が押した瞬間」なので、
+    // 全画面へ入り直す機会にしてある。選択画面で断られていても、
+    // 席や準備を押した所でもう一度頼める（試合が始まってからでは遅い）
+    this.onPress = () => {};
+
     this.el.leave.onclick = () => this.onLeave();
-    this.el.standUp.onclick = () => this.onSeat(-1, 0);
-    this.el.ready.onclick = () => this.onReady(!this.meReady);
+    this.el.standUp.onclick = () => { this.onPress(); this.onSeat(-1, 0); };
+    this.el.ready.onclick = () => { this.onPress(); this.onReady(!this.meReady); };
 
     this._build();
     this.render({ rows: [], why: '' });
@@ -81,7 +86,7 @@ export class Lobby {
         const b = document.createElement('button');
         b.type = 'button';
         b.className = 'lbseat';
-        b.onclick = () => this.onSeat(team, seat);
+        b.onclick = () => { this.onPress(); this.onSeat(team, seat); };
         box.appendChild(b);
         this.seatEls[team].push(b);
       }
