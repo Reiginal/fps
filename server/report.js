@@ -66,11 +66,22 @@ export class ReportLimiter {
   }
 }
 
+/* 遊ぶ側から受け取ってよい出来事の種類。
+ *
+ * **ここに無い名前は全部 error 扱いにする。** 種類を自由に付けられると、
+ * 外から 'boot'（サーバー起動）のような偽の行を混ぜられて、
+ * ログを読む側が「いつ再起動したか」を読み違える。
+ *
+ * solo は1人プレイ。1人プレイはサーバーに一切繋がらないので、
+ * ここを通さないと**遊んだ事実がどこにも残らない**。
+ * 実際に遊んだ後でログを見て「1件も無い、壊れている？」となった */
+export const REPORT_KINDS = ['error', 'solo'];
+
 /**
- * 受け取った本文を、ログに出す1行へ直す。
+ * 受け取った本文を、扱える形へ直す。
  * 捨てるべき物はnullを返す（壊れたJSON・本文が無い・空っぽ）
  */
-export function reportLine(bodyText) {
+export function reportRecord(bodyText) {
   if (typeof bodyText !== 'string' || bodyText.length > REPORT_BODY_MAX) return null;
   let m = null;
   try { m = JSON.parse(bodyText); } catch { return null; }
@@ -80,10 +91,28 @@ export function reportLine(bodyText) {
   const message = one(m.message);
   if (!message) return null;
 
-  const name = one(m.name || '名無し', 24) || '名無し';
-  const where = one(m.where, 120);
-  const ua = one(m.ua, 120);
-  return `[画面のエラー] ${name}: ${message}`
-    + (where ? ` @ ${where}` : '')
-    + (ua ? ` [${ua}]` : '');
+  // 数字は数字として持つ。文字にすると、後で「3波より上だけ数える」ができない。
+  // 有限の数以外（NaN・Infinity・文字列）は入れない
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : null);
+
+  return {
+    kind: REPORT_KINDS.includes(m.kind) ? m.kind : 'error',
+    name: one(m.name || '名無し', 24) || '名無し',
+    message,
+    where: one(m.where, 120),
+    ua: one(m.ua, 120),
+    wave: num(m.wave),
+    kills: num(m.kills),
+    score: num(m.score),
+  };
+}
+
+/** 流れて消える方（flyctl logs）へ出す1行。人が目で追うためだけの形 */
+export function reportLine(bodyText) {
+  const r = reportRecord(bodyText);
+  if (!r) return null;
+  const tag = r.kind === 'solo' ? '[1人で遊んだ]' : '[画面のエラー]';
+  return `${tag} ${r.name}: ${r.message}`
+    + (r.where ? ` @ ${r.where}` : '')
+    + (r.ua ? ` [${r.ua}]` : '');
 }

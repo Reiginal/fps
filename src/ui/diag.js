@@ -53,21 +53,41 @@ export class Diag {
     this._report(message, where);
   }
 
+  /**
+   * エラー以外の出来事を送る。
+   *
+   * なぜ要るか: **1人プレイはサーバーに一度も繋がらない。**
+   * 敵も地形も得点も全部このブラウザの中で動いていて、通信が発生しないので、
+   * どれだけ遊んでもサーバー側には何も残らない。
+   * 遊んだ後でログを見て「1件も無い、壊れている？」となった（実際になった）。
+   *
+   * 送り先を増やさず /report を通すのは、あの口に既に
+   * 連投の見張りと長さの上限が付いているため。口を増やすと同じ守りを2度書くことになる
+   */
+  event(message, fields = {}) {
+    this._send({ kind: 'solo', message, ...fields });
+  }
+
   /* サーバーへ送る。画面に出すだけでは、遠くで遊んでいる人の不具合が
      こちらへ届かない（本人が読み上げてくれない限り分からない）。
      送れなくても遊べる物なので、失敗は黙って捨てる。
      同じ物は_seenで既に1回に絞ってあるので、ここでは数を数えない */
   _report(message, where) {
+    this._send({ kind: 'error', message: String(message).slice(0, 400), where });
+  }
+
+  /* 実際に投げる所。**送り終わるのを待たない。**
+     待つと、60分の1秒ごとに描き直している最中に止まってカクつく */
+  _send(payload) {
     try {
       fetch('/report', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           name: this.name || '',
-          message: String(message).slice(0, 400),
-          where,
-          // どの環境で起きたか。Windowsだけで出る不具合を追うのに要る
+          // どの環境か。Windowsだけで出る不具合を追うのに要る
           ua: navigator.userAgent || '',
+          ...payload,
         }),
       }).catch(() => {});
     } catch { /* 送れないだけ */ }

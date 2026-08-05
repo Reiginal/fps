@@ -138,6 +138,7 @@ const KIND_LABEL = {
   match: '試合終了',
   error: '画面のエラー',
   net: '通信で例外',
+  solo: '1人で遊んだ',
 };
 
 const two = (n) => String(n).padStart(2, '0');
