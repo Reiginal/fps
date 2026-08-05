@@ -594,7 +594,9 @@
      描く画素数まで変わって、狭い端末ほど重くなる */
   #lbView {
     display: block; margin: 0 auto 9px;
-    width: 220px; height: 270px;
+    /* 正方形にしてある。縦長だと、回った時に横へ振れるライフルが枠から出る
+       （縦の画角は固定なので、横を広げても兵士は小さくならない） */
+    width: 260px; height: 260px;
     max-width: 100%;
     background: linear-gradient(180deg, rgba(20,26,34,.9), rgba(6,9,13,.9));
     border: 1px solid rgba(255,255,255,.1);
@@ -612,6 +614,13 @@
   /* 迷彩の色の四角。名前だけだとどれがどれか読まないと分からない */
   .lbswatch { width: 13px; height: 13px; flex: none; border: 1px solid rgba(0,0,0,.5); }
   .lbchar.on { border-color: var(--accent); color: var(--accent); background: rgba(99,210,255,.1); }
+  /* 席に着いている他の人が使っている見た目。押せないことを、色とカーソルの両方で出す。
+     色だけだと押せるように見えて、押して無反応＝壊れている、と読まれる */
+  .lbchar.taken {
+    opacity: .3; cursor: not-allowed; pointer-events: auto;
+    text-decoration: line-through; border-style: dashed;
+  }
+  .lbchar.taken:hover { color: var(--dim); border-color: rgba(255,255,255,.14); }
   .lbstand { font-size: 11px; color: var(--dim); letter-spacing: .1em; min-height: 30px; margin-bottom: 0; }
   #netmenu.busy .field input { opacity: .45; pointer-events: none; }
 
@@ -849,7 +858,7 @@
       </div>
       <div class="lbchars">
         <div class="lbchead">見た目</div>
-        <canvas id="lbView" width="220" height="270"></canvas>
+        <canvas id="lbView" width="260" height="260"></canvas>
         <div class="lbcrow" id="lbChars"></div>
       </div>
     </div>

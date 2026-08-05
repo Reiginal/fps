@@ -41,16 +41,28 @@ export class CharView {
       canvas: this.canvas, antialias: true, alpha: true,
     });
     // 端末の画素密度をそのまま使うと、Retinaで4倍の画素を描くことになる。
-    // 220×270の小さい絵なので2倍で足りる
+    // 260×260の小さい絵なので2倍で足りる
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     this.renderer.setSize(this.canvas.width, this.canvas.height, false);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(30, this.canvas.width / this.canvas.height, 0.1, 20);
-    // 少し上から見下ろす。真横から見ると背丈の差が読めない
-    this.camera.position.set(0, 1.15, 3.4);
-    this.camera.lookAt(0, 0.95, 0);
+    /* 少し上から見下ろす。真横から見ると背丈の差が読めない。
+     *
+     * この距離は目分量ではなく、6人ぶんの頂点を投影して詰めてある
+     * （tools/check-character.mjs の[5]が同じ測り方で見張る）。
+     *
+     * 元は (0,1.15,3.4) → (0,0.95,0) で、**頭が枠の上へ突き抜けていた**。
+     * 収まらない理由は2つあって、どちらも兵士の一部なので切るわけにいかない:
+     *   ・無線のアンテナが2.37mまで伸びている（身長1.74mより63cm上）
+     *   ・ライフルが中心から1.04m出ていて、回ると横へ大きく振れる
+     * 実測では頂点の8.6%が枠の外にあり、背丈だけで画面の107%を占めていた。
+     *
+     * 引いた結果、背丈は画面の69%になる。小さくはなるが、
+     * **切れている物を大きく見せても選ぶ役には立たない** */
+    this.camera.position.set(0, 1.40, 5.10);
+    this.camera.lookAt(0, 1.20, 0);
 
     // 光は2灯だけ。ロビーの絵に影は要らないので、影の焼き付けもしない
     const key = new THREE.DirectionalLight(0xfff2e0, 2.2);
