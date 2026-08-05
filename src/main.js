@@ -2098,7 +2098,9 @@ class Game {
         this.audio.click(out ? 1400 : 1000, 0.28, 0.05);
       }
       if (canAct && input.pressed('KeyR')) {
-        if (this.weapons.reload()) this.audio.reload(this.weapons.def.reloadTime);
+        // 鳴らす音の選び分けは武器側が持つ。1発ずつ入れる武器と
+        // 弾倉ごと入れ替える武器で鳴る物が違う
+        if (this.weapons.reload()) this.weapons.playReloadSound(this.audio);
       }
       // 武器の数だけ回す。3で固定していたので、4本目を足しても持ち替えられなかった
       for (let i = 0; canAct && i < this.weapons.weapons.length && i < 9; i++) {

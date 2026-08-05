@@ -2112,7 +2112,12 @@ export const WEAPONS = [
     id: 'shotgun', name: 'M870 ショットガン', build: buildShotgun,
     damage: 13, headMult: 1.6, rpm: 78, auto: false, pellets: 9,
     // ライフルと同じで5マガジン分（56発＝8本から落とす）
-    mag: 7, reserve: 35, reloadTime: 2.9,
+    //
+    // shellTimeは1発を入れるのにかかる時間。1発ずつ入れる武器はこちらを使い、
+    // reloadTimeは使わない（空から満タンで7発×0.42＝2.94秒。前の2.9秒とほぼ同じ）。
+    // reloadTimeを残してあるのは、サーバー(server/sim.js)がこの表を読んで
+    // 「装填中」の印を立てる時に見ているため
+    mag: 7, reserve: 35, reloadTime: 2.9, shellTime: 0.42,
     spreadHip: 0.062, spreadAds: 0.040, spreadPerShot: 0.0, spreadMax: 0.062, spreadRecover: 0.2,
     recoilPitch: 0.052, recoilYaw: 0.010, kick: 0.11, adsFov: 58, adsTime: 0.2,
     range: 40, falloffStart: 8, falloffEnd: 26, falloffMin: 0.18,
@@ -2209,20 +2214,19 @@ const PATH_TAC = [
   [0.70, 0.80, 'mag', 'mag'],
   [0.80, 1.00, 'mag', 'rest'],
 ];
-// 装弾は1発ずつ。掴む→押し込むを繰り返して最後にポンプを引く
+/* 装弾は1発ずつ。**この表は「1発ぶん」で1周する。**
+   弾が1つ増えるたびに頭から回り直すので、7発入れれば7周する。
+   以前はここに4回ぶんの往復を並べて、全部終わってから弾を7発まとめて足していた。
+   見た目は1発ずつ入れているのに、中身は弾倉ごと入れ替える武器と同じだったので、
+   途中でやめると1発も増えていなかった */
 const PATH_SHELL = [
-  [0.00, 0.10, 'rest', 'low'],
-  [0.10, 0.22, 'low', 'mag'],
-  [0.22, 0.32, 'mag', 'low'],
-  [0.32, 0.44, 'low', 'mag'],
-  [0.44, 0.54, 'mag', 'low'],
-  [0.54, 0.66, 'low', 'mag'],
-  [0.66, 0.76, 'mag', 'low'],
-  [0.76, 0.86, 'low', 'mag'],
-  [0.86, 1.00, 'mag', 'rest'],
+  [0.00, 0.18, 'low', 'low'],    // 次の1発を掴む
+  [0.18, 0.52, 'low', 'mag'],    // 装弾口へ運ぶ
+  [0.52, 0.70, 'mag', 'mag'],    // 押し込む
+  [0.70, 1.00, 'mag', 'low'],    // 手を戻す
 ];
-// シェルを押し込んでいる区間
-const SHELL_INS = [[0.10, 0.22], [0.32, 0.44], [0.54, 0.66], [0.76, 0.86]];
+// シェルが見えている区間（運んでいる間だけ手に持っている）
+const SHELL_INS = [[0.12, 0.62]];
 
 /* ------------------------------------------------------------ 実装 */
 
@@ -2378,6 +2382,12 @@ export class WeaponSystem {
     // 覗き込みの入り切り。右クリックを押すたびに反転する
     this.adsHeld = false;
     this.reloading = 0;
+    // 1発ずつ入れている途中か。reloadingは「今の1発の残り時間」しか持たないので、
+    // 「まだ続きがある」はこちらで持つ。ここを落とすと、途中で持ち替えた後に
+    // 1発だけ入って止まる
+    this.shellReload = false;
+    // 1発ずつ入れる時に銃を下ろしている量。1発ごとに上下させないためのもの
+    this._shellLower = 0;
     this.switching = 0;
     this.pumping = 0;
     this.fireTimer = 0;
@@ -2558,6 +2568,8 @@ export class WeaponSystem {
     this.bandageOut = true;
     // 構えの状態を引きずらない。覗いたまま包帯を出すと画角だけ狭いままになる
     this.reloading = 0;
+    this.shellReload = false;
+    this._shellLower = 0;
     this.adsHeld = false;
     this.burstLeft = 0;
     this.swing = 0;
@@ -2576,6 +2588,8 @@ export class WeaponSystem {
     if (i === this.index || i < 0 || i >= this.weapons.length) return false;
     if (this.switching > 0) return false;
     this.reloading = 0;
+    this.shellReload = false;
+    this._shellLower = 0;
     this.switching = 0.42;
     // 持ち替えを跨いで前の武器の状態を残さない。
     // 振りの途中でナイフから銃へ替えると、銃が刃の軌道で振り回される
@@ -2586,14 +2600,38 @@ export class WeaponSystem {
     return true;
   }
 
+  /**
+   * 装填を始める。始められたらtrue。
+   *
+   * 入れ方は2種類ある。
+   *   弾倉ごと（mag）… 抜いて差して槓桿を引く。**途中で止められない**
+   *   1発ずつ（shell）… 1発入れるたびに区切りがある。**いつでも止めて撃てる**
+   *
+   * 1発ずつの方は、ここでは1発ぶんの時間しか回さない。
+   * 1発入り終わったところで update() が「まだ入るか」を見て、次の1発へ進める。
+   * 全部を1本の時間で回してしまうと、途中でやめた時に
+   * 「2.9秒のうち2秒ぶん入れたのに1発も増えていない」ことになる
+   */
   reload() {
     // 近接は装填しない。Rを押すたびに空振りの動作が入るのを止める
     if (this.def.melee) return false;
     const w = this.current;
     if (this.reloading > 0 || this.switching > 0) return false;
     if (w.ammo >= w.def.mag || w.reserve <= 0) return false;
-    this.reloading = w.def.reloadTime;
+    this.shellReload = w.def.reloadKind === 'shell';
+    this.reloading = this.shellReload ? w.def.shellTime : w.def.reloadTime;
     return true;
+  }
+
+  /**
+   * 装填を始めた時の音。入れ方で鳴らす物が違うので、呼ぶ側に選ばせない。
+   * ここを呼ぶ側（main.jsのRキーと、下の撃ち切り自動装填）が
+   * それぞれ判断すると、片方だけ直して音がずれる
+   */
+  playReloadSound(audio) {
+    const d = this.def;
+    if (d.reloadKind === 'shell') audio?.shell?.();
+    else audio?.reload?.(d.reloadTime);
   }
 
   // 移動・跳躍・姿勢で精度が変わる。止まって覗くのが一番当たる形にする
@@ -2648,12 +2686,27 @@ export class WeaponSystem {
       this.reloading -= dt;
       if (prev > 0 && this.reloading <= 0) {
         const cur = this.current;
-        const need = cur.def.mag - cur.ammo;
-        const take = Math.min(need, cur.reserve);
-        cur.ammo += take;
-        cur.reserve -= take;
-        cur.boltLocked = false;
-        this.shotIndexInMag = 0;
+        if (this.shellReload) {
+          // 1発だけ入る。ここで弾数が増えるので、**途中でやめても入れた分は残る**
+          cur.ammo += 1;
+          cur.reserve -= 1;
+          cur.boltLocked = false;
+          this.shotIndexInMag = 0;
+          if (cur.ammo < cur.def.mag && cur.reserve > 0) {
+            // まだ入るので次の1発へ。押し込む音もここで1発ぶん鳴らす
+            this.reloading = cur.def.shellTime;
+            ctx.audio?.shell?.();
+          } else {
+            this.shellReload = false;
+          }
+        } else {
+          const need = cur.def.mag - cur.ammo;
+          const take = Math.min(need, cur.reserve);
+          cur.ammo += take;
+          cur.reserve -= take;
+          cur.boltLocked = false;
+          this.shotIndexInMag = 0;
+        }
       }
     }
 
@@ -2720,6 +2773,23 @@ export class WeaponSystem {
     // 指を離したら反動パターンを最初に戻す。押しっぱなしの間だけ積み上がる
     if (!trigger) this.shotIndexInMag = 0;
 
+    /* -------------------------------- 1発ずつ入れている途中で撃ちたくなった */
+    // 1発ずつ入れる武器は、入れている途中で止めて撃てる。
+    // 弾倉ごと入れ替える武器は止められない（実物がそうだし、
+    // 抜いた弾倉を戻す動作が要るので「今すぐ撃つ」にならない）。
+    //
+    // ここが無いと、装填を始めた後で敵が出てきた時に、
+    // **弾が入っているのに2.9秒撃てないまま撃たれる。**
+    // 止めた時点までに入った分は弾倉に残っているので、押した瞬間から撃てる。
+    //
+    // reloadingを0にするだけで済むのは、この下の発砲がreloading<=0を見ているから。
+    // 同じフレームのうちに撃ちに行く（押してから撃つまでに間が空かない）
+    if (this.shellReload && triggerEdge && w.ammo > 0
+      && !busyHealing && player.alive && !player.sprinting) {
+      this.reloading = 0;
+      this.shellReload = false;
+    }
+
     /* -------------------------------------------- 包帯を構えている間 */
     // Fで手に持ち、左クリックで巻き始める。持っているだけでは回復しない。
     // 巻き終わるか、途中で撃たれて中断したら、そのまま武器へ戻す。
@@ -2777,15 +2847,14 @@ export class WeaponSystem {
         if (this.fireTimer <= 0) {
           ctx.audio?.click(2800, 0.3, 0.03);
           this.fireTimer = 0.28;
-          if (w.reserve > 0) this.reload();
+          if (w.reserve > 0 && this.reload()) this.playReloadSound(ctx.audio);
         }
       }
     }
 
     // 自動リロード（撃ち切ったら勝手に入れ替える）
     if (w.ammo === 0 && w.reserve > 0 && this.reloading <= 0 && this.switching <= 0) {
-      this.reload();
-      ctx.audio?.reload(d.reloadTime);
+      if (this.reload()) this.playReloadSound(ctx.audio);
     }
 
     this._animate(dt, input, player);
@@ -3071,8 +3140,16 @@ export class WeaponSystem {
     const sp = this._sprintBlend;
 
     // 装填中は下げて回す（工程の中身は_animatePartsが担当する）
+    //
+    // 1発ずつ入れる武器はここを分ける。
+    // 弾倉ごと入れ替える武器は「下げて→戻す」が1回なので sin で山を描けばよいが、
+    // 1発ずつだと**その山が1発ごとに立つ。7発入れると銃が7回上下する。**
+    // 入れている間は下げたまま、始めと終わりだけ滑らかにする形にする
     let reloadT = 0;
-    if (this.reloading > 0) {
+    if (d.reloadKind === 'shell') {
+      this._shellLower = THREE.MathUtils.damp(this._shellLower, this.reloading > 0 ? 1 : 0, 13, dt);
+      reloadT = this._shellLower;
+    } else if (this.reloading > 0) {
       const p = 1 - this.reloading / d.reloadTime;
       reloadT = Math.sin(clamp01(p) * Math.PI);
     }
@@ -3188,7 +3265,12 @@ export class WeaponSystem {
     const P = w.parts;
     const v = d.view;
     const reloading = this.reloading > 0;
-    const p = reloading ? clamp01(1 - this.reloading / d.reloadTime) : 0;
+    // 工程の進み具合。0で始まって1で終わる。
+    // 1発ずつ入れる武器は「1発ぶん」が1周期なので、割る相手がshellTimeになる。
+    // ここをreloadTimeのままにすると、0.42秒しか回っていないのに
+    // 「もう85%終わった」と出て、手も薬莢も最後の一瞬しか動かない
+    const span = d.reloadKind === 'shell' ? d.shellTime : d.reloadTime;
+    const p = reloading ? clamp01(1 - this.reloading / span) : 0;
 
     /* ---- ボルト。発砲で1往復し、撃ち切ると後退位置で止まる */
     let boltOff = 0;
@@ -3251,9 +3333,9 @@ export class WeaponSystem {
     if (P.pump) {
       let po = 0;
       if (this.pumping > 0 && d.pumpTime) po = Math.sin((1 - this.pumping / d.pumpTime) * Math.PI);
-      if (reloading && d.reloadKind === 'shell') {
-        po = Math.max(po, Math.sin(seg(p, 0.88, 1.0) * Math.PI));
-      }
+      // 装填中にポンプを引く動きは入れない。
+      // この表は1発ぶんで1周するので、ここに置くと**1発入れるたびに引く**ことになる。
+      // ポンプは発砲の後に引く物なので、上のpumpingだけが受け持つ
       P.pump.position.z = P.pumpRest + po * 0.075;
     }
 
@@ -3340,6 +3422,8 @@ export class WeaponSystem {
     this.index = 0;
     this.current.model.visible = true;
     this.reloading = 0;
+    this.shellReload = false;
+    this._shellLower = 0;
     this.switching = 0;
     this.pumping = 0;
     this.adsFactor = 0;
