@@ -133,7 +133,23 @@ export class Lobby {
     // 自分の行から、座っているか・準備を立てているか・どの見た目かを読む
     const me = rows.find((r) => r[0] === this.myId);
     if (me && typeof me[4] === 'number') this.myChar = me[4] | 0;
-    this.charEls.forEach((b, i) => b.classList.toggle('on', i === this.myChar));
+
+    // 席に着いている他の人が使っている見た目は押せなくする。
+    // サーバーも断るので押しても害は無いが、**押して無反応だと壊れているように見える**。
+    // 誰が使っているかまで出すのは、「じゃあ別のにするか」を1回で決められるようにするため
+    const takenBy = new Map();
+    for (const r of rows) {
+      const [id, name, seat, , chr] = r;
+      if (id === this.myId || seat < 0 || typeof chr !== 'number') continue;
+      takenBy.set(chr | 0, name);
+    }
+    this.charEls.forEach((b, i) => {
+      b.classList.toggle('on', i === this.myChar);
+      const who = takenBy.get(i);
+      b.classList.toggle('taken', !!who);
+      b.disabled = !!who;
+      b.title = who ? `${who} が使用中` : '';
+    });
     const meSeated = !!me && me[2] >= 0;
     this.meReady = !!me && !!me[3];
 

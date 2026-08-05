@@ -103,5 +103,86 @@ console.log('\n[6] ロビーの3Dが、試合中も描き続けないか');
   ok(/if \(!this\.running/.test(view), '止まっている間は描かない');
 }
 
+console.log('\n[7] ロビーのプレビューに、兵士が丸ごと収まっている');
+// 遊んで「見た目のやつが見切れてる」と言われた所。
+//
+// 収まらない理由は2つあって、**どちらも兵士の一部なので切るわけにいかない**:
+//   ・無線のアンテナが2.37mまで伸びている（身長1.74mより63cm上）
+//   ・ライフルが中心から1.04m出ていて、回ると横へ大きく振れる
+// 直す前は頂点の8.6%が枠の外にあり、背丈だけで画面の107%を占めていた。
+//
+// canvasの大きさとカメラの置き方はコードに直書きしてあるので、
+// 両方をソースから読み取って、実際に投影して測る。
+// **片方だけ直すと必ずずれる**（canvasを縦長に戻せば、回ったライフルがまた出る）
+{
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const view = readFileSync(new URL('../src/ui/charview.js', import.meta.url), 'utf8');
+
+  const cv = html.match(/id="lbView"\s+width="(\d+)"\s+height="(\d+)"/);
+  ok(!!cv, 'index.html から canvas の大きさが読める');
+  const pos = view.match(/camera\.position\.set\(([-\d.]+),\s*([-\d.]+),\s*([-\d.]+)\)/);
+  const look = view.match(/camera\.lookAt\(([-\d.]+),\s*([-\d.]+),\s*([-\d.]+)\)/);
+  const fovM = view.match(/PerspectiveCamera\((\d+)/);
+  ok(!!pos && !!look && !!fovM, 'charview.js からカメラの置き方が読める');
+
+  if (cv && pos && look && fovM) {
+    const W = +cv[1], H = +cv[2];
+    const cam = new THREE.PerspectiveCamera(+fovM[1], W / H, 0.1, 20);
+    cam.position.set(+pos[1], +pos[2], +pos[3]);
+    cam.lookAt(+look[1], +look[2], +look[3]);
+    cam.updateProjectionMatrix();
+    cam.updateMatrixWorld(true);
+
+    // ロビーでは回り続けるので、1周ぶん試して一番はみ出す角度で判定する。
+    // 正面だけ見て通していたら、横を向いた時にライフルが出るのを見逃す
+    const SPIN = 12;
+    let out = 0, total = 0, top = -9, bottom = 9, side = 0, headTop = -9, footLow = 9;
+    const v = new THREE.Vector3();
+    for (let i = 0; i < CHARACTERS.length; i++) {
+      const e = new Enemy(level, { seed: characterAt(i).seed });
+      e.root.position.set(0, 0, 0);
+      e.root.rotation.y = 0;
+      e.root.updateMatrixWorld(true);
+      const pts = [];
+      e.root.traverse((m) => {
+        if (!m.isMesh || !m.geometry?.attributes?.position) return;
+        if (m === e.blob) return;         // 足元の暗がりはロビーでは消してある
+        let vis = m.visible;
+        for (let o = m.parent; o && vis; o = o.parent) vis = o.visible;
+        if (!vis) return;
+        const p = m.geometry.attributes.position;
+        for (let k = 0; k < p.count; k += 3) {
+          v.fromBufferAttribute(p, k).applyMatrix4(m.matrixWorld);
+          pts.push(v.x, v.y, v.z);
+        }
+      });
+      for (let s = 0; s < SPIN; s++) {
+        const a = (s / SPIN) * Math.PI * 2;
+        const cos = Math.cos(a), sin = Math.sin(a);
+        for (let k = 0; k < pts.length; k += 3) {
+          const x = pts[k], y = pts[k + 1], z = pts[k + 2];
+          v.set(x * cos + z * sin, y, -x * sin + z * cos).project(cam);
+          total++;
+          if (Math.abs(v.x) > 1 || Math.abs(v.y) > 1) out++;
+          top = Math.max(top, v.y); bottom = Math.min(bottom, v.y);
+          side = Math.max(side, Math.abs(v.x));
+          if (y > 1.60 && y < 1.80) headTop = Math.max(headTop, v.y);
+          if (y < 0.05) footLow = Math.min(footLow, v.y);
+        }
+      }
+    }
+    const pct = (out / total) * 100;
+    ok(pct === 0, `枠の外に出ている頂点 ${pct.toFixed(1)}%（元は8.6%）`);
+    ok(
+      top <= 1 && bottom >= -1 && side <= 1,
+      `上端 ${top.toFixed(2)} 下端 ${bottom.toFixed(2)} 左右 ${side.toFixed(2)}（±1が枠）`,
+    );
+    // 収めるだけなら遠ざければいくらでも収まるが、それでは何を選んでいるか分からない。
+    // 背丈が画面の半分は無いと、迷彩の違いが読めない
+    const bodyH = (headTop - footLow) / 2 * 100;
+    ok(bodyH > 50, `兵士の背丈が画面の${bodyH.toFixed(0)}%（50%以上）`);
+  }
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);

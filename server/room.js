@@ -94,6 +94,10 @@ export class Room {
       if (s !== slot && s.seat === seat) return;   // 埋まっている
     }
     slot.seat = seat;
+    // 座った時点で、見た目が先客とかぶっていたら空いている物へ寄せる。
+    // 立っている人同士は見た目がかぶれるので（席に着いている人しか見張っていない）、
+    // その2人が続けて座ると同じ姿が2人並ぶ。ここが最後の砦
+    if (this._charTaken(slot.chr, slot)) slot.chr = this._freeChar(slot);
     // 座った所から湧くので、席が決まった時点で位置も合わせておく。
     // ここで動かしておかないと、ロビーで待っている間だけ前の席の場所に立っている
     this._respawn(slot);
@@ -118,14 +122,54 @@ export class Room {
   }
 
   /**
+   * その見た目が、席に着いている誰かに使われているか。
+   *
+   * **見張るのは席に着いている人だけ。** 部屋には最大8人入れるのに見た目は6種類しかないので、
+   * 全員で取り合うと7人目が必ずあぶれる。実際に撃ち合うのは席に着いた4人までなので、
+   * その4人が別々の姿であれば足りる（席は4つ、見た目は6種類あるので必ず行き渡る）
+   */
+  _charTaken(index, except = null) {
+    for (const s of this.slots.values()) {
+      if (s !== except && s.seat !== null && s.chr === index) return true;
+    }
+    return false;
+  }
+
+  /** まだ席に着いている誰にも使われていない見た目を1つ返す */
+  _freeChar(except = null) {
+    for (let i = 0; i < CHARACTERS.length; i++) if (!this._charTaken(i, except)) return i;
+    return 0;   // 席が4つで見た目が6種類あるので、ここへは来ない
+  }
+
+  /**
+   * 入った時に配る既定の見た目。
+   *
+   * こちらは席に着いていない人も含めて見る。**入った瞬間から散っていてほしい**ので、
+   * 席に着くのを待たない。部屋の上限8人に対して見た目は6種類なので、
+   * 7人目からは重なるが、席に着いた時にtakeSeatが寄せ直すので実害は無い
+   */
+  _defaultChar() {
+    const used = new Set();
+    for (const s of this.slots.values()) used.add(s.chr);
+    for (let i = 0; i < CHARACTERS.length; i++) if (!used.has(i)) return i;
+    return 0;
+  }
+
+  /**
    * 見た目を選ぶ。試合が始まってからは変えられない。
-   * 途中で姿が変わると、撃っている相手が入れ替わったように見える
+   * 途中で姿が変わると、撃っている相手が入れ替わったように見える。
+   *
+   * **同じ見た目が2人並ぶのも断る。** 撃ち合いの最中に区別が付かないし、
+   * 撃破の知らせを見ても誰を倒したのか読めなくなる。早い者勝ち。
+   * 断った時もロビーを配り直す。押した側の画面は元の番号へ戻るので、
+   * 「押したのに変わらない」ではなく「取られている」が絵で分かる
    */
   setChar(slot, index) {
     if (this.phase !== PHASE.WAIT) return;
     const i = index | 0;
     if (i < 0 || i >= CHARACTERS.length) return;
     if (slot.chr === i) return;
+    if (this._charTaken(i, slot)) { this._sendLobby(); return; }
     slot.chr = i;
     this._sendLobby();
   }
@@ -237,8 +281,12 @@ export class Room {
       // 席を降りた時と、試合が終わって待ちへ戻った時に倒れる
       ready: false,
       // 選んだ見た目（CHARACTERSの番号）。姿そのものは運ばず、番号だけ配る。
-      // 見た目に効くだけで、当たり判定にも足の速さにも一切効かない
-      chr: 0,
+      // 見た目に効くだけで、当たり判定にも足の速さにも一切効かない。
+      //
+      // 入った時点で、まだ使われていない番号を配る。
+      // **全員0番から始める形にしていたので、誰も選び直さなければ4人とも同じ姿だった。**
+      // 選べるようにしてあるだけでは足りず、既定でも散っていないと意味がない
+      chr: this._defaultChar(),
       sim: new SimPlayer(id, name, this.world),
       pending: new Map(),   // seq -> [bits, yaw, pitch]
       nextSeq: -1,          // 次に食わせるseq

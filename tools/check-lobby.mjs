@@ -174,6 +174,51 @@ console.log('\n[14] 入った本人へ、お迎えより後にロビーが届く
   ok(lob.rows.length === room.slots.size, `全員が一覧に入っている (${lob.rows.length}人)`);
 }
 
+console.log('\n[15] 同じ見た目が2人並ばない');
+// 遊んで「2人以上でやる時は同じスキンを選べないようにして」と言われた所。
+// 同じ姿が2人いると、撃ち合いの最中に区別が付かないし、
+// 撃破の知らせを見ても誰を倒したのか読めない
+{
+  clear();
+  const ps = ['あ', 'い', 'う', 'え'].map((n) => join(n));
+  // **既定でも散っていること。** 全員0番から始める形だったので、
+  // 誰も選び直さなければ4人とも同じ姿だった
+  const defaults = ps.map((p) => p.slot.chr);
+  ok(new Set(defaults).size === 4, `入った時点で全員別の見た目 (${defaults.join(', ')})`);
+
+  ps.forEach((p, i) => room.takeSeat(p.slot, i));
+  ok(new Set(ps.map((p) => p.slot.chr)).size === 4, '席に着いても重ならない');
+
+  // 他人が使っている番号は選べない
+  const taken = ps[1].slot.chr;
+  const before = ps[0].slot.chr;
+  room.setChar(ps[0].slot, taken);
+  ok(ps[0].slot.chr === before, `使われている ${taken} 番は取れない（${before} 番のまま）`);
+  // 断った時もロビーを配り直す。押した側の画面が元へ戻らないと、
+  // 「押したのに変わらない」が壊れているように見える
+  const lob = ps[0].conn.sent.filter((m) => m.t === 'L').pop();
+  ok(!!lob, '断った時もロビーを配り直している');
+
+  // 空いている番号なら取れる
+  const { CHARACTERS } = await import('../src/net/protocol.js');
+  const used = new Set(ps.map((p) => p.slot.chr));
+  const free = [...Array(CHARACTERS.length).keys()].find((i) => !used.has(i));
+  room.setChar(ps[0].slot, free);
+  ok(ps[0].slot.chr === free, `空いている ${free} 番は取れる`);
+
+  // 立っている人同士は重なりうるが、座った時点で寄せる（最後の砦）
+  clear();
+  const x = join('えっくす');
+  const y = join('わい');
+  room.takeSeat(x.slot, 0);
+  y.slot.chr = x.slot.chr;          // 立ったまま同じ番号を持っている状態を作る
+  room.takeSeat(y.slot, 1);
+  ok(y.slot.chr !== x.slot.chr, `座った時に空いている番号へ寄せた (${x.slot.chr} と ${y.slot.chr})`);
+
+  // 席は4つで見た目は6種類。座る人が全員別の姿になれることを数で確かめる
+  ok(CHARACTERS.length >= SEATS, `見た目 ${CHARACTERS.length} 種 ≧ 席 ${SEATS} つ（必ず行き渡る）`);
+}
+
 clear();
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
