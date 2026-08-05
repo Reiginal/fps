@@ -721,6 +721,16 @@ class Game {
   _bindMenu() {
     const menu = new NetMenu();
     this.menu = menu;
+    // 全画面で遊ぶかどうかは選択画面のつまみが持っている。
+    // 前回の設定がlocalStorageから戻ってくるので、起動時に一度写しておかないと
+    // 「切ったまま閉じて、開き直したら全画面に戻る」ことになる
+    this.input.wantFullscreen = menu.fullscreen;
+    menu.onFullscreen = (on) => {
+      this.input.wantFullscreen = on;
+      // 遊んでいる最中に切られたら、その場で窓へ戻す。
+      // 次に遊び始めるまで効かないと、切ったのに何も起きないように見える
+      if (!on) this.input.exitFullscreen();
+    };
 
     // 繋がってから試合が始まるまでの画面。押された席をそのままサーバーへ送る。
     // 座れたかどうかを手元で決めないので、ここでは絵を書き換えない
