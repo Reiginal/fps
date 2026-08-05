@@ -103,3 +103,6 @@ jobs:
 
       - name: 検査 キャラクター選択
         run: node tools/check-character.mjs
+
+      - name: 検査 当たり判定と見た目
+        run: node tools/check-hitbox.mjs
