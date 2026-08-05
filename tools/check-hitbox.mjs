@@ -81,6 +81,30 @@ for (let i = 0; i < CHARACTERS.length; i++) {
   ok(box <= seen * 2, `${i}番 … 判定 ${(box * 100).toFixed(0)}cm / 見た目 ${(seen * 100).toFixed(0)}cm`);
 }
 
+console.log('\n[3.5] 相手が武器を持ち替えると見た目が変わる');
+// 武器の番号はずっと届いていたのに、受け取った側が使っていなかった所。
+// 「同時に出るのは1つだけ」も見る。2つ出ると、ナイフを持ちながら銃も構えている絵になる
+{
+  const id = 900;
+  remotes.setChars(new Map([[id, 0]]));
+  const holdOf = (w) => {
+    remotes.sync([{ id, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, state: 0, hp: 100, weapon: w }], -1, null);
+    const p = remotes.slots.get(id).enemy.parts;
+    return [
+      p.gun.visible && 'ライフル',
+      p.gunShotgun.visible && '散弾銃',
+      p.heldKnife.visible && 'ナイフ',
+      p.heldNade.visible && '手榴弾',
+    ].filter(Boolean);
+  };
+  for (const [w, want] of [[0, 'ライフル'], [1, '散弾銃'], [2, 'ナイフ'], [3, '手榴弾']]) {
+    const shown = holdOf(w);
+    ok(shown.length === 1 && shown[0] === want, `${w}番を持つと「${shown.join('と') || '何も出ない'}」が見える（欲しいのは${want}）`);
+  }
+  // 持ち替えて戻れること。1回変えたら戻らない作りになっていないか
+  ok(holdOf(0)[0] === 'ライフル', 'ライフルへ戻せる');
+}
+
 console.log('\n[4] 当たった弾のうち頭になる割合');
 // 割合そのものに正解は無いが、跳ね上がった時に気づけるように数字を出す。
 // 実測: 直す前も後も9%前後。位置が直っただけで、広さは変えていない
