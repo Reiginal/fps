@@ -35,6 +35,11 @@ targets.push({
 });
 targets.push({ name: 'explosion', label: '爆発', play: (a) => a.explosion(null, null) });
 targets.push({ name: 'swing', label: 'ナイフを振る', play: (a) => a.swing() });
+// 刃が当たった音は材質で分かれる。金属だけ「カンッ」と長く残るのが狙いなので、
+// 4つとも書き出して長さと重心を並べて見る
+for (const k of ['flesh', 'metal', 'wood', 'concrete']) {
+  targets.push({ name: `stab-${k}`, label: `刃が当たる(${k})`, play: (a) => a.stab(null, null, k) });
+}
 for (const sf of ['dirt', 'gravel', 'asphalt', 'concrete', 'metal', 'wood']) {
   targets.push({
     name: `step-${sf}`, label: `足音(${sf})`, seconds: 0.8,

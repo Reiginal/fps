@@ -1362,35 +1362,98 @@ export class AudioEngine {
   }
 
   /**
-   * 刃が物に当たった音。火花を消したぶん、手応えが完全に無くなっていたので置く。
-   * 金属を叩く音ではなく「重い物が突き刺さって止まる」音にする。
-   * 帯域を低く取って余韻をほぼ切ると、鈍い衝突として聞こえる
+   * 刃が物に当たった音。当たった相手で鳴り方を変える。
+   *
+   * 全部同じ鈍い音にしていた時期があるが、遊んで
+   * 「ナイフを障害物にやったらカンカン鳴ってほしい」と言われた。
+   * 肉に刺さる音と鉄板を叩く音が同じでは、何に当たったのか耳から分からない。
+   *
+   * kind は着弾の材質分けと同じ言葉を使う（flesh / metal / wood / concrete）。
+   * 分けているのは3つ:
+   *   刺さる … 芯が低くて余韻が無い。「ドスッ」
+   *   叩く   … 澄んだ倍音が重なって長く残る。「カンッ」
+   *   突く   … その中間。木は短く、コンクリは芯だけ
    */
-  stab(position, camera, flesh = false) {
+  stab(position, camera, kind = 'concrete') {
     if (!this.ready || !this.enabled) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
+    const flesh = kind === 'flesh';
+    const bus = ctx.createGain();
+    const ends = [];
+
+    if (kind === 'metal') {
+      /* 金属を叩いた音。
+         鐘や鉄板の倍音は整数倍に並ばない（1:2:3ではなく1:2.76:5.40のように散る）。
+         整数倍で重ねると「音程のある楽器」になってしまい、鉄を叩いた感じが出ない。
+         散らした3本を高いQで長めに残すと「カンッ」と鳴って尾が引く */
+      const base = rnd(1180, 1520);
+      const ratios = [1, 2.71, 5.13];
+      /* 音量。ここは最初この5倍にしていて、実測すると山が0.58〜0.92まで振れていた。
+         銃声(0.67)より大きい音が壁を擦るたびに鳴る状態。
+         しかも5分の1にしても山は0.38までしか下がらず、**比例していなかった**。
+         出口のリミッターに突っ込んでいて、潰れたぶんだけ数字が動かなくなっていた。
+         潰れる手前まで下げてあるのがこの値で、山は0.42（肉0.57・木0.45と同じ範囲） */
+      const gains = [0.053, 0.030, 0.018];
+      const decays = [0.34, 0.22, 0.14];
+      for (let i = 0; i < ratios.length; i++) {
+        const o = ctx.createOscillator();
+        o.type = 'sine';
+        // わずかに下がる。叩いた直後の張りが抜けていく所
+        o.frequency.setValueAtTime(base * ratios[i], t);
+        o.frequency.exponentialRampToValueAtTime(base * ratios[i] * 0.985, t + decays[i]);
+        const g = ctx.createGain();
+        o.connect(g); g.connect(bus);
+        this._env(g, t, gains[i], 0.001, decays[i]);
+        o.start(t); o.stop(t + 0.9);
+        ends.push(o);
+      }
+      // 打点。刃が当たった瞬間の硬い当たり。これが無いと「後から鳴り出す」ように聞こえる
+      const src = this._noiseSource(0.35);
+      const f = ctx.createBiquadFilter();
+      f.type = 'highpass';
+      f.frequency.value = 2600;
+      const g = ctx.createGain();
+      src.connect(f); f.connect(g); g.connect(bus);
+      this._env(g, t, 0.065, 0.001, 0.02);
+      src.start(t, Math.random()); src.stop(t + 0.4);
+
+      // 物がぶつかった手応え。倍音だけだと250〜800Hzの取り分が1.2%まで落ちて、
+      // 鉄板ではなく鈴を鳴らしたように聞こえる（実測して足した。今は15.2%）。
+      // 短く切るので「カン」の頭にしか乗らない
+      const th = ctx.createOscillator();
+      th.type = 'sine';
+      th.frequency.setValueAtTime(420, t);
+      th.frequency.exponentialRampToValueAtTime(180, t + 0.06);
+      const thg = ctx.createGain();
+      th.connect(thg); thg.connect(bus);
+      this._env(thg, t, 0.050, 0.001, 0.045);
+      th.start(t); th.stop(t + 0.3);
+      ends.push(th);
+      // 残響へ多めに送る。金属は周りへ響く物なので、乾いていると板ではなく紙に聞こえる
+      this._out(this._place(bus, position, camera, 10), 0.32, 0.22);
+      return;
+    }
 
     // 突き当たりの芯。硬い物ほど高く短い
+    const core = flesh ? 160 : kind === 'wood' ? 300 : 240;
     const o = ctx.createOscillator();
     o.type = 'triangle';
-    o.frequency.setValueAtTime(flesh ? 160 : 240, t);
-    o.frequency.exponentialRampToValueAtTime(flesh ? 70 : 110, t + 0.05);
+    o.frequency.setValueAtTime(core, t);
+    o.frequency.exponentialRampToValueAtTime(flesh ? 70 : core * 0.46, t + 0.05);
     const og = ctx.createGain();
-    o.connect(og);
+    o.connect(og); og.connect(bus);
     this._env(og, t, 0.30, 0.002, flesh ? 0.07 : 0.05);
 
     // 擦れ。刃が入って止まるまでの短いノイズ
     const src = this._noiseSource(rnd(0.5, 0.8));
     const f = ctx.createBiquadFilter();
     f.type = 'lowpass';
-    f.frequency.value = flesh ? 700 : 1600;
+    f.frequency.value = flesh ? 700 : kind === 'wood' ? 2400 : 1600;
     const g = ctx.createGain();
-    src.connect(f); f.connect(g);
+    src.connect(f); f.connect(g); g.connect(bus);
     this._env(g, t, flesh ? 0.26 : 0.16, 0.002, 0.06);
 
-    const bus = ctx.createGain();
-    og.connect(bus); g.connect(bus);
     this._out(this._place(bus, position, camera, 8), 0.2, 0.1);
     o.start(t); o.stop(t + 0.3);
     src.start(t, Math.random()); src.stop(t + 0.3);
