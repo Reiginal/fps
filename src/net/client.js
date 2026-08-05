@@ -586,10 +586,10 @@ export class NetClient {
     this._send({ t: C.WEAPON, i: index | 0 });
   }
 
-  /** ロビーで席に着く。teamに-1を渡すと降りる。座れたかどうかはLOBBYが返ってくるかで分かる */
-  sendSeat(team, seat) {
+  /** ロビーで席に着く。-1を渡すと降りる。座れたかどうかはLOBBYが返ってくるかで分かる */
+  sendSeat(seat) {
     if (!this.connected) return;
-    this._send({ t: C.SEAT, tm: team | 0, st: seat | 0 });
+    this._send({ t: C.SEAT, st: seat | 0 });
   }
 
   /** 準備完了の入り切り。全員が立てた時にサーバーが試合を始める */

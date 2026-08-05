@@ -1,16 +1,16 @@
-// ロビーの検査。本物のRoomを動かして、席の取り合いと開始条件を確かめる。
+// ロビーとデスマッチの検査。本物のRoomを動かして、席の取り合いと決着を確かめる。
 //
-// なぜ要るか: ロビーは画面を見ないと分からない層に見えるが、
-// 「誰が座れて、いつ始まるか」を決めているのは全部サーバー側で、
-// そこはブラウザ無しで動かせる。画面に出す前にここで潰しておく。
+// なぜ要るか: ここは「誰が座れて、いつ始まって、誰が勝つか」を決めている層で、
+// 全部サーバー側にあるのでブラウザ無しで動かせる。画面に出す前にここで潰す。
 //
 // 特に確かめたいのは「落ちること」のほう。
-// 埋まっている席に座れてしまう・1人でも試合が始まってしまう、が起きると
+// 埋まっている席に座れてしまう・1人でも試合が始まってしまう・
+// 誰かが倒れただけでラウンドが終わってしまう、が起きると
 // 遊んでいる側からは何が起きたのか読めない不具合になる。
 //
 //   node tools/check-lobby.mjs
 import '../server/dom-stub.js';
-import { PHASE, SEATS_PER_TEAM } from '../src/net/protocol.js';
+import { PHASE, SEATS, MATCH } from '../src/net/protocol.js';
 
 const { getRoom } = await import('../server/room.js');
 const { buildWorld } = await import('../server/world.js');
@@ -26,7 +26,8 @@ const mkConn = () => ({ sent: [], rtt: 0, send(m) { this.sent.push(m); } });
 const room = getRoom(world);
 // 部屋は1つしか無く、他の検査と同じプロセスで動くこともある。
 // 前の検査が残した人がいると数が合わないので、必ず空から始める
-for (const s of [...room.slots.values()]) room.leave(s);
+const clear = () => { for (const s of [...room.slots.values()]) room.leave(s); };
+clear();
 
 const join = (name) => {
   const conn = mkConn();
@@ -35,121 +36,145 @@ const join = (name) => {
   return { conn, slot };
 };
 
+/* 倒す。sim.aliveは読み取り専用で、中のPlayerが実体を持っている。
+   体力を0にして倒すのが本物の道筋なので、そこを通す */
+const down = (p) => { p.slot.sim.player.alive = false; p.slot.sim.player.health = 0; };
+
+/** 全員を席に着かせて準備完了まで持っていく。始まった状態で返す */
+const startWith = (names) => {
+  clear();
+  const ps = names.map((n) => join(n));
+  ps.forEach((p, i) => room.takeSeat(p.slot, i));
+  ps.forEach((p) => room.setReady(p.slot, true));
+  return ps;
+};
+
 console.log('\n[1] 入っただけでは試合が始まらない');
 const a = join('あき');
 const b = join('ばん');
 ok(room.phase === PHASE.WAIT, '2人繋いでも待ちのまま');
-ok(a.slot.team === null && a.slot.seat === null, '入った人はまだ席にいない');
+ok(a.slot.seat === null, '入った人はまだ席にいない');
 
-console.log('\n[2] 片方だけ座っても始まらない');
-room.takeSeat(a.slot, 0, 0);
-ok(a.slot.team === 0 && a.slot.seat === 0, 'Aの1番に座れた');
-ok(room.phase === PHASE.WAIT, '相手がいないので始まらない');
-ok(/B/.test(room._whyNotStart()), `理由が出る（${room._whyNotStart()}）`);
+console.log('\n[2] 1人だけでは始まらない');
+room.takeSeat(a.slot, 0);
+room.setReady(a.slot, true);
+ok(a.slot.seat === 0, '1番の席に座れた');
+ok(room.phase === PHASE.WAIT, '1人では始まらない');
+ok(/あと1人/.test(room._whyNotStart()), `理由が出る（${room._whyNotStart()}）`);
 
 console.log('\n[3] 埋まっている席には座れない');
-room.takeSeat(b.slot, 0, 0);
-ok(b.slot.team === null, '先客のいる席は取れない');
-ok(a.slot.team === 0 && a.slot.seat === 0, '先客は動かされない');
+room.takeSeat(b.slot, 0);
+ok(b.slot.seat === null, '先客のいる席は取れない');
+ok(a.slot.seat === 0, '先客は動かされない');
 
-console.log('\n[4] 同じチームに2人だと始まらない');
-room.takeSeat(b.slot, 0, 1);
-ok(b.slot.seat === 1, 'Aの2番には座れる');
-ok(room.phase === PHASE.WAIT, '1対1しか動かないので始まらない');
-
-console.log('\n[5] 席が埋まっただけでは始まらない');
-room.takeSeat(b.slot, 1, 0);
-ok(b.slot.team === 1 && b.slot.seat === 0, 'Bへ移れた');
+console.log('\n[4] 席が埋まっただけでは始まらない');
+room.takeSeat(b.slot, 1);
+ok(b.slot.seat === 1, '2番の席には座れる');
 ok(room.phase === PHASE.WAIT, '準備完了を押していないので始まらない');
 ok(/準備待ち/.test(room._whyNotStart()), `理由が出る（${room._whyNotStart()}）`);
 
-console.log('\n[5-2] 席にいない人は準備できない');
-const d = join('でー');
-room.setReady(d.slot, true);
-ok(d.slot.ready === false, '立っている人は準備を立てられない');
-room.leave(d.slot);
-
-console.log('\n[5-3] 全員が準備完了を押したら始まる');
-room.setReady(a.slot, true);
-ok(a.slot.ready === true, '片方が押した');
-ok(room.phase === PHASE.WAIT, 'まだ片方なので始まらない');
-room.setReady(a.slot, false);
-ok(a.slot.ready === false, '取り消せる');
-room.setReady(a.slot, true);
+console.log('\n[5] 全員が準備完了で始まる（1対1）');
 room.setReady(b.slot, true);
-ok(room.phase !== PHASE.WAIT, '両方押したら始まった');
+ok(room.phase !== PHASE.WAIT, '試合が始まった');
 ok(room._whyNotStart() === '', '始まらない理由はもう無い');
 
-console.log('\n[6] 湧く位置がチームで分かれる');
-const pa = room._spawnFor(a.slot);
-const pb = room._spawnFor(b.slot);
-ok(pa.x < 0, `Aは西側 (x=${pa.x})`);
-ok(pb.x > 0, `Bは東側 (x=${pb.x})`);
-
-console.log('\n[7] 試合が始まったら席を動かせない');
-room.takeSeat(a.slot, 1, 1);
-ok(a.slot.team === 0 && a.slot.seat === 0, '始まった後の移動は無視される');
-
-console.log('\n[8] 範囲の外を指定しても座らない');
-room.leave(b.slot);
-ok(room.phase === PHASE.WAIT, '片方が抜けたら待ちへ戻る');
+console.log('\n[6] 範囲の外を指定しても座らない');
+clear();
 const c = join('しい');
-room.takeSeat(c.slot, 1, SEATS_PER_TEAM);
-ok(c.slot.team === null, `席番号が${SEATS_PER_TEAM}は範囲外なので座らない`);
-room.takeSeat(c.slot, 5, 0);
-ok(c.slot.team === null, 'チーム5は無いので座らない');
-room.takeSeat(c.slot, 1, -1);
-ok(c.slot.team === null, '席番号が負でも座らない');
+room.takeSeat(c.slot, SEATS);
+ok(c.slot.seat === null, `席番号が${SEATS}は範囲外なので座らない`);
+room.takeSeat(c.slot, 99);
+ok(c.slot.seat === null, '大きすぎる番号でも座らない');
 
-// ここでBに座らせると1対1が成立して試合が始まってしまい、
-// 「試合中は席を動かせない」の方が効いて降りられない。
-// 降りる所を見たいので、始まらない側（aと同じA）に座らせる
-console.log('\n[9] 降りられる');
-room.takeSeat(c.slot, 0, 1);
-ok(c.slot.team === 0 && c.slot.seat === 1, 'いったん座る');
-ok(room.phase === PHASE.WAIT, '同じチームなので始まらない');
-room.takeSeat(c.slot, -1, 0);
-ok(c.slot.team === null && c.slot.seat === null, '降りると立った状態へ戻る');
+console.log('\n[7] 降りられる');
+room.takeSeat(c.slot, 2);
+ok(c.slot.seat === 2, 'いったん座る');
+room.takeSeat(c.slot, -1);
+ok(c.slot.seat === null && c.slot.ready === false, '降りると立った状態へ戻り、準備も倒れる');
 
-console.log('\n[10] 試合中に抜けられたら待ちへ戻る');
-room.takeSeat(c.slot, 1, 0);
-room.setReady(a.slot, true);
-room.setReady(c.slot, true);
-ok(room.phase !== PHASE.WAIT, 'また揃って始まった');
-room.leave(c.slot);
-ok(room.phase === PHASE.WAIT, '相手が抜けたら試合を止める');
-ok(a.slot.rounds === 0, '取ったラウンドも戻す');
-// 倒しておかないと、残った人が押しっぱなしのままロビーへ戻る。
-// 次に来た人が準備を押した瞬間、こちらは何もしていないのに試合が始まる
-ok(a.slot.ready === false, '残った人の準備完了も倒す');
+console.log('\n[8] 3人でも4人でも始まる');
+for (const n of [3, 4]) {
+  const names = ['あき', 'ばん', 'しい', 'でー'].slice(0, n);
+  const ps = startWith(names);
+  ok(room.phase !== PHASE.WAIT, `${n}人で始まった`);
+  ok(ps.length === n, `${n}人が席に着いている`);
+}
 
-console.log('\n[11] 入った本人へ、お迎えより後にロビーが届く');
-// 順番が逆だと、入ってきた本人の画面は受け口をまだ繋いでいないので
-// ロビーを取りこぼし、**先にいた人が誰も映らない**。
-// 実際に「相手から見たら俺がロビーにいない」が起きた。
-// room.join()だけではロビーを配らず、server/index.jsがWELCOMEの後に配る
+console.log('\n[9] 誰か1人が倒れただけではラウンドが終わらない（3人以上）');
+// 1対1の頃は「片方が倒れたら終わり」だった。3人いる時にそれをやると、
+// 最初に倒れた瞬間に残り2人の勝負が消える
 {
+  const ps = startWith(['あき', 'ばん', 'しい']);
+  const round0 = room.round;
+  down(ps[0]);
+  room._checkRoundOver('kill');
+  ok(room.phase === PHASE.LIVE, '1人倒れてもラウンドは続く');
+  ok(room.round === round0, 'ラウンドが進んでいない');
+
+  down(ps[1]);
+  room._checkRoundOver('kill');
+  ok(room.phase !== PHASE.LIVE, '2人目が倒れて最後の1人になったら終わる');
+  ok(ps[2].slot.rounds === 1, '最後まで残った人が取る');
+  ok(ps[0].slot.rounds === 0 && ps[1].slot.rounds === 0, '倒れた人は取らない');
+}
+
+console.log('\n[10] 全員同時に倒れたら誰の取得にもならない');
+// 手榴弾の相討ち。「最後に死んだ人」を勝ちにすると、爆風の計算順という
+// 遊ぶ側からまったく見えない事情で勝敗が決まる
+{
+  const ps = startWith(['あき', 'ばん']);
+  for (const p of ps) down(p);
+  room._checkRoundOver('kill');
+  ok(room.phase !== PHASE.LIVE, 'ラウンドは終わる');
+  ok(ps.every((p) => p.slot.rounds === 0), '誰も取っていない');
+}
+
+console.log('\n[11] 先に3ラウンド取ったら試合が終わる');
+{
+  const ps = startWith(['あき', 'ばん']);
+  for (let i = 0; i < MATCH.ROUND_WINS; i++) {
+    down(ps[1]);
+    room._checkRoundOver('kill');
+    // 次のラウンドへ進める（幕間を飛ばす）
+    if (room.phase === PHASE.BREAK) room._startRound();
+  }
+  ok(ps[0].slot.rounds === MATCH.ROUND_WINS, `${MATCH.ROUND_WINS}本取った`);
+  ok(room.phase === PHASE.END, '試合が終わった');
+}
+
+console.log('\n[12] 試合中に抜けられて1人になったら待ちへ戻る');
+{
+  const ps = startWith(['あき', 'ばん']);
+  ok(room.phase !== PHASE.WAIT, '始まっている');
+  room.leave(ps[1].slot);
+  ok(room.phase === PHASE.WAIT, '相手が抜けたら試合を止める');
+  ok(ps[0].slot.rounds === 0, '取ったラウンドも戻す');
+  ok(ps[0].slot.ready === false, '残った人の準備完了も倒す');
+}
+
+console.log('\n[13] 3人のうち1人が抜けても、残り2人なら続く');
+{
+  const ps = startWith(['あき', 'ばん', 'しい']);
+  room.leave(ps[2].slot);
+  ok(room.phase !== PHASE.WAIT, '2人残っているので試合は続く');
+}
+
+console.log('\n[14] 入った本人へ、お迎えより後にロビーが届く');
+// 順番が逆だと、入ってきた本人の画面は受け口をまだ繋いでいないので
+// ロビーを取りこぼし、先にいた人が誰も映らない
+{
+  clear();
   const d2 = join('でぃー');
-  const kinds = d2.conn.sent.map((m) => m.t);
-  ok(!kinds.includes('L'), 'join()の時点ではまだロビーを配っていない');
-  // server/index.jsがやっている順番を再現する
+  ok(!d2.conn.sent.some((m) => m.t === 'L'), 'join()の時点ではまだロビーを配っていない');
   d2.conn.send(room.welcome(d2.slot));
   room.sendLobby();
   const order = d2.conn.sent.map((m) => m.t).join('');
   ok(order.indexOf('W') < order.indexOf('L'), `お迎えが先、ロビーが後 (${order})`);
   const lob = d2.conn.sent.filter((m) => m.t === 'L').pop();
-  ok(lob.rows.length === room.slots.size, `先にいた人も入っている (${lob.rows.length}人)`);
-  room.leave(d2.slot);
+  ok(lob.rows.length === room.slots.size, `全員が一覧に入っている (${lob.rows.length}人)`);
 }
 
-console.log('\n[12] ロビーの中身が配られている');
-const last = a.conn.sent.filter((m) => m.t === 'L').pop();
-ok(!!last, 'LOBBYが届いている');
-ok(Array.isArray(last.rows), '席の一覧が入っている');
-ok(last.rows.some((r) => r[0] === a.slot.id), '自分が一覧に入っている');
-
-// 後片付け。同じ部屋を他の検査が使う
-for (const s of [...room.slots.values()]) room.leave(s);
+clear();
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);

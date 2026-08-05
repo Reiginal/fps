@@ -530,11 +530,10 @@
   /* 始まらない理由がここに出る。出ていない時も場所を空けておかないと、
      理由が出た瞬間に席の絵が下へずれて、押そうとしていた席が動く */
   .lbpanel .subtitle { margin-bottom: 24px; min-height: 16px; color: var(--warn); }
-  .lbteams { display: flex; gap: 14px; margin-bottom: 18px; }
-  .lbteam { flex: 1; border: 1px solid rgba(255,255,255,.14); padding: 12px 10px; }
-  .lbhead { font-size: 20px; letter-spacing: .3em; margin-bottom: 10px; }
-  .lbteam[data-team="0"] .lbhead { color: var(--accent); }
-  .lbteam[data-team="1"] .lbhead { color: var(--warn); }
+  /* 席は1列。チーム分けが無いので左右に割らない。
+     2人なら1対1、4人なら1対1対1対1で、座った人全員が互いに敵になる */
+  .lbteam { border: 1px solid rgba(255,255,255,.14); padding: 12px 10px; margin-bottom: 18px; }
+  .lbhead { font-size: 12px; letter-spacing: .24em; color: var(--dim); margin-bottom: 10px; }
   .lbseats { display: flex; flex-direction: column; gap: 7px; }
   /* 席1つ。空席は押せる、埋まっている席は押せない。
      押せるかどうかを色だけで表すと、埋まっている席を押して無反応に見える。
@@ -814,15 +813,9 @@
   <div class="lbpanel">
     <div class="title">ロビー</div>
     <div class="subtitle" id="lbWhy"></div>
-    <div class="lbteams">
-      <div class="lbteam" data-team="0">
-        <div class="lbhead">A</div>
-        <div class="lbseats" id="lbSeatsA"></div>
-      </div>
-      <div class="lbteam" data-team="1">
-        <div class="lbhead">B</div>
-        <div class="lbseats" id="lbSeatsB"></div>
-      </div>
+    <div class="lbteam">
+      <div class="lbhead">席（2〜4人）</div>
+      <div class="lbseats" id="lbSeats"></div>
     </div>
     <div class="lbchars">
       <div class="lbchead">見た目</div>
