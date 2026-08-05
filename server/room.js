@@ -12,6 +12,7 @@ import {
   Sv, EV, packPlayer, SEATS, SEAT_SPAWN, CHARACTERS,
 } from '../src/net/protocol.js';
 import { SimPlayer, resolveShot, rewindMs, originVisible } from './sim.js';
+import { logs } from './logs.js';
 
 const TICK_MS = 1000 / TICK_HZ;
 const SNAP_EVERY = Math.round(TICK_HZ / SNAPSHOT_HZ);
@@ -274,6 +275,10 @@ export class Room {
   leave(slot) {
     if (!this.slots.delete(slot.id)) return;
     this.push({ e: EV.LEAVE, id: slot.id });
+    // 抜けた所を残す。「途中で落ちた」のか「自分で抜けた」のかは
+    // ここからは分からないが、**いつ何人になったか**が分かるだけで
+    // 「3人目が入った直後に落ちる」のような形に辿り着ける
+    logs.add('leave', { name: slot.name, count: this.slots.size });
     if (this.slots.size === 0) {
       // 誰もいなくなったら60Hzのタイマーを止める。部屋そのものは残す
       this._stop();
@@ -826,6 +831,9 @@ export class Room {
       s.sim.deaths = 0;
     }
     this._sendScore();
+    logs.add('start', {
+      players: [...this.slots.values()].filter((s) => s.seat !== null).map((s) => s.name).join('、'),
+    });
     this._startRound();
   }
 
@@ -845,6 +853,9 @@ export class Room {
     if (this.phase !== PHASE.LIVE) return;
     if (winner) winner.rounds++;
     this._sendScore();
+    logs.add('round', {
+      round: this.round, winner: winner ? winner.name : '（決着なし）', why,
+    });
 
     if (winner && winner.rounds >= MATCH.ROUND_WINS) {
       this._endMatch(why);
@@ -863,6 +874,11 @@ export class Room {
     // 得点だけを配ると、受け取った側は「これが最終順位なのか途中経過なのか」を
     // 区別できない。次の試合の0点で必ず上書きされるので、専用の電文で名乗る
     const rows = this._rows();
+    // 取得ラウンドが一番多い人が勝ち。同数なら並びの先頭になるが、
+    // ここは記録であって判定ではないので、その粗さで足りる
+    let best = null;
+    for (const s of this.slots.values()) if (!best || s.rounds > best.rounds) best = s;
+    logs.add('match', { winner: best ? `${best.name}(${best.rounds})` : '', why });
     for (const s of this.slots.values()) {
       s.conn.send({ t: Sv.MATCHEND, rows, why, next: MATCH.MATCH_BREAK_S });
     }
