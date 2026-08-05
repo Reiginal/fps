@@ -2679,9 +2679,19 @@ export class WeaponSystem {
     if (!canAds) this.adsHeld = false;
     this.wantAds = this.adsHeld && canAds;
     const adsTarget = this.wantAds ? 1 : 0;
-    const adsSpeed = 1 / Math.max(d.adsTime, 0.01);
-    this.adsFactor = THREE.MathUtils.damp(this.adsFactor, adsTarget, adsSpeed * 1.6, dt);
-    if (Math.abs(this.adsFactor - adsTarget) < 0.002) this.adsFactor = adsTarget;
+    // 覗き込みは「adsTime秒で覗き終わる」。一定の速さで詰める。
+    //
+    // ここは damp（指数で近づく関数）だった。指数はいつまでも到達しないので、
+    // adsTimeに0.16秒と書いてあっても実際に覗き終わるのは**0.625秒**（3.9倍）で、
+    // 0.16秒の時点ではまだ63%しか進んでいなかった。
+    // 「スコープを覗くまでの時間が長い」の正体がこれ。
+    // 数字の意味と画の動きが食い違っていると、値をいくら詰めても合わせられない。
+    //
+    // 一定の速さなら「書いた秒数＝かかる秒数」になり、指定値がそのまま効く
+    const adsStep = dt / Math.max(d.adsTime, 0.01);
+    this.adsFactor = adsTarget > this.adsFactor
+      ? Math.min(adsTarget, this.adsFactor + adsStep)
+      : Math.max(adsTarget, this.adsFactor - adsStep);
     player.adsFactor = this.adsFactor;
     // 移動速度の倍率も武器から渡す。持ち替えた次のフレームから効く
     player.moveMul = d.moveMul || 1;
