@@ -1794,8 +1794,22 @@ class Game {
    * 数cmの差はどうせ描き分けられない）
    */
   _updateNadeArc() {
-    const show = this.state === 'playing' && this.player.alive
-      && !!this.weapons.def.thrown;
+    const holding = !!this.weapons.def.thrown;
+    const show = this.state === 'playing' && this.player.alive && holding;
+
+    /* 手榴弾を持っているのに線が出ない時だけ、その理由を画面に出す。
+       「試合の途中から軌道が出なくなった」と言われたが、コードを読んでも
+       どこで止まるのか特定できなかった。3つの条件のどれが崩れているかが
+       分かれば次の1回で決まるので、本人の画面に出す。
+       持っていない時は当然出ないので、その時は黙っている */
+    this.diag?.setState(
+      'arc',
+      !holding || show ? ''
+        : this.state !== 'playing'
+          ? `軌道が出ない: 操作を握れていない（state=${this.state}）`
+          : '軌道が出ない: 倒れている扱いになっている',
+    );
+
     if (!show) {
       if (this._arc) this._arc.visible = false;
       return;
@@ -2051,6 +2065,7 @@ class Game {
          遊ぶ側からは「3つ同時に壊れた」ようにしか見えない。
          実際にWindowsの人から報告された症状のうち3件がこの形だった */
       this.diag?.setState(
+        'canAct',
         canAct ? '' : '倒れている間は、包帯・リロード・武器の切り替えが使えません',
       );
       // 包帯はFで手に持つだけ。巻き始めるのは左クリックで、そちらはweapons側が見る。

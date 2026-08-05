@@ -11,8 +11,9 @@
    スナップショットの状態ビットから同じ形を作る。 */
 
 import * as THREE from 'three';
-import { S, characterAt } from './protocol.js';
+import { S, characterAt, HITBOX } from './protocol.js';
 import { Enemy } from '../ai/enemy.js';
+import { WEAPONS } from '../player/weapons.js';
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -98,10 +99,39 @@ export class RemotePlayers {
       seen.add(st.id);
       let slot = this.slots.get(st.id);
       if (!slot) { slot = this._spawn(st, this._chars?.get(st.id) | 0); this.slots.set(st.id, slot); }
+      this._applyWeapon(slot, st.weapon | 0);
       this._apply(slot, st, dt, viewPos);
     }
     // 消えた相手は残さない。抜け殻が立ち続けるより消える方が嘘が小さい
     for (const id of this.slots.keys()) if (!seen.has(id)) this.remove(id);
+  }
+
+  /**
+   * 相手が持ち替えた武器を見た目へ反映する。
+   *
+   * 武器の番号はスナップショットにずっと乗っていた（protocol.jsのpackPlayerの9番目）が、
+   * **受け取った側が一度も使っていなかった。** 相手がナイフに持ち替えても
+   * こちらの画面では銃を構えたままで、何で殺されるのか読めなかった。
+   *
+   * 兵士の銃は組み上げ時に決まっていて差し替えられないので、
+   * 出す・引っ込める・寸法を変える、の3つで持ち替えを表す。
+   * 見た目を作り込むのは後からできるが、**持っていない物を持って見えるのは嘘**なので
+   * そこだけ先に消す
+   */
+  _applyWeapon(slot, index) {
+    if (slot.weapon === index) return;
+    slot.weapon = index;
+    const g = slot.enemy.parts.gun;
+    if (!g) return;
+    const def = WEAPONS[index];
+    // 近接と投擲は銃を持っていない。引っ込める
+    const hasGun = !!def && !def.melee && !def.thrown;
+    g.visible = hasGun;
+    // 散弾銃は短くて太い。同じ形のままだとライフルと見分けが付かない
+    if (hasGun) {
+      const short = index === 1;
+      g.scale.set(short ? 1.12 : 1, short ? 1.12 : 1, short ? 0.82 : 1);
+    }
   }
 
   get(id) {
@@ -158,6 +188,23 @@ export class RemotePlayers {
       this.scene.add(e.blob);
       this._all.push(e);
     }
+    /* 見た目の身長を、サーバーの当たり判定の身長へ合わせる。
+       **ここがずれていたのが「ヘッドショットの判定がデカすぎる」の正体だった。**
+
+       兵士は個体差で0.94〜1.12倍に伸び縮みするのに、サーバーの当たり判定は
+       1.74m固定。実測すると、大柄なキャラでは頭の当たり判定(1.42〜1.72m)と
+       見えている頭(1.72〜2.03m)が**1cmも重ならない**。
+       見えている頭を撃っても頭にならず、胸のあたりを撃つと頭になっていた。
+
+       身長差を残したまま判定側を各自の身長に合わせる手もあるが、それをやると
+       背の低いキャラを選ぶだけで当たりにくくなり、選ぶ物で有利不利が出る。
+       見た目を判定へ寄せるのが正しい。個体差は迷彩・装備・肩幅・姿勢に残る */
+    const natural = e.height / e.bodyScale;   // 個体差を掛ける前の素の身長
+    const fit = HITBOX.STAND_H / natural;
+    e.root.scale.setScalar(fit);
+    e.bodyScale = fit;
+    e.height = HITBOX.STAND_H;
+
     e.root.visible = true;
     e.root.rotation.set(0, 0, 0);
     e.blob.visible = true;
