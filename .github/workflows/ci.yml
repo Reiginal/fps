@@ -109,3 +109,6 @@ jobs:
 
       - name: 検査 エラーの受け口
         run: node tools/check-report.mjs
+
+      - name: 検査 地形のメモリ
+        run: node --expose-gc tools/check-world.mjs
