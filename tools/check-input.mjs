@@ -19,8 +19,14 @@ const ok = (c, msg) => { console.log(`  ${c ? '○' : '× 失敗:'} ${msg}`); if
 /* ブラウザの代わりに、頼まれた内容を記録するだけの偽物を置く。
    dom-stubにはこれらが無いので、ここで足す */
 const log = { fullscreen: 0, exit: 0, lockedKeys: null, unlocked: 0 };
-// Nodeのnavigatorは差し替えられない（getterしか無い）ので、
-// 生えている物の上へkeyboardだけ足す
+// navigatorはNodeのバージョンで扱いが割れる。**両方で通る形にしないとCIが片肺で落ちる。**
+//   Node 20 … そもそも生えていない（触るとReferenceError）
+//   Node 21以降 … 生えているが、差し替えられないgetterになっている（代入すると例外）
+// 無ければ作る、有ればその上へkeyboardだけ足す、で両方を通す。
+// 手元がNode 24しかなくて20で落ちた実績があるので、ここは消さない
+if (typeof globalThis.navigator === 'undefined') {
+  Object.defineProperty(globalThis, 'navigator', { value: {}, writable: true, configurable: true });
+}
 navigator.keyboard = {
   lock: (keys) => { log.lockedKeys = keys; return Promise.resolve(); },
   unlock: () => { log.unlocked++; },
