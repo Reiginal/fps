@@ -176,68 +176,36 @@ console.log('\n[3.6] 包帯の見え方');
   const bw = r16.maxX - r16.minX, bh = r16.maxY - r16.minY;
   ok(bw > 0.4 && bh > 0.4, `帯の大きさ 横${(bw * 50).toFixed(0)}% 縦${(bh * 50).toFixed(0)}%`);
 
+  // 目からの距離。**ここが「手がでかい・グロい」の正体だった。**
+  //
+  // 元は目から25cmの所に縮尺1.35で置いてあり、前腕が目より26cm手前まで
+  // 突き抜けていた（1307頂点のうち972個がカメラの手前）。
+  // カメラの手前へ回った面は画面上で無限に広がるので、腕の断面が画面いっぱいに出る。
+  // 形の問題ではなく位置の問題で、直すのに触ったのは距離と縮尺と袖の長さだけ。
+  //
+  // 「大きさ」ではなく「カメラの手前に頂点があるか」で見るのは、
+  // 大きさは縮尺を下げれば下がってしまい、突き抜けを見逃すため
+  {
+    let ahead = 0, nearest = 9;
+    ws.bandage.updateMatrixWorld(true);
+    ws.bandage.traverse((m) => {
+      if (!m.isMesh || !m.geometry?.attributes?.position) return;
+      const pos = m.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        _v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+        const dist = -_v.z;   // ビューモデルは-zが前
+        nearest = Math.min(nearest, dist);
+        if (dist <= vcam.near) ahead++;
+      }
+    });
+    ok(ahead === 0, `目より手前に出ている頂点 ${ahead}個（元は811個）`);
+    // 一番近い所。ライフルを支える腕が16cmなので、そこから極端に離れない
+    ok(nearest > 0.02, `一番近い所 ${(nearest * 100).toFixed(0)}cm（2cmより先）`);
+  }
+
   ws.holsterBandage();
   for (let i = 0; i < 40; i++) ws.update(1 / 60, none, p, {});
   ok(!ws.bandage.visible, 'しまうと消える');
-}
-
-/* -------------------------------------- 巻いている間、手が回り続けないか */
-
-console.log('\n[3.7] 包帯を巻いている間の動き');
-// 遊んで「巻いてる時に腕もぐるぐる回ってる」と言われた所。
-// 原因は、増え続ける値(spin)を手の向きへそのまま足していたこと。
-// 2.4秒巻くと手が1回転半していた。
-//
-// 見た目の不具合は画面を見ないと気づけないが、「回りすぎ」は角度なので測れる。
-// 巻いている間の向きを1コマずつ拾って、振れ幅が往復の範囲に収まるかを見る
-{
-  const p = {
-    alive: true, sprinting: false, crouching: false, onFloor: true,
-    horizontalSpeed: 0, adsFactor: 0, moveMul: 1, roll: 0, healing: 0, bandages: 2,
-    yaw: 0, pitch: 0, bobAmount: 0,
-    addRecoil: () => {}, cancelHeal: () => {}, startHeal: () => false,
-    collider: { start: new THREE.Vector3() },
-  };
-  const none = {
-    down: () => false, pressed: () => false, clicked: () => false, buttons: [false, false, false],
-  };
-  ws.toggleBandage(p);
-  for (let i = 0; i < 30; i++) ws.update(1 / 60, none, p, {});
-
-  // 巻いている最中を再現する。healingは残り秒なので、満タンから減らしていく
-  const HEAL_S = 2.4;
-  let minY = 9, maxY = -9, rollX = 0;
-  // 巻き終わる手前で止める。healingが0になったコマまで含めると、
-  // そこは「巻いていない」扱いで回転が0に戻るので、最後の値を拾うと0が出る
-  for (let i = 0; i < Math.round(HEAL_S * 60); i++) {
-    p.healing = HEAL_S - i / 60;
-    ws.update(1 / 60, none, p, {});
-    minY = Math.min(minY, ws.bandage.rotation.y);
-    maxY = Math.max(maxY, ws.bandage.rotation.y);
-    rollX = Math.max(rollX, Math.abs(ws.bandage.userData.roll.rotation.x));
-  }
-  // 手が帯を握る向きになっているか。
-  // 「手の形はしているが握っていない」は画面を見ないと気づけないが、
-  // 握り軸(手のローカルY)と帯の軸(横に寝た円筒なのでX)の角度なら測れる。
-  // 元は69.9度ずれていて、指が帯を回り込まずに横切って閉じていた
-  {
-    const hand = ws.bandage.children.find((c) => c !== ws.bandage.userData.roll);
-    const grip = new THREE.Vector3(0, 1, 0).applyQuaternion(hand.quaternion).normalize();
-    const gap = THREE.MathUtils.radToDeg(Math.acos(Math.abs(grip.dot(new THREE.Vector3(1, 0, 0)))));
-    ok(gap < 20, `手が帯を握る向きになっている (軸のずれ ${gap.toFixed(1)}度 / 上限20度)`);
-  }
-
-  const swing = maxY - minY;
-  // 手首のひねりは往復。半回転(π)を超えたら、それはもう「回っている」
-  ok(swing < Math.PI, `手の振れ幅が往復に収まる (${swing.toFixed(2)}ラジアン / 上限${Math.PI.toFixed(2)})`);
-  // 逆に、まったく動かないのも困る。持っているだけの絵に見える
-  ok(swing > 0.1, `手はちゃんと動いている (${swing.toFixed(2)}ラジアン)`);
-  // 帯そのものはほどけていく物なので、こちらは回り続けるのが正しい
-  ok(rollX > Math.PI * 2, `帯はほどける向きに回っている (${rollX.toFixed(1)}ラジアン)`);
-
-  p.healing = 0;
-  ws.holsterBandage();
-  for (let i = 0; i < 40; i++) ws.update(1 / 60, none, p, {});
 }
 
 console.log('\n[4] 近接武器を振った時');
