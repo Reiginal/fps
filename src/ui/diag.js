@@ -23,7 +23,9 @@ export class Diag {
   constructor() {
     this.el = $('diag');
     this._errors = [];
-    this._state = '';
+    // 状態は名前を付けて複数持つ。1つの文字列にすると、
+    // 別々の場所から毎フレーム書き合って点滅する
+    this._states = new Map();
     this._seen = new Set();
 
     // 拾い損ねた例外を捕まえる。ここが無いと、遊ぶ側には
@@ -48,19 +50,21 @@ export class Diag {
   }
 
   /**
-   * 今の状態。空文字なら何も出ない。
-   * 「操作が効かない理由」をここへ入れる
+   * 今の状態。空文字を渡すとその行が消える。
+   * 「操作が効かない理由」をここへ入れる。
+   * keyは出す場所ごとの名前で、別々の場所が互いを消さないために要る
    */
-  setState(text) {
+  setState(key, text) {
     const t = String(text || '');
-    if (t === this._state) return;
-    this._state = t;
+    if ((this._states.get(key) || '') === t) return;
+    if (t) this._states.set(key, t);
+    else this._states.delete(key);
     this._render();
   }
 
   _render() {
     const lines = [];
-    if (this._state) lines.push(this._state);
+    for (const s of this._states.values()) lines.push(s);
     for (const e of this._errors) lines.push(`エラー: ${e}`);
     if (!lines.length) {
       this.el.classList.add('hidden');
