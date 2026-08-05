@@ -721,6 +721,16 @@ class Game {
   _bindMenu() {
     const menu = new NetMenu();
     this.menu = menu;
+    // 全画面で遊ぶかどうかは選択画面のつまみが持っている。
+    // 前回の設定がlocalStorageから戻ってくるので、起動時に一度写しておかないと
+    // 「切ったまま閉じて、開き直したら全画面に戻る」ことになる
+    this.input.wantFullscreen = menu.fullscreen;
+    menu.onFullscreen = (on) => {
+      this.input.wantFullscreen = on;
+      // 遊んでいる最中に切られたら、その場で窓へ戻す。
+      // 次に遊び始めるまで効かないと、切ったのに何も起きないように見える
+      if (!on) this.input.exitFullscreen();
+    };
 
     // 繋がってから試合が始まるまでの画面。押された席をそのままサーバーへ送る。
     // 座れたかどうかを手元で決めないので、ここでは絵を書き換えない
@@ -1240,7 +1250,7 @@ class Game {
       this.effects.impact(enemyHit.point, dir.clone().negate(), 'flesh');
       // 近接は刃が入る音を足す。弾が当たった時と同じ音だと、
       // 撃ったのか斬ったのかが耳から判別できない
-      if (def.melee) this.audio.stab(enemyHit.point, this.camera, true);
+      if (def.melee) this.audio.stab(enemyHit.point, this.camera, 'flesh');
       this.hud.hitmarker(head);
       this.audio.hitmarker(head);
       if (killed) {
@@ -1260,8 +1270,10 @@ class Game {
         this.effects.impact(worldHit.point, normal, kind);
         this.audio.impact(kind, worldHit.point, this.camera);
       } else {
-        // 火花は出さないが、当たった手応えは要る。刃が突き当たって止まる鈍い音
-        this.audio.stab(worldHit.point, this.camera, false);
+        // 火花は出さないが、当たった手応えは要る。
+        // 材質を渡すのは、鉄板とコンクリで鳴り方を変えるため。
+        // 全部同じ鈍い音だと、何に当たったのか耳から分からない
+        this.audio.stab(worldHit.point, this.camera, kind);
       }
       if (drawTracer) this.effects.tracer(muzzle, worldHit.point, 0.03);
     } else if (drawTracer) {
@@ -1308,7 +1320,7 @@ class Game {
         this.effects.impact(h.point, normal, kind);
         this.audio.impact(kind, h.point, this.camera);
       } else {
-        this.audio.stab(h.point, this.camera, false);
+        this.audio.stab(h.point, this.camera, kind);
       }
       if (drawTracer) this.effects.tracer(muzzle, h.point, 0.03);
     } else if (drawTracer) {

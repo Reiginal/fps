@@ -176,9 +176,80 @@ console.log('\n[3.6] 包帯の見え方');
   const bw = r16.maxX - r16.minX, bh = r16.maxY - r16.minY;
   ok(bw > 0.4 && bh > 0.4, `帯の大きさ 横${(bw * 50).toFixed(0)}% 縦${(bh * 50).toFixed(0)}%`);
 
+  // 目からの距離。**ここが「手がでかい・グロい」の正体だった。**
+  //
+  // 元は目から25cmの所に縮尺1.35で置いてあり、前腕が目より26cm手前まで
+  // 突き抜けていた（1307頂点のうち972個がカメラの手前）。
+  // カメラの手前へ回った面は画面上で無限に広がるので、腕の断面が画面いっぱいに出る。
+  // 形の問題ではなく位置の問題で、直すのに触ったのは距離と縮尺と袖の長さだけ。
+  //
+  // 「大きさ」ではなく「カメラの手前に頂点があるか」で見るのは、
+  // 大きさは縮尺を下げれば下がってしまい、突き抜けを見逃すため
+  {
+    let ahead = 0, nearest = 9;
+    ws.bandage.updateMatrixWorld(true);
+    ws.bandage.traverse((m) => {
+      if (!m.isMesh || !m.geometry?.attributes?.position) return;
+      const pos = m.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        _v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+        const dist = -_v.z;   // ビューモデルは-zが前
+        nearest = Math.min(nearest, dist);
+        if (dist <= vcam.near) ahead++;
+      }
+    });
+    ok(ahead === 0, `目より手前に出ている頂点 ${ahead}個（元は811個）`);
+    // 一番近い所。ライフルを支える腕が16cmなので、そこから極端に離れない
+    ok(nearest > 0.02, `一番近い所 ${(nearest * 100).toFixed(0)}cm（2cmより先）`);
+  }
+
   ws.holsterBandage();
   for (let i = 0; i < 40; i++) ws.update(1 / 60, none, p, {});
   ok(!ws.bandage.visible, 'しまうと消える');
+}
+
+/* ------------------------------------------ 覗くのに何秒かかるか */
+
+console.log('\n[3.8] 覗き込みの速さ');
+// 遊んで「スコープを覗くまでの時間が長い」と言われた所。
+//
+// 原因は damp（指数で近づく関数）に adsTime をそのまま渡していたこと。
+// 指数はいつまでも到達しないので、0.16秒と書いてあっても実際に覗き終わるのは
+// 0.625秒（3.9倍）だった。数字の意味と画の動きが食い違っていると、
+// 値をいくら詰めても合わせられない。
+//
+// ここは「書いた秒数で覗き終わる」ことだけを見る。
+// 誤差を1割まで許すのは、コマの刻み方で1フレームぶんずれるため
+{
+  const none = {
+    down: () => false, pressed: () => false, clicked: () => false, buttons: [false, false, false],
+  };
+  const p = {
+    alive: true, sprinting: false, crouching: false, onFloor: true,
+    horizontalSpeed: 0, adsFactor: 0, moveMul: 1, roll: 0, healing: 0, bandages: 2,
+    yaw: 0, pitch: 0, bobAmount: 0,
+    addRecoil: () => {}, cancelHeal: () => {}, startHeal: () => false,
+    collider: { start: new THREE.Vector3() },
+  };
+  const DT = 1 / 120;
+  for (const [index, w] of ws.weapons.entries()) {
+    if (w.def.melee) continue;
+    ws.switchTo(index);
+    // 持ち替えの間は覗けないので、終わるまで空回しする
+    for (let i = 0; i < 120; i++) ws.update(DT, none, p, {});
+    ws.adsHeld = true;
+    let t = 0;
+    for (let i = 0; i < 600 && ws.adsFactor < 1; i++) { ws.update(DT, none, p, {}); t += DT; }
+    const want = w.def.adsTime;
+    ok(
+      ws.adsFactor >= 1 && Math.abs(t - want) <= want * 0.10 + DT * 1.5,
+      `${w.def.name} … 指定${(want * 1000).toFixed(0)}ms に対して実測${(t * 1000).toFixed(0)}ms`,
+    );
+    ws.adsHeld = false;
+    for (let i = 0; i < 240; i++) ws.update(DT, none, p, {});
+  }
+  ws.switchTo(0);
+  for (let i = 0; i < 120; i++) ws.update(DT, none, p, {});
 }
 
 /* -------------------------------------- 巻いている間、手が回り続けないか */

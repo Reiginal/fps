@@ -919,7 +919,7 @@ class FocusPass extends Pass {
 
 /* ------------------------------------------------------------ グレード */
 
-const GradeShader = {
+export const GradeShader = {
   uniforms: {
     tDiffuse: { value: null },
     uTexel: { value: new THREE.Vector2(1 / 1280, 1 / 720) },
@@ -968,7 +968,18 @@ const GradeShader = {
     // 錯乱円が最大の時のぼかし半径。画面高に対する比なので解像度が変わっても見た目が揃う。
     // 13タップしか撒かないので、ここを広げるほどリングのゴーストが分かれて見える
     uDofRadius: { value: 0.013 },
-    uDofStrength: { value: 1.0 },
+    // 0にして切ってある。
+    //
+    // 遊んで「スコープが曇る仕様がいらない」と言われた所。曇りを描いてはいないが、
+    // 覗いている間だけ**合焦距離から外れた物が全部ボケる**ので、
+    // 遠くを狙えば手前が、手前を狙えば遠くが溶ける。撃ち合いの最中に見ると
+    // レンズが曇ったようにしか見えない。写真では正しくても、
+    // 狙う道具としては「見えなくなる」ほうが先に来る。
+    //
+    // 仕組みごと消さずに0で残してあるのは、覗いた時の奥行きを別の形で
+    // やり直したくなった時に、また測り直す所から始めなくて済むように。
+    // 0の間はシェーダの分岐ごと飛ぶので、描く負荷は掛からない
+    uDofStrength: { value: 0 },
   },
   vertexShader: /* glsl */`
     varying vec2 vUv;
@@ -1052,8 +1063,9 @@ const GradeShader = {
       // そこから奥にも手前にも離れるほどボケる。合焦距離はFocusPassが1画素のバッファに
       // 1/距離の形で入れてある。
       // 銃と光学の筐体は先のViewCompositePassでボケ済みなので、ここでは受け持たない。
-      // uAdsは画面全体で同じ値なので、この分岐は覗いていない間まるごと飛ぶ
-      if (uAds > 0.002) {
+      // uAdsもuDofStrengthも画面全体で同じ値なので、この分岐は
+      // 覗いていない間と、ボケを切ってある間はまるごと飛ぶ
+      if (uAds * uDofStrength > 0.002) {
         float invFocus = texture2D(tFocus, vec2(0.5, 0.5)).r;
         float coc = cocOf(texture2D(tDepth, vUv).x, invFocus);
         // 銃の画素は世界の深度を持っていない(別シーンなので深度には裏の壁が入っている)。
@@ -1142,7 +1154,7 @@ const GradeShader = {
 
 // FXAAで均した後に掛ける。先に掛けるとFXAAがシャープの縁を拾って余計に滲む。
 // グレインもここ。シャープの前に乗せると粒がバリバリに強調される
-const FinishShader = {
+export const FinishShader = {
   uniforms: {
     tDiffuse: { value: null },
     uTexel: { value: new THREE.Vector2(1 / 1280, 1 / 720) },
@@ -1164,6 +1176,10 @@ const FinishShader = {
     uFar: { value: 900 },
     uCocNear: { value: 1.6 },
     uCocFar: { value: 19.0 },
+    // ボケの強さ。gradeとuniformオブジェクトごと共有する。
+    // 別々に持つと、gradeでボケを切った後もここだけ「ボカしたつもり」で
+    // シャープを引き続け、覗いた瞬間に画面全体が眠くなる
+    uDofStrength: { value: 0 },
     uGrain: { value: 0.018 },
     uGrainPx: { value: 1 },   // 粒1つ分の画面ピクセル数。デバイスピクセル比から入れる
     uTime: { value: 0 },      // gradeと同じuniformオブジェクトを差し込んで共有する
@@ -1183,7 +1199,7 @@ const FinishShader = {
   fragmentShader: /* glsl */`
     uniform sampler2D tDiffuse, tDepth, tFocus;
     uniform vec2 uTexel;
-    uniform float uSharpen, uSharpClamp, uGrain, uGrainPx, uTime, uAds;
+    uniform float uSharpen, uSharpClamp, uGrain, uGrainPx, uTime, uAds, uDofStrength;
     uniform float uDither, uFireflyGain, uFireflyFloor;
     uniform float uNear, uFar, uCocNear, uCocFar;
     varying vec2 vUv;
@@ -1229,7 +1245,7 @@ const FinishShader = {
       // 前段でボカした所(ADS中)ではシャープを引く。判定はgradeの被写界深度と
       // 同じ式にする。ずらすと輪郭が立つ帯とボケる帯が分かれて縞に見える
       float soft = 1.0;
-      if (uAds > 0.002) {
+      if (uAds * uDofStrength > 0.002) {
         float diff = 1.0 / max(-viewZOf(texture2D(tDepth, vUv).x), uNear)
                    - texture2D(tFocus, vec2(0.5, 0.5)).r;
         float coc = clamp(diff > 0.0 ? diff * uCocNear : -diff * uCocFar, 0.0, 1.0);
@@ -1540,6 +1556,9 @@ export function createComposer(renderer, scene, camera, viewScene, viewCamera) {
   sharpen.uniforms.uFar = grade.uniforms.uFar;
   sharpen.uniforms.uCocNear = grade.uniforms.uCocNear;
   sharpen.uniforms.uCocFar = grade.uniforms.uCocFar;
+  // ボケの強さも共有する。ここが分かれていると、gradeでボケを切った後も
+  // シャープだけ「ボカした所」を避け続けて、覗いた瞬間に画が眠くなる
+  sharpen.uniforms.uDofStrength = grade.uniforms.uDofStrength;
   composer.addPass(sharpen);
 
   // 粒はデバイスピクセルではなくCSSピクセル基準で1粒にする。デバイスピクセル基準にすると

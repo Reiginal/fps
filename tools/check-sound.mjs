@@ -200,5 +200,48 @@ for (const [name, play] of loud) {
   ok(worst < 0.95, `${name} … ${REPEAT}回のうち一番大きい回で ${worst.toFixed(2)}`);
 }
 
+console.log('\n[6] 刃が当たった音が材質で分かれているか');
+// 遊んで「ナイフを障害物にやったらカンカン鳴ってほしい」と言われた所。
+// 元は肉でも鉄板でもコンクリでも同じ鈍い音で、何に当たったのか耳から分からなかった。
+//
+// 「カンカン」は数字で言うと、低音がほとんど無く高い所へ寄っていること。
+// 逆に肉へ刺さる音は低音が主役でないといけない。
+// この2つが逆転していないか、間に木とコンクリが挟まっているかを見る
+{
+  const got = {};
+  for (const k of ['flesh', 'metal', 'wood', 'concrete']) {
+    got[k] = await capture((a) => a.stab(null, null, k));
+  }
+  ok(
+    got.metal.centroid > 2500,
+    `金属は高い所で鳴る (重心${got.metal.centroid.toFixed(0)}Hz / 2500Hzより上)`,
+  );
+  ok(
+    got.metal.lowPct < 8,
+    `金属に低音の重さは無い (${got.metal.lowPct.toFixed(1)}% / 8%未満)`,
+  );
+  ok(
+    got.flesh.lowPct > 40 && got.flesh.centroid < 900,
+    `肉は低く鈍い (低音${got.flesh.lowPct.toFixed(1)}% 重心${got.flesh.centroid.toFixed(0)}Hz)`,
+  );
+  // 材質の間に差が出ているか。1つでも同じ所に来ていると作り分けた意味が無い。
+  // 金属＞木＞コンクリ＞肉 の順に高くなる並びを崩さない
+  const order = ['metal', 'wood', 'concrete', 'flesh'];
+  let sorted = true;
+  for (let i = 0; i + 1 < order.length; i++) {
+    if (got[order[i]].centroid <= got[order[i + 1]].centroid) sorted = false;
+  }
+  ok(
+    sorted,
+    '金属＞木＞コンクリ＞肉 の順に高い ('
+    + order.map((k) => `${k} ${got[k].centroid.toFixed(0)}Hz`).join(' / ') + ')',
+  );
+  // 壁を擦るたびに銃声より大きい音が出ると、耳が持たない。
+  // 金属だけ出口のリミッターに突っ込んで0.9近くまで出ていたことがある
+  let worst = 0;
+  for (let k = 0; k < 4; k++) worst = Math.max(worst, (await capture((a) => a.stab(null, null, 'metal'))).peak);
+  ok(worst < 0.7, `金属が銃声より大きくならない (4回のうち一番大きい回で ${worst.toFixed(2)})`);
+}
+
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);
 process.exit(bad === 0 ? 0 : 1);

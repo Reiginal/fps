@@ -2512,9 +2512,19 @@ export class WeaponSystem {
     // 画面には甲の塊しか出ない（buildHandのrollの説明を参照）。
     // 握る対象の太さ(gripR 0.031)はライフルの先台と同じなので、
     // 詰め済みの値をそのまま借りる
+    // armDirとarmLenは前腕がどこへ抜けるかを決める。
+    //
+    // ここは [0.42, -0.70, 0.90] / 0.58 だった。手前(+z)へ0.43m伸ばす向きで、
+    // 包帯そのものが目から25cmしか離れていないので、**前腕の先が目より
+    // 26cm手前へ突き抜けていた。** 1307頂点のうち972個がカメラの手前にある状態で、
+    // 手前に来た面は画面上で無限に広がるので、腕の断面が画面いっぱいに出る。
+    // 「手がでかい」「手の形がグロい」の正体はこれ（形ではなく位置の問題）。
+    //
+    // 下向きを強くして短くする。前腕は画面の下から入って下へ抜ける形になり、
+    // 一番手前でも目から18cm残る（ライフルを支える腕の16cmと同じ範囲）
     const hand = buildHand(1, {
       gripR: 0.031, wrap: 0.62, tip: -0.34, roll: 0.52, skew: 0.22,
-      armDir: [0.42, -0.70, 0.90], armLen: 0.58,
+      armDir: [0.42, -0.92, 0.62], armLen: 0.34,
     });
     hand.position.set(0.030, -0.006, 0.004);
     hand.rotation.set(-0.10, 0, -Math.PI / 2 + 0.14);
@@ -2522,7 +2532,8 @@ export class WeaponSystem {
 
     g.position.set(0.10, -0.14, -0.28);
     g.rotation.set(-0.35, 0.4, 0.2);
-    g.scale.setScalar(1.35);
+    // 縮尺は_animateが毎フレーム上書きするので、ここは組み立て時の目安でしかない
+    g.scale.setScalar(1.18);
     g.visible = false;
     viewScene.add(g);
     return g;
@@ -2668,9 +2679,19 @@ export class WeaponSystem {
     if (!canAds) this.adsHeld = false;
     this.wantAds = this.adsHeld && canAds;
     const adsTarget = this.wantAds ? 1 : 0;
-    const adsSpeed = 1 / Math.max(d.adsTime, 0.01);
-    this.adsFactor = THREE.MathUtils.damp(this.adsFactor, adsTarget, adsSpeed * 1.6, dt);
-    if (Math.abs(this.adsFactor - adsTarget) < 0.002) this.adsFactor = adsTarget;
+    // 覗き込みは「adsTime秒で覗き終わる」。一定の速さで詰める。
+    //
+    // ここは damp（指数で近づく関数）だった。指数はいつまでも到達しないので、
+    // adsTimeに0.16秒と書いてあっても実際に覗き終わるのは**0.625秒**（3.9倍）で、
+    // 0.16秒の時点ではまだ63%しか進んでいなかった。
+    // 「スコープを覗くまでの時間が長い」の正体がこれ。
+    // 数字の意味と画の動きが食い違っていると、値をいくら詰めても合わせられない。
+    //
+    // 一定の速さなら「書いた秒数＝かかる秒数」になり、指定値がそのまま効く
+    const adsStep = dt / Math.max(d.adsTime, 0.01);
+    this.adsFactor = adsTarget > this.adsFactor
+      ? Math.min(adsTarget, this.adsFactor + adsStep)
+      : Math.max(adsTarget, this.adsFactor - adsStep);
     player.adsFactor = this.adsFactor;
     // 移動速度の倍率も武器から渡す。持ち替えた次のフレームから効く
     player.moveMul = d.moveMul || 1;
@@ -3077,11 +3098,15 @@ export class WeaponSystem {
         // 画面のどこに来るかは、この3つの数字と下のscaleでほぼ決まる。
         // 目分量で置くと枠から出るので、投影して測った上で詰めてある
         // （tools/check-weapons.mjs の[3.6]がその測定）。
-        // kが0の間は画面の下に沈めておいて、持つと同時に持ち上がる形にする
+        // kが0の間は画面の下に沈めておいて、持つと同時に持ち上がる形にする。
+        //
+        // zは-0.30だった。手に持ちきった所で目から25cmしか離れておらず、
+        // ライフルを支える手が36cm先にあるのと比べて近すぎた。
+        // -0.38にして33cmへ送ってある（縮尺も1.35→1.18）
         this.bandage.position.set(
           0.048 - k * 0.014 + this.swayX * 0.5,
           -0.200 + k * 0.154 + breath + this.swayY * 0.5,
-          -0.30 + k * 0.05,
+          -0.38 + k * 0.05,
         );
         // 手首のひねり。往復させる。
         //
@@ -3101,7 +3126,7 @@ export class WeaponSystem {
         // 帯そのものは回してよい。ほどけていく物なので、増え続ける値が正しい。
         // 回るのはこの roll だけで、手は上の往復しかしない
         if (this.bandage.userData.roll) this.bandage.userData.roll.rotation.x = spin * 1.6;
-        this.bandage.scale.setScalar(1.35 * (0.72 + k * 0.28));
+        this.bandage.scale.setScalar(1.18 * (0.72 + k * 0.28));
       }
     }
     const lower = Math.max(reloadT, switchT, this._healBlend);

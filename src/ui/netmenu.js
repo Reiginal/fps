@@ -5,7 +5,7 @@
 const $ = (id) => document.getElementById(id);
 
 // 前回の入力を覚えておく口。遊ぶたびに名前を打ち直させない
-const SAVE = { name: 'blackout.name' };
+const SAVE = { name: 'blackout.name', full: 'blackout.fullscreen' };
 
 // 繋がらなかった時の文言。「エラー」とだけ出すと、遊ぶ側に打つ手が無くなる。
 // 統合側はsetStatusにこれを渡す
@@ -32,14 +32,24 @@ export class NetMenu {
       root: $('netmenu'),
       name: $('nmName'),
       status: $('nmStatus'), solo: $('nmSolo'), join: $('nmJoin'),
+      full: $('nmFull'),
     };
 
     // 統合側が差し替える。初期値を空関数にしておくと、繋ぎ忘れても画面が落ちない
     this.onSolo = () => {};
     this.onJoin = () => {};
+    // 全画面の入り切りが変わった時に統合側へ知らせる口。
+    // 押した時点で伝えるのは、遊び始める前に切り替えたぶんを反映させるため
+    this.onFullscreen = () => {};
     this.busy = false;
 
     this.el.name.value = load(SAVE.name, '');
+    // 覚えていない時は入りにする。全画面のほうがCtrl+Wを止められるので既定はこちら
+    this.el.full.checked = load(SAVE.full, '1') !== '0';
+    this.el.full.onchange = () => {
+      save(SAVE.full, this.el.full.checked ? '1' : '0');
+      this.onFullscreen(this.el.full.checked);
+    };
 
     // addEventListenerではなく代入で持つ。DOMはindex.html側に1組しかないので、
     // 2回作られた時に古い方の処理まで動いて二重に始まるのを防ぐ
@@ -79,6 +89,9 @@ export class NetMenu {
     this.el.status.textContent = text || '';
     this.el.status.classList.toggle('bad', !!isError);
   }
+
+  /** 全画面で遊ぶ設定になっているか。統合側が起動時に読む */
+  get fullscreen() { return !!this.el.full.checked; }
 
   /** 接続中はボタンを止める。連打されると同じ部屋へ何本も繋ぎにいく */
   setBusy(on) {

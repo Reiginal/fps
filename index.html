@@ -440,6 +440,16 @@
   .field input:focus { outline: none; border-color: var(--accent); background: rgba(99,210,255,.07); }
   .hint { font-size: 10px; line-height: 1.7; color: var(--dim); margin-top: 5px; }
 
+  /* 入り切りのつまみ。文字の側を押しても切り替わるようlabelで包んである
+     （13pxの四角だけが当たり判定だと、狙って押させることになる） */
+  .check {
+    display: flex; align-items: center; gap: 8px; margin-top: 12px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
+    color: var(--hud); cursor: pointer; user-select: none;
+  }
+  .check input { width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; }
+  #netmenu.busy .check { opacity: .45; pointer-events: none; }
+
   /* つまみ。作った側が音を聴けないので、聴ける側が直接回せる場所を用意する。
      ここが無いと「作る→聴いてもらう→駄目→また作る」を延々やることになる */
   .linkbtn {
@@ -842,6 +852,15 @@
     <div class="field">
       <label class="label" for="nmName">名前</label>
       <input id="nmName" type="text" maxlength="12" autocomplete="off" spellcheck="false">
+    </div>
+
+    <label class="check" for="nmFull">
+      <input id="nmFull" type="checkbox" checked>
+      <span>全画面で遊ぶ</span>
+    </label>
+    <div class="hint">
+      切ると窓のまま遊べます（別のタブを見に行きたい時に）。<br>
+      そのかわりWindowsでは、しゃがみながらWを押すとタブが閉じることがあります。
     </div>
 
     <div id="nmStatus"></div>
