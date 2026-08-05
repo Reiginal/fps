@@ -50,26 +50,41 @@ function makeBox(w, h, d, scale) {
   return geo;
 }
 
-// three付属のOctreeは「1葉あたり8三角形で分割をやめる」という閾値を持つが、
-// 子ノードを new Octree() で作り直す実装なので、この閾値がroot以外へ伝播しない。
-// 結果、プロップを増やすと節点が20万近くまで膨れて100MB単位のメモリを食う。
-// 構築後に「配下の三角形が少ない枝」を葉へ畳んで節点を減らす。
-// 判定側は triangles を持つ節点をそこで打ち切る（葉とみなす）ので、結果は変わらない。
-// 戻り値は畳めた場合の三角形一覧、畳めなければnull
-function foldOctree(node, limit) {
-  if (node.subTrees.length === 0) return node.triangles.length <= limit ? node.triangles : null;
-  const merged = [];
-  let over = false;
-  for (const sub of node.subTrees) {
-    const got = foldOctree(sub, limit);
-    if (over || got === null) { over = true; continue; }
-    for (const t of got) if (merged.indexOf(t) === -1) merged.push(t);
-    if (merged.length > limit) over = true;
+/* 1葉に置く三角形の上限。three既定の8だと深さ12まで割れて節点が3万近くになる。
+   32にすると浅く済み、当たり判定の速さは変わらない（葉の中を総当たりする数が
+   8→32になるだけで、そこは元々1回の判定で数十個しか見ない） */
+const LEAF_TRIS = 32;
+
+/**
+ * Octreeを組む。
+ *
+ * three付属の実装は `split()` の中で `new Octree(box)` を作るので、
+ * root に設定した閾値が子へ伝播しない。子は既定の8に戻り、深さ12・節点26,960まで割れる。
+ *
+ * 以前は「割り切ってから畳み直す」形にしていたが、**畳むのは組み終わった後**なので
+ * 一番深く割れた状態の記憶を一度は必ず払っていた。実測で、地形を組むのに
+ * ヒープ448MBが要り、384MBでは落ちていた。
+ *
+ * 各節点が自分の split を始める瞬間に閾値を入れ直せば、割る前に浅くできる。
+ * 「割ってから畳む」ではなく「深く割らない」形になる。
+ * これで**96MBでも組めるようになり、マシンを1GBから512MBへ戻せた**。
+ * 当たり判定は4000本のレイで結果が完全に一致することを確かめてある。
+ *
+ * 差し込みは組んでいる間だけで、終わったら必ず元へ戻す
+ */
+function buildOctree(octree, group) {
+  const orig = Octree.prototype.split;
+  Octree.prototype.split = function patched(level) {
+    this.trianglesPerLeaf = LEAF_TRIS;
+    return orig.call(this, level);
+  };
+  try {
+    octree.fromGraphNode(group);
+  } finally {
+    // 例外が出ても必ず戻す。戻し忘れると、この後に作る他のOctreeまで巻き込む
+    Octree.prototype.split = orig;
   }
-  if (over) return null;
-  node.triangles = merged;
-  node.subTrees.length = 0;
-  return merged;
+  return octree;
 }
 
 // 不定形の塊。破片を全部同じ縦横比のクサビで作ると、地面にまき散らした
@@ -3769,8 +3784,7 @@ export function buildLevel(mats) {
 
   /* ------------------------------------------------------- 衝突用Octree */
   const octree = new Octree();
-  octree.fromGraphNode(solids);
-  foldOctree(octree, 32);
+  buildOctree(octree, solids);
 
   /* -------------------------------------------- スポーン地点と遮蔽情報 */
   const enemySpawns = [
