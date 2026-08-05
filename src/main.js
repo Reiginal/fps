@@ -831,6 +831,9 @@ class Game {
     // 発言の中身は誰が言ったかを名前で運ぶので、自分の名前を覚えておく。
     // idで比べたいところだが、抜けた人の発言を残すために名前で運んでいる
     this._myName = name;
+    // エラーを送る時に名前も載せる。誰の画面で起きたかが分からないと、
+    // 遊んでいた人に聞き直す所からやり直しになる
+    if (this.diag) this.diag.name = name;
     this.chat.clear();
     this.chat.show();
     // 前の顔ぶれを忘れてから入る。持ち越すと、2回目に入った時に
@@ -1730,13 +1733,14 @@ class Game {
        自分が先頭なら2番手と比べる（自分と自分を比べても差が分からない） */
     let mine = 0;
     let theirs = 0;
-    const others = [];
+    let leader = '';
     for (const [id, r] of net.players) {
-      if (id === net.id) mine = r.rounds | 0;
-      else others.push(r.rounds | 0);
+      if (id === net.id) { mine = r.rounds | 0; continue; }
+      const n = r.rounds | 0;
+      // 先頭の名前も持つ。3人以上いる時、王手なのが誰かを名指しで出すのに要る
+      if (n > theirs || !leader) { theirs = Math.max(theirs, n); if (n >= theirs) leader = r.name || ''; }
     }
-    if (others.length) theirs = Math.max(...others);
-    this.hud.matchInfo(mine, theirs, MATCH.ROUND_WINS, net.phase, net.timeLeft);
+    this.hud.matchInfo(mine, theirs, MATCH.ROUND_WINS, net.phase, net.timeLeft, leader);
     this.hud.roster(net.scoreRows());
     this.hud.scoreboard(net.scoreRows(), input.down('Tab'));
     this.hud.netStatus(net.ping > 220 ? `回線が不安定です (${Math.round(net.ping)}ms)` : '');
