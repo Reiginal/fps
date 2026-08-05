@@ -93,6 +93,9 @@ export class NetMenu {
   /** 全画面で遊ぶ設定になっているか。統合側が起動時に読む */
   get fullscreen() { return !!this.el.full.checked; }
 
+  /** 入力欄の名前。1人で遊ぶ時は必須ではないので、空のこともある */
+  get playerName() { return this.el.name.value.trim(); }
+
   /** 接続中はボタンを止める。連打されると同じ部屋へ何本も繋ぎにいく */
   setBusy(on) {
     this.busy = !!on;

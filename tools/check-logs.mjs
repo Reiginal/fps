@@ -138,12 +138,46 @@ console.log('\n[10] 拾っているのは「たまにしか起きない物」だ
     const text = String(src(new URL(`../${f}`, import.meta.url)));
     for (const m of text.matchAll(/logs\.add\(\s*'([a-z]+)'/g)) kinds.add(m[1]);
   }
+  // 遊ぶ側から送られてくる種類は、名前を直に書かず REPORT_KINDS が決めている。
+  // 本文の走査だけだと見落とすので、そちらも足して数える
+  const { REPORT_KINDS } = await import('../server/report.js');
+  for (const k of REPORT_KINDS) kinds.add(k);
+
   // 毎フレーム・毎発砲で起きる物の名前。ここに載っている名前で拾い始めたら落とす
   const TOO_OFTEN = ['shot', 'fire', 'move', 'input', 'tick', 'pos', 'hit', 'frame'];
   const busted = [...kinds].filter((k) => TOO_OFTEN.includes(k));
   ok(busted.length === 0, `毎秒何十回も起きる物を拾っていない (${[...kinds].join(', ')})`);
   ok(kinds.has('error'), 'エラーは拾っている');
   ok(kinds.has('boot'), '起動の印を残している（ログが消えた境目が読める）');
+}
+
+console.log('\n[11] 1人プレイも残る');
+// **1人プレイはサーバーに一度も繋がらない。**
+// 敵も地形も得点も全部ブラウザの中で動いていて、通信が発生しないので、
+// 何もしなければどれだけ遊んでもサーバー側には1行も残らない。
+// 実際に遊んだ後でログを見て「1件も無い、壊れている？」となった。
+//
+// 遊ぶ側(diag.js)が /report を通して送る作りにしてあるので、
+// 送る側と受ける側の両方が生きていることを見る
+{
+  const src = await import('node:fs').then((m) => m.readFileSync);
+  const diag = String(src(new URL('../src/ui/diag.js', import.meta.url)));
+  const main = String(src(new URL('../src/main.js', import.meta.url)));
+  ok(/event\s*\(message/.test(diag), '遊ぶ側に、エラー以外を送る口がある');
+  ok(/kind:\s*'solo'/.test(diag), 'その口が solo として送っている');
+  // 口を増やしていないこと。増やすと連投の見張りと長さの上限を2度書くことになる
+  const posts = [...diag.matchAll(/fetch\('([^']+)'/g)].map((m) => m[1]);
+  ok(
+    posts.every((u) => u === '/report'),
+    `送り先が /report だけ (${[...new Set(posts)].join(', ')})`,
+  );
+  ok(/diag\.event\('遊び始めた'\)/.test(main), '1人で遊び始めた所で送っている');
+  ok(/diag\?\.event\('力尽きた'/.test(main), '倒れた所でも送っている（どこまで行ったかが残る）');
+  // 対戦では送らない。サーバーが全部知っているので、二重に残るだけ
+  ok(/mode === 'solo'/.test(main), '対戦では送っていない');
+
+  const { REPORT_KINDS } = await import('../server/report.js');
+  ok(REPORT_KINDS.includes('solo'), '受ける側も solo を受け付ける');
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);

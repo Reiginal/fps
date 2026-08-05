@@ -19,7 +19,9 @@ import { WebSocketServer } from 'ws';
 import { buildWorld } from './world.js';
 import { getRoom } from './room.js';
 import { publicPath } from './serve-rules.js';
-import { ReportLimiter, reportLine, REPORT_BODY_MAX, stripControl } from './report.js';
+import {
+  ReportLimiter, reportLine, reportRecord, REPORT_BODY_MAX, stripControl,
+} from './report.js';
 import { logs, canViewLogs, isLocal, renderPage } from './logs.js';
 import { WEAPONS, weaponsSource } from './sim.js';
 import {
@@ -154,18 +156,15 @@ async function handleReport(req, res) {
     if (body.length > REPORT_BODY_MAX) { res.writeHead(413).end('too big'); return; }
   }
 
-  const line = reportLine(body);
-  if (!line) { res.writeHead(400).end('bad'); return; }
-  console.warn(line);
-  // 表にも積む。console.warnは流れて消えるので、後から見に行けない。
-  // 中身をもう一度読み直しているのは、reportLineが人向けの1行しか返さないため
-  // （文章から名前や場所を切り出すと、名前に記号が入っただけで壊れる）
-  try {
-    const m = JSON.parse(body);
-    logs.add('error', {
-      name: m.name || '名無し', message: m.message, where: m.where, ua: m.ua,
-    });
-  } catch { /* reportLineが通った物なので普通はここへ来ない */ }
+  const rec = reportRecord(body);
+  if (!rec) { res.writeHead(400).end('bad'); return; }
+  // 流れる方と、後から読める方の両方へ出す。
+  // console.warnは`flyctl logs`で今しか見られないので、表にも積む
+  console.warn(reportLine(body));
+  logs.add(rec.kind, {
+    name: rec.name, message: rec.message, where: rec.where, ua: rec.ua,
+    wave: rec.wave, kills: rec.kills, score: rec.score,
+  });
   res.writeHead(204).end();
 }
 

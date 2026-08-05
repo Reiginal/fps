@@ -766,6 +766,11 @@ class Game {
       // その起動画面が押されないまま隠れて、音が一度も初期化されないまま遊ぶことになる。
       // ボタンを押した流れそのものが操作なので、ここで起こしてよい
       this._wakeAudio();
+      // 1人プレイはこの後サーバーと一度も会話しないので、
+      // ここで送っておかないと**遊んだ事実がどこにも残らない**。
+      // 名前は対戦と違って必須ではないので、入っていなければ名無しになる
+      this.diag.name = menu.playerName || '';
+      this.diag.event('遊び始めた');
       this._enterSolo();
       menu.hide();
       // 選んだ直後にロックを取らないと、画面が固まったように見える
@@ -1059,6 +1064,13 @@ class Game {
     this.deathT = 0;
     document.exitPointerLock?.();
     this.audio.playerDown();
+    // 1人プレイの結果を残す。対戦はサーバーが全部知っているので送らない。
+    // どこまで行ったかが分かると、「3波で必ず落ちる」のような形に辿り着ける
+    if (this.mode === 'solo') {
+      this.diag?.event('力尽きた', {
+        wave: this.director.wave, kills: this.kills, score: this.score,
+      });
+    }
     // すぐ結果を出さない。倒れる間を見せてから出す。
     // 260msで切り替えていた頃は、撃たれた次の瞬間に文字が出ていて、
     // 何が起きて死んだのかを見る時間が無かった
