@@ -11,7 +11,7 @@
    スナップショットの状態ビットから同じ形を作る。 */
 
 import * as THREE from 'three';
-import { S } from './protocol.js';
+import { S, characterAt } from './protocol.js';
 import { Enemy } from '../ai/enemy.js';
 
 const TAU = Math.PI * 2;
@@ -81,6 +81,12 @@ export class RemotePlayers {
   /* net.stateAt()の結果をそのまま渡す。dtは持たないので自前で測る
      （呼ぶ側のフレーム時間と一致していなくても、歩調が少しずれるだけで破綻しない）。
      viewPosを渡すと、遠くの相手の細部を落とす */
+  /**
+   * 誰がどの見た目を選んだかを渡す。id -> 番号 のMap。
+   * 統合側が毎フレーム渡すのではなく、変わった時だけ入れ替える
+   */
+  setChars(map) { this._chars = map; }
+
   sync(states, myId, viewPos = null) {
     const t = now();
     const dt = this._last ? clamp((t - this._last) / 1000, 0, 0.1) : 1 / 60;
@@ -91,7 +97,7 @@ export class RemotePlayers {
       if (st.id === myId) continue;      // 自分は描かない。一人称の腕が既にある
       seen.add(st.id);
       let slot = this.slots.get(st.id);
-      if (!slot) { slot = this._spawn(st); this.slots.set(st.id, slot); }
+      if (!slot) { slot = this._spawn(st, this._chars?.get(st.id) | 0); this.slots.set(st.id, slot); }
       this._apply(slot, st, dt, viewPos);
     }
     // 消えた相手は残さない。抜け殻が立ち続けるより消える方が嘘が小さい
@@ -136,10 +142,17 @@ export class RemotePlayers {
 
   /* ------------------------------------------------------------ 中身 */
 
-  _spawn(st) {
-    let e = this._pool.pop();
+  /* chrは選ばれた見た目の番号。
+     使い回しの入れ物は、姿を組み上げた時の種を持ったままなので、
+     **番号が違う物を使い回すと別人の姿で出てくる。**
+     同じ番号の物だけを探し、無ければ新しく組む。
+     人数は最大8人で選べる姿も数種類なので、作られる数はたかが知れている */
+  _spawn(st, chr = 0) {
+    const seed = characterAt(chr).seed;
+    const at = this._pool.findIndex((x) => x.variant?.seed === seed);
+    let e = at >= 0 ? this._pool.splice(at, 1)[0] : null;
     if (!e) {
-      e = new Enemy(this.level);
+      e = new Enemy(this.level, { seed });
       this.scene.add(e.root);
       // 足元の暗がりはrootの子にすると倒れた時に一緒に回るのでシーン直下に置く
       this.scene.add(e.blob);

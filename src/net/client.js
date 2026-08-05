@@ -243,9 +243,18 @@ export class NetClient {
         break;
       // ロビーの中身。届いた物をそのまま渡す。
       // ここで席の絵を組み立てないのは、通信の層が画面の都合を持たないため
-      case Sv.LOBBY:
-        this._emit(this.onLobby, { rows: Array.isArray(m.rows) ? m.rows : [], why: m.why || '' });
+      case Sv.LOBBY: {
+        const rows = Array.isArray(m.rows) ? m.rows : [];
+        // 見た目の番号だけはここで拾って覚えておく。
+        // 試合が始まると、相手の姿を組むのに要るのはこの番号で、
+        // ロビーの電文はもう飛んでこない
+        for (const r of rows) {
+          const row = this._touchPlayer({ id: r[0], name: r[1] });
+          if (row) row.chr = r[5] | 0;
+        }
+        this._emit(this.onLobby, { rows, why: m.why || '' });
         break;
+      }
       // 往復を測るのはサーバー。こちらは即返すことだけが仕事
       case Sv.PING: this._send({ t: C.PONG, id: m.id }); break;
       case Sv.FULL: this._fail(m.why || '満員'); break;
@@ -281,7 +290,8 @@ export class NetClient {
     const id = Array.isArray(p) ? p[0] : p.id;
     if (id == null) return null;
     let row = this.players.get(id);
-    if (!row) { row = { name: '', kills: 0, deaths: 0, ping: 0, rounds: 0 }; this.players.set(id, row); }
+    // chrは選んだ見た目の番号。既定は0番で、ロビーの電文が来たら上書きされる
+    if (!row) { row = { name: '', kills: 0, deaths: 0, ping: 0, rounds: 0, chr: 0 }; this.players.set(id, row); }
     const name = Array.isArray(p) ? p[1] : p.name;
     // 送る時と同じ長さで詰める。長い名前がそのまま来ると名札が画面を横切る
     if (typeof name === 'string' && name) row.name = name.slice(0, 24);
@@ -289,6 +299,7 @@ export class NetClient {
       if (typeof p.kills === 'number') row.kills = p.kills;
       if (typeof p.deaths === 'number') row.deaths = p.deaths;
       if (typeof p.ping === 'number') row.ping = p.ping;
+      if (typeof p.chr === 'number') row.chr = p.chr | 0;
     }
     return row;
   }
@@ -585,6 +596,12 @@ export class NetClient {
   sendReady(on) {
     if (!this.connected) return;
     this._send({ t: C.READY, r: on ? 1 : 0 });
+  }
+
+  /** 見た目を選ぶ。番号だけ送れば、相手の画面でも同じ姿が組み上がる */
+  sendChar(index) {
+    if (!this.connected) return;
+    this._send({ t: C.CHAR, i: index | 0 });
   }
 
   /** 発言する。長さも連投もサーバーが見るので、ここでは送るだけ */

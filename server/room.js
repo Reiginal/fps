@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { Capsule } from 'three/addons/math/Capsule.js';
 import {
   TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS, MATCH, PHASE, ZONE, NADE, outsideZone,
-  Sv, EV, packPlayer, SEATS_PER_TEAM, SEAT_SPAWN,
+  Sv, EV, packPlayer, SEATS_PER_TEAM, SEAT_SPAWN, CHARACTERS,
 } from '../src/net/protocol.js';
 import { SimPlayer, resolveShot, rewindMs, originVisible } from './sim.js';
 
@@ -119,6 +119,19 @@ export class Room {
     this._sendLobby();
   }
 
+  /**
+   * 見た目を選ぶ。試合が始まってからは変えられない。
+   * 途中で姿が変わると、撃っている相手が入れ替わったように見える
+   */
+  setChar(slot, index) {
+    if (this.phase !== PHASE.WAIT) return;
+    const i = index | 0;
+    if (i < 0 || i >= CHARACTERS.length) return;
+    if (slot.chr === i) return;
+    slot.chr = i;
+    this._sendLobby();
+  }
+
   /** 各チームに座っている人。[Aの人たち, Bの人たち] */
   _seated() {
     const teams = [[], []];
@@ -167,6 +180,7 @@ export class Room {
         s.team === null ? -1 : s.team,
         s.seat === null ? -1 : s.seat,
         s.ready ? 1 : 0,
+        s.chr | 0,
       ]);
     }
     return rows;
@@ -232,6 +246,9 @@ export class Room {
       // 準備完了。席に着いてから自分で押す。
       // 席を降りた時と、試合が終わって待ちへ戻った時に倒れる
       ready: false,
+      // 選んだ見た目（CHARACTERSの番号）。姿そのものは運ばず、番号だけ配る。
+      // 見た目に効くだけで、当たり判定にも足の速さにも一切効かない
+      chr: 0,
       sim: new SimPlayer(id, name, this.world),
       pending: new Map(),   // seq -> [bits, yaw, pitch]
       nextSeq: -1,          // 次に食わせるseq
@@ -310,6 +327,9 @@ export class Room {
         kills: s.sim.kills,
         deaths: s.sim.deaths,
         ping: Math.round(s.conn.rtt || 0),
+        // 見た目の番号。試合の途中で入ってきた人にも先客の姿が伝わるように、
+        // ここにも載せる（普段はロビーの電文で届く）
+        chr: s.chr | 0,
       });
     }
     return {

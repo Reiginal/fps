@@ -6,7 +6,7 @@
 // 押した瞬間に自分の画面だけ座らせると、埋まっていた席を押した時に
 // 「座れたように見えて座れていない」状態が残る。押したら送るだけにして、
 // 絵が変わるのは必ずサーバーから届いた後にする。
-import { SEATS_PER_TEAM, TEAM_NAME } from '../net/protocol.js';
+import { SEATS_PER_TEAM, TEAM_NAME, CHARACTERS } from '../net/protocol.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -21,6 +21,7 @@ export class Lobby {
       root: $('lobby'),
       why: $('lbWhy'),
       seats: [$('lbSeatsA'), $('lbSeatsB')],
+      chars: $('lbChars'),
       stand: $('lbStand'),
       leave: $('lbLeave'),
       standUp: $('lbStandUp'),
@@ -31,6 +32,9 @@ export class Lobby {
     this.onSeat = () => {};
     this.onLeave = () => {};
     this.onReady = () => {};
+    this.onChar = () => {};
+    // 自分が今どれを選んでいるか。印を付けるために持つ
+    this.myChar = 0;
 
     // 自分がどれかを知らないと、自分の席に印を付けられない
     this.myId = -1;
@@ -48,6 +52,27 @@ export class Lobby {
   /* 席のボタンは最初に1度だけ作る。
      届くたびに作り直すと、押そうとした瞬間にボタンが消えて空振りする */
   _build() {
+    // 見た目の候補。ここも最初に1度だけ作る
+    this.charEls = [];
+    this.el.chars.innerHTML = '';
+    CHARACTERS.forEach((c, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'lbchar';
+      // 色の四角と名前。名前はこちらが書いた固定の文字列なので、
+      // 発言や他人の名前と違って外から細工されることが無い
+      const sw = document.createElement('span');
+      sw.className = 'lbswatch';
+      sw.style.background = c.color;
+      const label = document.createElement('span');
+      label.textContent = c.name;
+      b.appendChild(sw);
+      b.appendChild(label);
+      b.onclick = () => this.onChar(i);
+      this.el.chars.appendChild(b);
+      this.charEls.push(b);
+    });
+
     this.seatEls = [[], []];
     for (let team = 0; team < 2; team++) {
       const box = this.el.seats[team];
@@ -105,8 +130,10 @@ export class Lobby {
       ? `まだ席にいない人: ${standing.map((p) => p.name).join('、')}`
       : '';
 
-    // 自分の行から、座っているか・準備を立てているかを読む
+    // 自分の行から、座っているか・準備を立てているか・どの見た目かを読む
     const me = rows.find((r) => r[0] === this.myId);
+    if (me && typeof me[5] === 'number') this.myChar = me[5] | 0;
+    this.charEls.forEach((b, i) => b.classList.toggle('on', i === this.myChar));
     const meSeated = !!me && (me[2] === 0 || me[2] === 1);
     this.meReady = !!me && !!me[4];
 

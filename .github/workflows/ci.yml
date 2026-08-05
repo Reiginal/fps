@@ -100,3 +100,6 @@ jobs:
 
       - name: 検査 発言
         run: node tools/check-chat.mjs
+
+      - name: 検査 キャラクター選択
+        run: node tools/check-character.mjs
