@@ -121,17 +121,18 @@ export class RemotePlayers {
   _applyWeapon(slot, index) {
     if (slot.weapon === index) return;
     slot.weapon = index;
-    const g = slot.enemy.parts.gun;
-    if (!g) return;
-    const def = WEAPONS[index];
-    // 近接と投擲は銃を持っていない。引っ込める
-    const hasGun = !!def && !def.melee && !def.thrown;
-    g.visible = hasGun;
-    // 散弾銃は短くて太い。同じ形のままだとライフルと見分けが付かない
-    if (hasGun) {
-      const short = index === 1;
-      g.scale.set(short ? 1.12 : 1, short ? 1.12 : 1, short ? 0.82 : 1);
-    }
+    const p = slot.enemy.parts;
+    if (!p.gun) return;
+    // 出るのは常に1つだけ。全部消してから1つ出す形にすると、
+    // 武器を足した時に消し忘れが起きない
+    const id = WEAPONS[index]?.id;
+    p.gun.visible = id === 'rifle';
+    if (p.gunShotgun) p.gunShotgun.visible = id === 'shotgun';
+    if (p.heldKnife) p.heldKnife.visible = id === 'knife';
+    if (p.heldNade) p.heldNade.visible = id === 'nade';
+    // 知らない武器が来たら、とりあえずライフルを出す。
+    // 何も出ないと素手で構えている絵になり、何を持っているのか読めない
+    if (!id) p.gun.visible = true;
   }
 
   get(id) {

@@ -1107,6 +1107,47 @@ function buildSoldier(v) {
   bag.add(box(0.028, 0.058, 0.028), M.glove, -0.030, 0.010, 0.018, 0, 0, -0.35);  // 親指
   bag.bake(handL);
 
+  /* 持ち替え用の見た目。対戦の相手が武器を変えた時に、こちらを出し入れする。
+     銃は材質ごとに1枚へ焼いてあって部分的に消せないので、別の塊として持つ。
+     どれも普段は隠してあり、同時に出るのは1つだけ。
+     （番号の届き方は protocol.js の packPlayer、出し分けは net/remote.js） */
+
+  // 散弾銃。同じ銃を縮めるだけだとライフルと区別が付かないので別に組む。
+  // 銃身が短く、下に太い先台と弾倉管が並ぶのが遠目でも効く特徴
+  const gunShotgun = new THREE.Group();
+  gunShotgun.rotation.copy(gun.rotation);
+  gunShotgun.visible = false;
+  gunMount.add(gunShotgun);
+  bag.at(MOUNT_X, 1.04 + MOUNT_Y, MOUNT_Z);
+  bag.origin(0, 0, -spec.buttZ);
+  bag.add(box(0.058, 0.090, 0.24), M.gun, 0, 0, -0.02);                          // 機関部
+  bag.add(box(0.046, 0.020, 0.14), M.gun, 0, 0.054, -0.04);                      // 上面
+  bag.add(cyl(0.020, 0.020, 0.34, 10), M.gun, 0, 0.008, -0.28, Math.PI / 2, 0, 0); // 銃身
+  bag.add(cyl(0.017, 0.017, 0.28, 8), M.gun, 0, -0.032, -0.26, Math.PI / 2, 0, 0); // 弾倉管
+  bag.add(cyl(0.040, 0.040, 0.13, 10), M.gunPoly, 0, -0.032, -0.20, Math.PI / 2, 0, 0); // 先台
+  bag.add(box(0.050, 0.120, 0.055), M.gunPoly, 0, -0.084, 0.060, -0.28, 0, 0);   // 握把
+  bag.add(box(0.055, 0.100, 0.20), M.gunPoly, 0, 0.006, 0.185);                  // 銃床
+  bag.add(box(0.060, 0.110, 0.026), M.gear, 0, 0.006, 0.295);                    // 床尾板
+  bag.bake(gunShotgun);
+
+  // ナイフ。右手の中に納める。銃を消しただけだと素手で構えている絵になり、
+  // 何で殺されたのかが読めない
+  const heldKnife = pivot(handR, 0, 0, 0);
+  heldKnife.visible = false;
+  bag.at(MOUNT_X + handR.position.x, 1.04 + MOUNT_Y + handR.position.y, MOUNT_Z + handR.position.z);
+  bag.add(box(0.022, 0.026, 0.10), M.gunPoly, 0, 0, 0.018);                      // 握り
+  bag.add(box(0.048, 0.012, 0.014), M.gun, 0, 0, -0.036);                        // 鍔
+  bag.add(box(0.010, 0.040, 0.17), M.gun, 0, 0.002, -0.128);                     // 刃
+  bag.bake(heldKnife);
+
+  // 手榴弾。丸い塊と安全レバー。輪郭が銃と正反対なので、遠目でも投げる姿勢が読める
+  const heldNade = pivot(handR, 0, 0, 0);
+  heldNade.visible = false;
+  bag.at(MOUNT_X + handR.position.x, 1.04 + MOUNT_Y + handR.position.y, MOUNT_Z + handR.position.z);
+  bag.add(new THREE.SphereGeometry(0.034, 10, 8), M.gear, 0, 0, -0.030);         // 弾体
+  bag.add(box(0.012, 0.048, 0.012), M.gun, 0.026, 0.012, -0.030);                // 安全レバー
+  bag.bake(heldNade);
+
   const muzzle = new THREE.Object3D();
   muzzle.position.set(0, 0, spec.muzzleZ - spec.buttZ);
   gun.add(muzzle);
@@ -1126,6 +1167,8 @@ function buildSoldier(v) {
     armL, armR, lowerL, lowerR,
     legL, legR, shinL, shinR, footL, footR,
     gun, gunMount, hands, handR, handL, muzzle,
+    // 持ち替えで出し入れする見た目。remote.jsが切り替える
+    gunShotgun, heldKnife, heldNade,
     headBone, chestTop, chestBot,
     wristR, wristL,
     mats: M,
