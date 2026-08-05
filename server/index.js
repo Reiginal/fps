@@ -20,6 +20,7 @@ import { buildWorld } from './world.js';
 import { getRoom } from './room.js';
 import { publicPath } from './serve-rules.js';
 import { ReportLimiter, reportLine, REPORT_BODY_MAX, stripControl } from './report.js';
+import { logs, canViewLogs, isLocal, renderPage } from './logs.js';
 import { WEAPONS, weaponsSource } from './sim.js';
 import {
   C, Sv, decode, encode, TIMEOUT_MS, CHAT_MAX, CHAT_GAP_MS,
@@ -27,6 +28,9 @@ import {
 
 const PORT = Number(process.env.PORT) || 8080;
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
+// 起動した時刻。ログの一覧に「起動から何分」を出すのに使う。
+// ログは記憶の中にしか無いので、この時刻より前の物はどこにも残っていない
+const BOOT_AT = Date.now();
 
 // 押しているキーは11ビットしか定義がない。それ以外のビットは捨てる。
 // protocol.jsのKを増やしたらここも広げること。忘れると増やしたキーだけ
@@ -77,11 +81,27 @@ async function serveStatic(req, res) {
        何回試してもらっても推測しか増えなかった。画面に出すだけでは
        本人が読み上げてくれない限り届かないので、こちらへ送らせる。
 
-       受け取った物は flyctl logs に出す。保存はしない。
-       溜める場所を作ると、置き場所と消し方の話が要るようになる */
+       受け取った物は flyctl logs へ出したうえで、logs.js の表にも積む。
+       流れて消える物だけだと、後から見に行けない */
     if (url === '/report') {
       if (req.method !== 'POST') { res.writeHead(405).end('post only'); return; }
       await handleReport(req, res);
+      return;
+    }
+
+    /* 溜めた出来事を読む口。ブラウザで開いて読む。
+       鍵(LOG_KEY)を入れていない間は手元からしか見えない（logs.jsのcanViewLogs）。
+       本番で見たい時は flyctl secrets set LOG_KEY=... を1度打つ。
+       見えない時に404を返すのは、口の存在そのものを外へ出さないため */
+    if (url === '/logs') {
+      const key = String(process.env.LOG_KEY || '');
+      const given = new URL(req.url, 'http://x').searchParams.get('k') || '';
+      if (!canViewLogs({ key, given, local: isLocal(req) })) {
+        res.writeHead(404).end('not found');
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(renderPage(logs.recent(), Date.now(), BOOT_AT));
       return;
     }
     // 部屋の一覧を返す口は閉じてある。合言葉で部屋を分けていた頃、
@@ -137,6 +157,15 @@ async function handleReport(req, res) {
   const line = reportLine(body);
   if (!line) { res.writeHead(400).end('bad'); return; }
   console.warn(line);
+  // 表にも積む。console.warnは流れて消えるので、後から見に行けない。
+  // 中身をもう一度読み直しているのは、reportLineが人向けの1行しか返さないため
+  // （文章から名前や場所を切り出すと、名前に記号が入っただけで壊れる）
+  try {
+    const m = JSON.parse(body);
+    logs.add('error', {
+      name: m.name || '名無し', message: m.message, where: m.where, ua: m.ua,
+    });
+  } catch { /* reportLineが通った物なので普通はここへ来ない */ }
   res.writeHead(204).end();
 }
 
@@ -214,8 +243,10 @@ wss.on('connection', (ws) => {
     try {
       onMessage(conn, raw);
     } catch (e) {
-      // 1人の電文で全員の試合を落とさない。捨てて次を待つ
+      // 1人の電文で全員の試合を落とさない。捨てて次を待つ。
+      // ここは黙って捨てる道なので、残しておかないと起きたことすら分からない
       console.warn(`[net] 電文の処理で例外: ${e && e.message}`);
+      logs.add('net', { message: e && e.message, who: conn.slot?.name });
     }
   });
   ws.on('error', () => { /* 切断の副産物。closeで片付く */ });
@@ -283,6 +314,7 @@ function onJoin(conn, m) {
   // まだ受け口を繋いでいないので、先にいた人が誰も映らないまま始まる
   room.sendLobby();
   console.log(`[net] ${name} が入った (${room.slots.size}人)`);
+  logs.add('join', { name, count: room.slots.size });
 }
 
 function onInput(conn, m) {
@@ -537,6 +569,10 @@ server.listen(PORT, async () => {
   // 武器の出どころは必ず出す。退避表で走っていることに気づかないまま
   // 「ダメージが本番と違う」を追いかけるのが一番時間を溶かす
   console.log(`[sim] 武器の表: ${weaponsSource}（${WEAPONS.map((w) => w.id).join(', ')}）`);
+  // 起動の印を1件目に置く。ログは記憶の中にしか無いので、
+  // デプロイのたびに全部消える。**その境目がどこかを表の上で分かるようにしておく**。
+  // これが無いと「静かだ」なのか「さっき消えた」なのかが読めない
+  logs.add('boot', { weapons: weaponsSource, port: PORT });
 
   const lan = await lanAddress();
   console.log('\n  BLACKOUT');
