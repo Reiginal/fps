@@ -7,6 +7,7 @@
 //
 //   node tools/check-character.mjs
 import '../server/dom-stub.js';
+import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { CHARACTERS, characterAt } from '../src/net/protocol.js';
 
@@ -86,6 +87,21 @@ console.log('\n[5] 知らない番号が来ても姿が消えない');
 ok(characterAt(-1) === CHARACTERS[0], '負の番号は0番へ寄せる');
 ok(characterAt(999) === CHARACTERS[0], '大きすぎる番号も0番へ寄せる');
 ok(characterAt(undefined) === CHARACTERS[0], '番号が無くても0番になる');
+
+console.log('\n[6] ロビーの3Dが、試合中も描き続けないか');
+// 止め忘れると、遊んでいる裏で2つ目の場面をずっと描くことになる。
+// 画面を見ても気づけない（絵は隠れている）のに、パソコンだけ熱くなる。
+// ロビーを畳む場所は複数あるので、そのどれからも止まることを文字で確かめる
+{
+  const src = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  const hides = (src.match(/lobby\.hide\(\)/g) || []).length;
+  const stops = (src.match(/charView\?\.stop\(\)/g) || []).length;
+  ok(hides > 0, `ロビーを畳む場所が${hides}箇所ある`);
+  ok(stops >= hides, `そのどれでも3Dを止めている（止める記述 ${stops}箇所）`);
+  // 描く側も、止まっている間は何もしないこと
+  const view = readFileSync(new URL('../src/ui/charview.js', import.meta.url), 'utf8');
+  ok(/if \(!this\.running/.test(view), '止まっている間は描かない');
+}
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);

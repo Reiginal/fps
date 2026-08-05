@@ -105,17 +105,31 @@ export class Input {
    * ESCを押した時に全画面と掴みの両方が外れるのは、ブラウザ側がそう作っている
    */
   requestLock() {
-    // 全画面はマウスを掴むより先に頼む。逆にすると、全画面へ移る時の
-    // 画面の作り直しで掴みが外れることがある
-    if (!document.fullscreenElement) {
-      // 失敗しても遊べるので、断られたことは黙って受ける
-      document.documentElement.requestFullscreen?.({ navigationUI: 'hide' })
-        .then(() => this._lockKeyboard())
-        .catch(() => this._lockKeyboard());
-    } else {
-      this._lockKeyboard();
-    }
+    // ここでも一応頼むが、**これだけでは足りない。**
+    //
+    // 全画面はブラウザが「人が押した直後」しか許さない。
+    // 対戦で試合が始まるのはサーバーから知らせが届いた時なので、
+    // そこから頼んでも断られる。まさに友達が遊ぶ場面で全画面にならず、
+    // キーボードも借りられず、Ctrl+Wでタブが閉じるのが残っていた。
+    //
+    // なので、ボタンを押した時点で goFullscreen() を呼んでおく形にした。
+    // 既に全画面なら、ここはキーボードを借り直すだけで済む
+    this.goFullscreen();
     this.dom.requestPointerLock?.();
+  }
+
+  /**
+   * 全画面にしてキーボードを借りる。**必ずクリックの中から呼ぶこと。**
+   *
+   * 通信の知らせやタイマーから呼んでも、ブラウザは全画面を断る。
+   * 断られたら黙って受ける（全画面でなくても遊べる。Ctrl+Wだけ残る）
+   */
+  goFullscreen() {
+    if (document.fullscreenElement) { this._lockKeyboard(); return; }
+    const p = document.documentElement.requestFullscreen?.({ navigationUI: 'hide' });
+    // 対応していないブラウザは何も返さないので、その時は素通り
+    if (!p?.then) { this._lockKeyboard(); return; }
+    p.then(() => this._lockKeyboard()).catch(() => this._lockKeyboard());
   }
 
   /* キーボードを丸ごと借りる。Ctrl+WとCtrl+Tまで手元に来る。

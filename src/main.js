@@ -14,6 +14,8 @@ import { HUD } from './ui/hud.js';
 import { NetMenu, NET_MSG } from './ui/netmenu.js';
 import { Lobby } from './ui/lobby.js';
 import { Chat } from './ui/chat.js';
+import { Diag } from './ui/diag.js';
+import { CharView } from './ui/charview.js';
 import { NetClient } from './net/client.js';
 import { RemotePlayers } from './net/remote.js';
 import {
@@ -724,13 +726,23 @@ class Game {
     // 座れたかどうかを手元で決めないので、ここでは絵を書き換えない
     const lobby = new Lobby();
     this.lobby = lobby;
+    // ロビーで何か押されたら全画面へ入り直す。選択画面で断られていても、
+    // ここでもう一度頼める。試合が始まってからでは断られる
+    lobby.onPress = () => this.input.goFullscreen();
     lobby.onSeat = (team, seat) => this.net?.sendSeat(team, seat);
     lobby.onReady = (on) => this.net?.sendReady(on);
+    // 選んでいる兵士を3Dで見せる。ロビーにいる間だけ描く
+    this.charView = new CharView(document.getElementById('lbView'));
     lobby.onChar = (i) => {
       // 選んだ物は覚えておく。毎回選び直させると、決まっている人ほど面倒になる
       saveChar(i);
+      this.charView.select(i);
       this.net?.sendChar(i);
     };
+
+    // 何かがおかしい時だけ手掛かりを出す入れ物。
+    // 遠くの人に遊んでもらった時、こちらに情報が返ってこないのを直すためにある
+    this.diag = new Diag();
 
     // 発言。ロビーでも試合中でも同じ物を使う
     const chat = new Chat();
@@ -751,6 +763,12 @@ class Game {
     };
     menu.onJoin = (opt) => {
       this._wakeAudio();
+      // ここで全画面に入っておく。
+      // 試合が始まるのはサーバーからの知らせが起点で、そこからでは
+      // ブラウザが全画面を断る（人が押した直後しか許されない）。
+      // 押したこの瞬間だけが頼めるタイミングで、ここを逃すと
+      // 対戦の最中ずっと全画面にならず、Ctrl+Wでタブが閉じる形が残る
+      this.input.goFullscreen();
       this._joinMatch(opt);
     };
     menu.show();
@@ -820,7 +838,10 @@ class Game {
     this._lobbyIds = null;
     // 前に選んだ見た目をサーバーへ伝える。伝えないと、覚えていても
     // 相手からは既定の姿に見える（サーバーは0番のまま持っている）
-    net.sendChar(loadChar());
+    const myChar = loadChar();
+    net.sendChar(myChar);
+    this.charView.select(myChar);
+    this.charView.start();
     // 繋がっただけでは操作を握らない。ここでロックを取ると、席を選ぶ前に
     // マウスが画面へ吸われて、ロビーのボタンが押せなくなる
     this.lobby.show(net.id);
@@ -853,12 +874,17 @@ class Game {
         this.state = 'menu';
         document.exitPointerLock?.();
         this.lobby.show(this.net?.id ?? -1);
+        // 試合が終わってロビーへ戻された。3Dも動かし直す
+        this.charView?.start();
       }
       return;
     }
     // 始まった。席の画面を畳んで操作を握る
     if (this.lobby.isOpen) {
       this.lobby.hide();
+      // ロビーの3Dを止める。止め忘れると、遊んでいる裏で2つ目の場面を
+      // 描き続けることになって、そのぶんパソコンが熱くなる
+      this.charView?.stop();
       this.input.requestLock();
     }
   }
@@ -888,6 +914,9 @@ class Game {
     // 出たままなので、どちらも畳んでから選択画面を出す
     this.hud.hideOverlay();
     this.lobby.hide();
+    // ロビーの3Dを止める。止め忘れると、遊んでいる裏で2つ目の場面を
+    // 描き続けることになって、そのぶんパソコンが熱くなる
+    this.charView?.stop();
     this.chat.hide();
     this.state = 'menu';
     document.exitPointerLock?.();
@@ -2016,6 +2045,14 @@ class Game {
       // 対戦では倒れている間の操作を受け付けない。復帰待ちの3秒に装填や持ち替えを
       // 通すと、湧いた瞬間の弾数がサーバーと食い違う
       const canAct = this.mode !== 'versus' || this.player.alive;
+      /* 効かない時は、なぜ効かないかを画面に出す。
+         ここが黙って効かなくなるのが一番たちが悪い。
+         包帯・リロード・武器の切り替えが全部この1つで止まるので、
+         遊ぶ側からは「3つ同時に壊れた」ようにしか見えない。
+         実際にWindowsの人から報告された症状のうち3件がこの形だった */
+      this.diag?.setState(
+        canAct ? '' : '倒れている間は、包帯・リロード・武器の切り替えが使えません',
+      );
       // 包帯はFで手に持つだけ。巻き始めるのは左クリックで、そちらはweapons側が見る。
       // 押した瞬間に巻き始める形をやめたのは、巻いている2.4秒は移動が半分以下に
       // 落ちるので、指が滑って始まった時の代償が大きすぎるため
@@ -2077,6 +2114,8 @@ class Game {
     // 発言の行を古くしていく。遊んでいてもいなくても時間は進むので、
     // どちらの道からも同じだけ薄くなるようここに置く
     this.chat?.update(dt);
+    // ロビーの3D。start()されている間だけ描く
+    this.charView?.update(dt);
 
     // 空はカメラに追従させる（遠景として固定して見せる）
     this.sky.position.copy(this.camera.position);
