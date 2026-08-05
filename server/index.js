@@ -378,8 +378,13 @@ function onWeapon(conn, m) {
 function onSeat(conn, m) {
   const slot = conn.slot;
   if (!slot) return;
-  if (!isNum(m.tm) || !isNum(m.st)) return;
-  conn.room.takeSeat(slot, Math.round(m.tm), Math.round(m.st));
+  // ここは長い間 m.tm（チーム番号）も必須にしていた。
+  // チーム制をやめた時にクライアントは送るのをやめたが、こちらは要求したままで、
+  // **席に着く要求が毎回ここで捨てられていた**（座れないので対戦が始まらない）。
+  // 捨てる側は黙って捨てるので、遊ぶ側からは「押しても何も起きない」としか見えない。
+  // tools/check-protocol.mjs が、送る側と受ける側の食い違いを見張る
+  if (!isNum(m.st)) return;
+  conn.room.takeSeat(slot, Math.round(m.st));
 }
 
 // 発言。人が読む文字列をそのまま他人の画面へ流すので、ここが一番危ない口になる。
