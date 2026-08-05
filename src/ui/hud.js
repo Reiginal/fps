@@ -494,9 +494,20 @@ export class HUD {
    *   phase       … protocol.jsのPHASE
    *   left        … 今の局面の残り秒
    */
-  matchInfo(mine, theirs, limit, phase, left) {
+  /**
+   * 画面の上に出す試合の状況。
+   *
+   * mineは自分の取得数、theirsは自分以外で一番取っている人の数。
+   * 3人以上いると相手が1人に決まらないので、**今追うべき相手＝先頭**とだけ比べる。
+   * 全員ぶん並べても撃ち合いの最中には読めない（誰が何本かは右上の一覧が持つ）。
+   *
+   * leaderは先頭の人の名前。あと1本で勝ちの人がいる時だけ、そこを名指しで出す。
+   * デスマッチは3人4人と増えるほど「誰が近いのか」が見えなくなるので、
+   * その1点だけは撃ち合いの最中でも分かるようにしておく
+   */
+  matchInfo(mine, theirs, limit, phase, left, leader = '') {
     const t = Math.max(0, Math.round(left || 0));
-    const key = `${mine}-${theirs}/${limit}/${phase}/${t}`;
+    const key = `${mine}-${theirs}/${limit}/${phase}/${t}/${leader}`;
     if (key === this._lastMatch) return;   // 毎フレーム呼ばれる。変わった時だけ触る
     this._lastMatch = key;
 
@@ -507,12 +518,21 @@ export class HUD {
 
     let sub;
     let urgent = false;
-    if (phase === 0) sub = '相手を待っています';
+    if (phase === 0) sub = '席に着いて準備完了を押してください';
     else if (phase === 2) sub = `次のラウンドまで ${Math.max(1, t)}`;
     else if (phase === 3) sub = '試合終了';
     else {
-      sub = `${limit | 0}本先取 ／ 残り ${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
-      urgent = t <= 15;
+      const top = Math.max(mine | 0, theirs | 0);
+      // 王手。あと1本で試合が決まる状態は、時計より先に知りたい
+      if (top >= (limit | 0) - 1 && top > 0) {
+        sub = (mine | 0) >= (limit | 0) - 1
+          ? 'あと1本で勝ち'
+          : `${leader || '相手'}があと1本で勝ち`;
+        urgent = true;
+      } else {
+        sub = `${limit | 0}本先取 ／ 残り ${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+        urgent = t <= 15;
+      }
     }
     this.el.matchTime.textContent = sub;
     this.el.matchTime.classList.toggle('urgent', urgent);
@@ -532,8 +552,15 @@ export class HUD {
     const key = list.map((r) => `${r.id}:${r.name}:${r.rounds | 0}:${r.me ? 1 : 0}`).join('|');
     if (key === this._lastRoster) return;
     this._lastRoster = key;
-    el.innerHTML = list.map((r) => `<div class="rname${r.me ? ' me' : ''}">`
-      + `${esc(r.name)}<span class="rw">${r.rounds | 0}</span></div>`).join('');
+    // 先頭に印を付ける。3人4人と増えると、並び順だけでは
+    // 「今は誰が一番なのか」が一瞬で読めなくなる。
+    // 全員0本の時は誰も先頭ではない（開始直後に1人だけ光ると誤解する）
+    const top = list.length ? (list[0].rounds | 0) : 0;
+    el.innerHTML = list.map((r) => {
+      const lead = top > 0 && (r.rounds | 0) === top;
+      return `<div class="rname${r.me ? ' me' : ''}${lead ? ' lead' : ''}">`
+        + `${esc(r.name)}<span class="rw">${r.rounds | 0}</span></div>`;
+    }).join('');
   }
 
   /** 対戦のキルログ。他人同士の行が流れる中で、自分が絡んだ行だけ拾えるようにする */

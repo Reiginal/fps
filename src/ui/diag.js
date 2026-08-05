@@ -27,6 +27,9 @@ export class Diag {
     // 別々の場所から毎フレーム書き合って点滅する
     this._states = new Map();
     this._seen = new Set();
+    // 送る時に名前も載せる。「誰の画面で起きたか」が分からないと、
+    // 遊んでいた人に聞き直す所からやり直しになる。統合側が入れる
+    this.name = '';
 
     // 拾い損ねた例外を捕まえる。ここが無いと、遊ぶ側には
     // 「急に操作が効かなくなった」としか見えない
@@ -47,6 +50,27 @@ export class Diag {
     this._errors.push(where ? `${message}（${where}）` : String(message));
     while (this._errors.length > MAX_ERRORS) this._errors.shift();
     this._render();
+    this._report(message, where);
+  }
+
+  /* サーバーへ送る。画面に出すだけでは、遠くで遊んでいる人の不具合が
+     こちらへ届かない（本人が読み上げてくれない限り分からない）。
+     送れなくても遊べる物なので、失敗は黙って捨てる。
+     同じ物は_seenで既に1回に絞ってあるので、ここでは数を数えない */
+  _report(message, where) {
+    try {
+      fetch('/report', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: this.name || '',
+          message: String(message).slice(0, 400),
+          where,
+          // どの環境で起きたか。Windowsだけで出る不具合を追うのに要る
+          ua: navigator.userAgent || '',
+        }),
+      }).catch(() => {});
+    } catch { /* 送れないだけ */ }
   }
 
   /**

@@ -106,3 +106,6 @@ jobs:
 
       - name: 検査 当たり判定と見た目
         run: node tools/check-hitbox.mjs
+
+      - name: 検査 エラーの受け口
+        run: node tools/check-report.mjs

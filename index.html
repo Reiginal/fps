@@ -222,6 +222,9 @@
     text-shadow: 0 2px 8px rgba(0,0,0,.8);
   }
   .rname.me { color: var(--accent); }
+  /* 先頭。3人4人と増えると、並び順だけでは今誰が一番なのかが読めない。
+     自分の色(水色)とは別の色にして、自分が先頭の時に両方付いても分かるようにする */
+  .rname.lead .rw { color: var(--ok); font-weight: 600; }
   .rname .rw { color: var(--dim); margin-left: 8px; font-size: 11px; }
 
   /* キルログ */
