@@ -729,7 +729,7 @@ class Game {
     // ロビーで何か押されたら全画面へ入り直す。選択画面で断られていても、
     // ここでもう一度頼める。試合が始まってからでは断られる
     lobby.onPress = () => this.input.goFullscreen();
-    lobby.onSeat = (team, seat) => this.net?.sendSeat(team, seat);
+    lobby.onSeat = (seat) => this.net?.sendSeat(seat);
     lobby.onReady = (on) => this.net?.sendReady(on);
     // 選んでいる兵士を3Dで見せる。ロビーにいる間だけ描く
     this.charView = new CharView(document.getElementById('lbView'));
@@ -1722,14 +1722,20 @@ class Game {
 
     this.effects.update(dt, this.camera);
     this._commonHud(dt);
-    // 1対1なので、自分以外の1人がそのまま相手。まだ来ていなければ0-0で出す
-    // players は id をキーにしたMapで、行そのものにidは入っていない
+    /* 画面の上に出す点数。「自分 － 先頭」で出す。
+       1対1の頃は「自分以外の1人」がそのまま相手だったが、
+       3人以上いると相手が1人に決まらない。
+       全員ぶん並べても撃ち合いの最中には読めないので、
+       **今追うべき相手＝一番取っている人**とだけ比べる。
+       自分が先頭なら2番手と比べる（自分と自分を比べても差が分からない） */
     let mine = 0;
     let theirs = 0;
+    const others = [];
     for (const [id, r] of net.players) {
       if (id === net.id) mine = r.rounds | 0;
-      else theirs = r.rounds | 0;
+      else others.push(r.rounds | 0);
     }
+    if (others.length) theirs = Math.max(...others);
     this.hud.matchInfo(mine, theirs, MATCH.ROUND_WINS, net.phase, net.timeLeft);
     this.hud.roster(net.scoreRows());
     this.hud.scoreboard(net.scoreRows(), input.down('Tab'));

@@ -6,7 +6,7 @@
 // 押した瞬間に自分の画面だけ座らせると、埋まっていた席を押した時に
 // 「座れたように見えて座れていない」状態が残る。押したら送るだけにして、
 // 絵が変わるのは必ずサーバーから届いた後にする。
-import { SEATS_PER_TEAM, TEAM_NAME, CHARACTERS } from '../net/protocol.js';
+import { SEATS, CHARACTERS } from '../net/protocol.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -20,7 +20,7 @@ export class Lobby {
     this.el = {
       root: $('lobby'),
       why: $('lbWhy'),
-      seats: [$('lbSeatsA'), $('lbSeatsB')],
+      seats: $('lbSeats'),
       chars: $('lbChars'),
       stand: $('lbStand'),
       leave: $('lbLeave'),
@@ -78,18 +78,17 @@ export class Lobby {
       this.charEls.push(b);
     });
 
-    this.seatEls = [[], []];
-    for (let team = 0; team < 2; team++) {
-      const box = this.el.seats[team];
-      box.innerHTML = '';
-      for (let seat = 0; seat < SEATS_PER_TEAM; seat++) {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'lbseat';
-        b.onclick = () => { this.onPress(); this.onSeat(team, seat); };
-        box.appendChild(b);
-        this.seatEls[team].push(b);
-      }
+    // 席は1列に4つ。チーム分けは無く、座った人全員が互いに敵になる
+    this.seatEls = [];
+    const box = this.el.seats;
+    box.innerHTML = '';
+    for (let seat = 0; seat < SEATS; seat++) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'lbseat';
+      b.onclick = () => { this.onPress(); this.onSeat(seat); };
+      box.appendChild(b);
+      this.seatEls.push(b);
     }
   }
 
@@ -104,30 +103,26 @@ export class Lobby {
 
   /**
    * サーバーから届いたロビーの中身を描く。
-   * rows は [[id, name, team, seat, ready]]。teamとseatが-1なら、その人はまだ立っている
+   * rows は [[id, name, seat, ready, chr]]。seatが-1なら、その人はまだ立っている
    */
   render({ rows = [], why = '' } = {}) {
     // 席番号から座っている人を引けるようにしておく
-    const bySeat = [[], []];
+    const bySeat = [];
     const standing = [];
     for (const r of rows) {
-      const [id, name, team, seat, ready] = r;
-      if (team === 0 || team === 1) bySeat[team][seat] = { id, name, ready: !!ready };
+      const [id, name, seat, ready] = r;
+      if (seat >= 0) bySeat[seat] = { id, name, ready: !!ready };
       else standing.push({ id, name });
     }
 
-    for (let team = 0; team < 2; team++) {
-      for (let seat = 0; seat < SEATS_PER_TEAM; seat++) {
-        const b = this.seatEls[team][seat];
-        const who = bySeat[team][seat];
-        b.classList.toggle('taken', !!who);
-        b.classList.toggle('me', !!who && who.id === this.myId);
-        b.classList.toggle('ready', !!who && who.ready);
-        b.disabled = !!who && who.id !== this.myId;
-        b.innerHTML = who
-          ? esc(who.name)
-          : `<span>${TEAM_NAME[team]}${seat + 1} 空席</span>`;
-      }
+    for (let seat = 0; seat < SEATS; seat++) {
+      const b = this.seatEls[seat];
+      const who = bySeat[seat];
+      b.classList.toggle('taken', !!who);
+      b.classList.toggle('me', !!who && who.id === this.myId);
+      b.classList.toggle('ready', !!who && who.ready);
+      b.disabled = !!who && who.id !== this.myId;
+      b.innerHTML = who ? esc(who.name) : `<span>${seat + 1}番 空席</span>`;
     }
 
     this.el.why.textContent = why;
@@ -137,10 +132,10 @@ export class Lobby {
 
     // 自分の行から、座っているか・準備を立てているか・どの見た目かを読む
     const me = rows.find((r) => r[0] === this.myId);
-    if (me && typeof me[5] === 'number') this.myChar = me[5] | 0;
+    if (me && typeof me[4] === 'number') this.myChar = me[4] | 0;
     this.charEls.forEach((b, i) => b.classList.toggle('on', i === this.myChar));
-    const meSeated = !!me && (me[2] === 0 || me[2] === 1);
-    this.meReady = !!me && !!me[4];
+    const meSeated = !!me && me[2] >= 0;
+    this.meReady = !!me && !!me[3];
 
     // 座っていない時に押せても何も起きない。押せない事を見た目でも出す
     this.el.standUp.disabled = !meSeated;
