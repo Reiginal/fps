@@ -1030,6 +1030,11 @@ function bakeStatic(group) {
 function buildHand(s, o) {
   o = o || {};
   const h = new THREE.Group();
+  // 手であることの印。**検査が「武器そのもの」と「手と腕」を分けて測るために要る。**
+  // 分けないと、頂点数の多い手が割合を支配してしまう。
+  // 実際ナイフは刃が152頂点に対して手と腕が2639頂点あり、
+  // 「頂点の何割が枠外か」は刃が見切れているかを何も表していなかった
+  h.userData.isHand = true;
   const R = o.gripR != null ? o.gripR : 0.022;   // 握る対象の半径
   const fr = 0.0094;                              // 指の基準の太さ
   const rr = R + fr * 0.85;                       // 指の芯が通る半径
@@ -1911,8 +1916,10 @@ function buildShotgun() {
 //
 // 弾を持たないので mag に大きい数を入れて装填を起こさせない。
 // muzzle/eject/sight の3つは武器側が必ず参照するので、銃が無くても印だけは置く
-function buildKnife() {
+function buildKnife(view = {}) {
   const g = new THREE.Group();
+  // 握り方は def.view.grip が持つ。持っていなければ今まで通りの値
+  const grip = view.grip || {};
 
   // 刃。輪郭を1枚のShapeで描いて押し出す。
   //
@@ -1963,12 +1970,14 @@ function buildKnife() {
   g.add(sight);
   g.userData.sight = sight;
 
-  /* ---- 手。右手だけで逆手に持つ。左手は使わないので画面外へ逃がす */
+  /* ---- 手。右手だけで順手に持つ。左手は使わないので画面外へ逃がす */
   const handR = buildHand(1, {
-    gripR: 0.021, wrap: 0.72, trigger: false, armDir: [0.38, -0.62, 0.92], armLen: 0.62,
+    gripR: 0.021, wrap: 0.72, trigger: false,
+    armDir: grip.armDir || [0.38, -0.62, 0.92],
+    armLen: grip.armLen != null ? grip.armLen : 0.62,
   });
-  handR.position.set(0, -0.001, 0.030);
-  handR.rotation.set(-0.10, 0, 0);
+  handR.position.fromArray(grip.pos || [0, -0.001, 0.030]);
+  handR.rotation.fromArray(grip.rot || [-0.10, 0, 0]);
   g.add(handR);
   g.userData.handR = handR;
 
@@ -1997,8 +2006,9 @@ function buildKnife() {
 
 // 手榴弾。持ち替えると手に持つだけで、左クリックで投げる。
 // 撃つ道具ではないので melee と同じく弾数も装填も持たない
-function buildGrenade() {
+function buildGrenade(view = {}) {
   const g = new THREE.Group();
+  const grip = view.grip || {};
   // 胴。上下を潰した円柱を2段にして卵形にする
   g.add(part(cylG(0.032, 0.036, 0.062, 14), MATS.enamel, 0, 0, 0, Math.PI / 2));
   g.add(part(cylG(0.026, 0.032, 0.020, 14), MATS.enamel, 0, 0, -0.040, Math.PI / 2));
@@ -2022,10 +2032,12 @@ function buildGrenade() {
   g.userData.sight = sight;
 
   const handR = buildHand(1, {
-    gripR: 0.026, wrap: 0.80, trigger: false, armDir: [0.38, -0.62, 0.92], armLen: 0.62,
+    gripR: 0.026, wrap: 0.80, trigger: false,
+    armDir: grip.armDir || [0.38, -0.62, 0.92],
+    armLen: grip.armLen != null ? grip.armLen : 0.62,
   });
-  handR.position.set(0, -0.004, 0.012);
-  handR.rotation.set(-0.12, 0, 0);
+  handR.position.fromArray(grip.pos || [0, -0.004, 0.012]);
+  handR.rotation.fromArray(grip.rot || [-0.12, 0, 0]);
   g.add(handR);
   g.userData.handR = handR;
 
@@ -2234,7 +2246,10 @@ class Weapon {
   constructor(def, viewScene) {
     this.def = def;
     const v = def.view;
-    this.inner = def.build();
+    // 組み立てにviewを渡す。**握り方（腕の入る向き・長さ・手の位置）を
+    // 武器ごとに変えられるようにするため。** 渡さなかった頃は4つとも
+    // ライフルの値で腕が入っていて、ナイフも手榴弾もライフルの構えに見えていた
+    this.inner = def.build(v);
     // ビューモデルは実寸のまま出すと画面を埋め尽くす。内側で縮めてから構える
     this.inner.scale.setScalar(v.scale);
     this.parts = this.inner.userData;
