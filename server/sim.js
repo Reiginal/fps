@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { Player } from '../src/player/player.js';
 import {
   K, S, TICK_DT, TICK_HZ, HISTORY_MS, MAX_REWIND_MS, INTERP_DELAY_MS,
-  HITBOX, PART, PART_MUL,
+  HITBOX, PART, PART_MUL, loadoutOf,
 } from '../src/net/protocol.js';
 
 /* ------------------------------------------------------------ 武器の表 */
@@ -245,7 +245,10 @@ export class SimPlayer {
     this.player = new Player(new THREE.Object3D(), world);
     this.input = new ServerInput();
 
-    this.weapon = 0;
+    // 持って出ている物の番号。既定は protocol.js の LOADOUT_IDS。
+    // ガンゲームで配る時はここを差し替える
+    this.carry = loadoutOf(WEAPONS);
+    this.weapon = this.carry[0] ?? 0;
     this.adsFactor = 0;
     this.kills = 0;
     this.deaths = 0;
@@ -291,6 +294,10 @@ export class SimPlayer {
   setWeapon(i) {
     const n = i | 0;
     if (n < 0 || n >= WEAPONS.length || n === this.weapon) return false;
+    // 持って出ていない武器は握らせない。**ここが無いと、電文を作れる人は
+    // 表にある武器を何でも使える。** 画面には持って出ていない物が写らないので、
+    // 撃たれた側からは「見えていない武器で撃たれた」ようにしか見えない
+    if (!this.carry.includes(n)) return false;
     this.weapon = n;
     this.reloadIn = 0;
     // 持ち替えの間は撃てない。weapons.jsのswitchingは0.42秒だが、

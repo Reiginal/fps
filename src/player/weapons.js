@@ -3,6 +3,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { muzzleFlashTexture, radialTexture, smokeTexture } from '../world/textures.js';
+// 持ち物の決まりだけ取り込む。protocol.jsはこちらを読まないので輪にならない
+import { loadoutOf } from '../net/protocol.js';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -2561,8 +2563,14 @@ export class WeaponSystem {
     this.camera = camera;
     this.viewCamera = viewCamera;
     this.viewScene = viewScene;
+    // モデルは全部組む。持っていない武器でも、ガンゲームで配られた瞬間に
+    // 組み始めると持ち替えのたびに一瞬止まる
     this.weapons = WEAPONS.map((d) => new Weapon(d, viewScene));
-    this.index = 0;
+    // **今持って出ている物の番号。** 表にあること（weapons）と
+    // 持っていること（carry）は別で、既定は protocol.js の LOADOUT_IDS。
+    // ガンゲームや将来の武器選択画面はここを差し替えるだけで済む
+    this.carry = loadoutOf(WEAPONS);
+    this.index = this.carry[0] ?? 0;
     this.current.model.visible = true;
 
     this.adsFactor = 0;
@@ -2774,6 +2782,10 @@ export class WeaponSystem {
   // 弾かれた持ち替えまで送ってサーバー側だけ別の銃を構えることになる
   switchTo(i) {
     if (i === this.index || i < 0 || i >= this.weapons.length) return false;
+    // 持っていない武器へは替われない。**サーバーも同じ判断をする**ので、
+    // ここを外しても向こうで弾かれる（画面だけ持ち替わって当たり判定が
+    // 元の武器のまま、という一番読めない食い違いになる）
+    if (!this.carry.includes(i)) return false;
     if (this.switching > 0) return false;
     this.reloading = 0;
     this.shellReload = false;

@@ -41,6 +41,10 @@ const RIFLE = indexOf('rifle');
 function ready(index) {
   const ws = new WeaponSystem(new THREE.Scene(), cam, vcam, new THREE.Scene());
   const p = mkPlayer();
+  // 表にある武器を全部握れるようにする。1発ずつ入れる装填はショットガンにしか
+  // 無いが、あれは既定の持ち物から外してある（表には在る）。
+  // 持ち物のままだと switchTo が断って、装填の検査が丸ごと空回りする
+  ws.carry = ws.weapons.map((_, i) => i);
   ws.switchTo(index);
   for (let i = 0; i < 120; i++) ws.update(DT, idle, p, {});
   return { ws, p };

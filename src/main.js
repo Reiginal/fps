@@ -1809,7 +1809,10 @@ class Game {
 
     const w = this.weapons.current;
     this.hud.health(this.player.health, this.player.maxHealth);
-    this.hud.ammo(w.ammo, w.reserve, w.def.name, this.weapons.index, this.weapons.reloading, !!w.def.melee);
+    // 画面の札に印を付ける位置は「持ち物の何番目か」。武器の番号そのものだと、
+    // 持って出ない武器のぶんずれて、別の札が光る
+    const slotAt = this.weapons.carry.indexOf(this.weapons.index);
+    this.hud.ammo(w.ammo, w.reserve, w.def.name, slotAt, this.weapons.reloading, !!w.def.melee);
     this.hud.bandage(
       this.player.bandages, this.player.healing, HEAL.TIME_S,
       this.weapons.bandageOut, HEAL.PER_ROUND,
@@ -2134,9 +2137,13 @@ class Game {
         // 弾倉ごと入れ替える武器で鳴る物が違う
         if (this.weapons.reload()) this.weapons.playReloadSound(this.audio);
       }
-      // 武器の数だけ回す。3で固定していたので、4本目を足しても持ち替えられなかった
-      for (let i = 0; canAct && i < this.weapons.weapons.length && i < 9; i++) {
-        if (!input.pressed(`Digit${i + 1}`)) continue;
+      // **持っている物の数だけ回す。** 表にある武器の数ではない。
+      // 表には持って出ない物（ショットガン）も入っているので、
+      // そちらで回すと押した数字と画面の札がずれる
+      const carry = this.weapons.carry;
+      for (let n = 0; canAct && n < carry.length && n < 9; n++) {
+        if (!input.pressed(`Digit${n + 1}`)) continue;
+        const i = carry[n];
         // 包帯を持ったまま武器を選んだらしまう。巻いている最中なら中断する。
         // 数字を押した時点で「戦う」と決めているので、包帯より武器を優先する
         this.player.cancelHeal();
