@@ -460,7 +460,8 @@ export class AudioEngine {
     const spatial = !!(position && camera);
     const dist = spatial ? this._dist(position, camera) : (profile.distance ?? 0);
     // 音速ぶんの到達遅れ。遠い銃声が一拍遅れて届くと距離が体で分かる
-    const t = ctx.currentTime + Math.min(dist / SOUND_SPEED, 0.28);
+    const delay = Math.min(dist / SOUND_SPEED, 0.28);
+    const t = ctx.currentTime + delay;
     // 遠景の撃ち合いは何発重なっても手前の音を痩せさせない
     const busy = this._busy(t, dist > 60 ? 0.3 : 1);
 
@@ -482,7 +483,15 @@ export class AudioEngine {
     const farAtten = !spatial && dist > 0 ? 1 / (1 + Math.pow(dist / 26, 1.4)) : 1;
     bus.gain.value = volume * jVol * farAtten;
 
-    const stopAt = t + Math.max(tailDecay * 2.4, bodyDecay * 3) + 0.6;
+    // 尾の実際の長さを先に出す。距離が離れる・開けた場所ほど、尾は
+    // tailDecayの最大約3.9倍まで伸びる（下の[3]のtailLenと同じ式）。
+    // stopAtが元のtailDecayしか見ていないと、遠景の尾はまだ2割前後の
+    // 音量が残っている所でオシレータごと止まり、プツンと切れる。
+    // tailDecayとのmaxを取るのは、開けていない・揺らぎが小さい側では
+    // tailLenがtailDecayを下回ることがあり、そちらまで縮めたくないため
+    const tailLen = tailDecay * jDecay * lerp(0.6, 1.7, this.openness) * lerp(1, 1.9, step(8, 50, dist));
+    const life = Math.max(Math.max(tailDecay, tailLen) * 2.4, bodyDecay * 3) + 0.6;
+    const stopAt = t + life;
 
     // 1. 立ち上がりの鋭いクラック。近距離だけの成分で、遠くでは空気に食われて消える
     if (wCrack > 0.03) {
@@ -528,7 +537,7 @@ export class AudioEngine {
       tf.Q.value = rnd(0.55, 0.9);
       const tailGain = ctx.createGain();
       tail.connect(tf); tf.connect(tailGain); tailGain.connect(bus);
-      const tailLen = tailDecay * jDecay * lerp(0.6, 1.7, this.openness) * lerp(1, 1.9, step(8, 50, dist));
+      // tailLenはstopAtを決める所で先に出してある（同じ式）
       this._env(tailGain, t + rnd(0.004, 0.022), 0.38 * wTail, 0.006, tailLen);
       tail.start(t, Math.random() * 1.5); tail.stop(stopAt);
     }
@@ -592,7 +601,13 @@ export class AudioEngine {
       out = g2;
     }
     // 遠いほど残響と跳ね返りに送る割合を増やす＝空間そのものが鳴っている状態
-    this._out(out, lerp(0.45, 1.0, step(2, 45, dist)), lerp(0.5, 0.95, step(2, 45, dist)));
+    //
+    // _reap()の期限はここを呼んだ瞬間のctx.currentTimeからの秒数で決まるが、
+    // 上のstopAtはt(=その時点 + 音速の到達遅れdelay)からの秒数。
+    // 揃えないと、遠い銃声ほど「まだtがdelayぶん遅れて来ていない=音源は
+    // 生きている」うちに出力側だけ先に切り離されることになる。
+    // life(stopAtまでの長さ)にdelayを足して、両者が同じ実時刻を指すようにする
+    this._out(out, lerp(0.45, 1.0, step(2, 45, dist)), lerp(0.5, 0.95, step(2, 45, dist)), life + delay);
   }
 
   /* -------------------------------------------------- 金属音の共通部品 */
