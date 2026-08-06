@@ -1030,6 +1030,11 @@ function bakeStatic(group) {
 function buildHand(s, o) {
   o = o || {};
   const h = new THREE.Group();
+  // 手であることの印。**検査が「武器そのもの」と「手と腕」を分けて測るために要る。**
+  // 分けないと、頂点数の多い手が割合を支配してしまう。
+  // 実際ナイフは刃が152頂点に対して手と腕が2639頂点あり、
+  // 「頂点の何割が枠外か」は刃が見切れているかを何も表していなかった
+  h.userData.isHand = true;
   const R = o.gripR != null ? o.gripR : 0.022;   // 握る対象の半径
   const fr = 0.0094;                              // 指の基準の太さ
   const rr = R + fr * 0.85;                       // 指の芯が通る半径
@@ -1911,8 +1916,10 @@ function buildShotgun() {
 //
 // 弾を持たないので mag に大きい数を入れて装填を起こさせない。
 // muzzle/eject/sight の3つは武器側が必ず参照するので、銃が無くても印だけは置く
-function buildKnife() {
+function buildKnife(view = {}) {
   const g = new THREE.Group();
+  // 握り方は def.view.grip が持つ。持っていなければ今まで通りの値
+  const grip = view.grip || {};
 
   // 刃。輪郭を1枚のShapeで描いて押し出す。
   //
@@ -1963,12 +1970,14 @@ function buildKnife() {
   g.add(sight);
   g.userData.sight = sight;
 
-  /* ---- 手。右手だけで逆手に持つ。左手は使わないので画面外へ逃がす */
+  /* ---- 手。右手だけで順手に持つ。左手は使わないので画面外へ逃がす */
   const handR = buildHand(1, {
-    gripR: 0.021, wrap: 0.72, trigger: false, armDir: [0.38, -0.62, 0.92], armLen: 0.62,
+    gripR: 0.021, wrap: 0.72, trigger: false,
+    armDir: grip.armDir || [0.38, -0.62, 0.92],
+    armLen: grip.armLen != null ? grip.armLen : 0.62,
   });
-  handR.position.set(0, -0.001, 0.030);
-  handR.rotation.set(-0.10, 0, 0);
+  handR.position.fromArray(grip.pos || [0, -0.001, 0.030]);
+  handR.rotation.fromArray(grip.rot || [-0.10, 0, 0]);
   g.add(handR);
   g.userData.handR = handR;
 
@@ -1997,8 +2006,9 @@ function buildKnife() {
 
 // 手榴弾。持ち替えると手に持つだけで、左クリックで投げる。
 // 撃つ道具ではないので melee と同じく弾数も装填も持たない
-function buildGrenade() {
+function buildGrenade(view = {}) {
   const g = new THREE.Group();
+  const grip = view.grip || {};
   // 胴。上下を潰した円柱を2段にして卵形にする
   g.add(part(cylG(0.032, 0.036, 0.062, 14), MATS.enamel, 0, 0, 0, Math.PI / 2));
   g.add(part(cylG(0.026, 0.032, 0.020, 14), MATS.enamel, 0, 0, -0.040, Math.PI / 2));
@@ -2022,10 +2032,12 @@ function buildGrenade() {
   g.userData.sight = sight;
 
   const handR = buildHand(1, {
-    gripR: 0.026, wrap: 0.80, trigger: false, armDir: [0.38, -0.62, 0.92], armLen: 0.62,
+    gripR: 0.026, wrap: 0.80, trigger: false,
+    armDir: grip.armDir || [0.38, -0.62, 0.92],
+    armLen: grip.armLen != null ? grip.armLen : 0.62,
   });
-  handR.position.set(0, -0.004, 0.012);
-  handR.rotation.set(-0.12, 0, 0);
+  handR.position.fromArray(grip.pos || [0, -0.004, 0.012]);
+  handR.rotation.fromArray(grip.rot || [-0.12, 0, 0]);
   g.add(handR);
   g.userData.handR = handR;
 
@@ -2158,12 +2170,28 @@ export const WEAPONS = [
     // 他の武器はこの値を持たないので、読む側は既定を1として扱う
     moveMul: 1.35,
     view: {
-      scale: 1.0, adsScale: 0.86, adsDist: 0.20,
-      // 短剣は構えを画面の右下に寄せて、視界を塞がない。
-      // 銃と同じ位置に置くと刃が画面中央に立って前が見えなくなる
-      // 画面の外へ刃先が出ていたので手前へ引いて内側へ寄せる。
-      // zを-0.40から-0.28へ、xも0.235から0.175へ
-      hip: [0.175, -0.185, -0.280], hipRot: [-0.10, 0.16, 0.30],
+      // 縮尺を1.0から1.4へ。刃が画面に占める面積が9.0%→16.8%になる。
+      // 短剣は元が小さいので、銃と同じ縮尺だと「持っているのが分かる」大きさに届かない
+      scale: 1.4, adsScale: 0.86, adsDist: 0.20,
+      // **構えを作り直した。** それまでは刃も腕も目の後ろまで突き抜けていて
+      // （一番手前の頂点が目の7.1cm後ろ）、カメラの手前へ回った面は画面上で
+      // 無限に広がるので、刃の断面と前腕が画面いっぱいに出ていた。
+      // 実測では武器本体の頂点の75.6%が枠の外。包帯の手が「でかいしグロい」と
+      // 言われたのと同じ壊れ方で、原因も同じ「位置」だった。
+      //
+      // 直したのは3つ:
+      //   ・奥行きを-0.280から-0.380へ。目から離して破裂を止める
+      //   ・縮尺を1.4へ。離したぶん小さくなるのを取り返す
+      //   ・腕の入る向き(grip.armDir)を下向きへ倒し、長さも0.62→0.30へ。
+      //     それまでライフルと同じ[0.38,-0.62,0.92]で、Zが大きいぶん
+      //     前腕が「手から目へ向かって」伸びていた
+      // 結果: 一番手前16.0cm（ライフル10.3cm）、本体の枠外9.9%
+      //
+      // hipRotのzを0.30から0.95へ。刃を寝かせて画面を横切らせる。
+      // 立てたままだと視界の中央に刃が壁のように立って前が見えない
+      hip: [0.22, -0.16, -0.38], hipRot: [0.02, 0.04, 0.95],
+      // 右手だけで持つ。腕は真下から入れて、目のほうへ戻さない
+      grip: { armDir: [0.30, -0.86, 0.10], armLen: 0.30 },
       bob: 1.10, sway: 0.80, kickK: 320, kickD: 20,
       kickUp: 0.60, kickSide: 1.60,
       boltTravel: 0, boltTime: 0, lower: 0.18,
@@ -2183,8 +2211,19 @@ export const WEAPONS = [
     reloadKind: 'mag', holdOpen: false,
     moveMul: 1.15,
     view: {
-      scale: 1.0, adsScale: 0.9, adsDist: 0.20,
-      hip: [0.215, -0.190, -0.360], hipRot: [-0.14, 0.12, 0.20],
+      // 玉そのものが直径6cmしかないので、縮尺1.0だと画面の5.4%しか占めず、
+      // 「何か持っている」以上の情報が出ない。1.45で12%前後になる
+      scale: 1.45, adsScale: 0.9, adsDist: 0.20,
+      // ナイフと同じ直し方。腕がライフルの向きのままで、
+      // 一番手前の頂点が目から0.8cm（＝ほぼ目の中）にあった。
+      //
+      // 右手を胸の高さまで上げて、玉を握って構える形にする。
+      // これ以上high上げると（yを-0.06や0.02にすると）玉が画面の右上へ抜けて、
+      // 本体の枠外が42%・83%まで跳ねる。振りかぶりは「上げる」より
+      // 「手前へ引いて傾ける」ほうが枠に収まる
+      hip: [0.26, -0.11, -0.44], hipRot: [-0.30, 0.20, 0.45],
+      // 腕は右下から入れる。Zを0.16まで落として目のほうへ戻さない
+      grip: { armDir: [0.44, -0.78, 0.16], armLen: 0.32 },
       bob: 1.10, sway: 0.85, kickK: 320, kickD: 20,
       kickUp: 0.40, kickSide: 0.30,
       boltTravel: 0, boltTime: 0, lower: 0.18,
@@ -2234,7 +2273,10 @@ class Weapon {
   constructor(def, viewScene) {
     this.def = def;
     const v = def.view;
-    this.inner = def.build();
+    // 組み立てにviewを渡す。**握り方（腕の入る向き・長さ・手の位置）を
+    // 武器ごとに変えられるようにするため。** 渡さなかった頃は4つとも
+    // ライフルの値で腕が入っていて、ナイフも手榴弾もライフルの構えに見えていた
+    this.inner = def.build(v);
     // ビューモデルは実寸のまま出すと画面を埋め尽くす。内側で縮めてから構える
     this.inner.scale.setScalar(v.scale);
     this.parts = this.inner.userData;
