@@ -55,6 +55,18 @@ export default [
   },
 
   {
+    /* 本物のブラウザで動かす検査（e2e/）。
+       Nodeで走るが、page.evaluate() の中はブラウザの中で動くので、
+       document や window をそのまま書く。両方のグローバルを知っている必要がある */
+    files: ['e2e/**/*.mjs', 'playwright.config.mjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: { ...globals.node, ...globals.browser },
+    },
+  },
+
+  {
     rules: {
       // 使っていない変数。消し忘れが積もるとどれが生きている値か読めなくなる。
       // 頭に _ を付けた物だけは「意図して使っていない」と見なして見逃す
