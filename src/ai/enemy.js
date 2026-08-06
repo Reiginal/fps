@@ -8,6 +8,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
+const _v4 = new THREE.Vector3();
 const _ray = new THREE.Ray();
 // 倒れ切った死体が壁や箱に刺さっていないか見るための寝そべりカプセル
 const _corpseCap = new Capsule(new THREE.Vector3(), new THREE.Vector3(), 0.26);
@@ -2034,13 +2035,16 @@ export class Enemy {
   }
 
   _shoot(player, dist, _ctx) {
-    const muzzleWorld = this.parts.muzzle.getWorldPosition(new THREE.Vector3());
+    // onShoot(main.jsの_enemyShot)は同期で全部読み切って数値だけを取り出すので、
+    // 使い回しのスカッチベクトルを渡してよい（発砲のたびにnew Vector3()×2を
+    // 積んでいたのを止めた。撃つ敵の数×連射速度ぶん効く）
+    const muzzleWorld = this.parts.muzzle.getWorldPosition(_v4);
     const playerEye = _v.set(
       player.collider.start.x,
       player.feetY + player.height - 0.16,
       player.collider.start.z,
     );
-    const dir = _v2.subVectors(playerEye, muzzleWorld).normalize().clone();
+    const dir = _v2.subVectors(playerEye, muzzleWorld).normalize();
 
     // 距離が離れるほど、相手が動くほど当たりにくくする
     const moveFactor = clamp(player.horizontalSpeed / 6, 0, 1);

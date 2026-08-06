@@ -478,6 +478,9 @@ class Game {
     this._ray = new THREE.Ray();
     this._evPos = new THREE.Vector3();
     this._evNormal = new THREE.Vector3();
+    // ソロの着弾解決(_resolveShot)専用。散弾は1発で複数ペレットぶん
+    // 呼ばれるので、その回数ぶんnew Vector3()を積まないための使い回し
+    this._hitNormal = new THREE.Vector3();
     // 誰がいつ撃ったか。散弾を1発の銃声にまとめるのに使う
     this._lastFireAt = new Map();
     // 死んでいる間の入力を止める受け皿。Inputと同じ形をしていればよい
@@ -1572,7 +1575,7 @@ class Game {
       const killed = enemyHit.enemy.hit(dmg, enemyHit.part);
       if (pellet === 0) { this.shotsHit++; this._tally('hits'); }
 
-      this.effects.impact(enemyHit.point, dir.clone().negate(), 'flesh');
+      this.effects.impact(enemyHit.point, this._hitNormal.copy(dir).negate(), 'flesh');
       // 近接は刃が入る音を足す。弾が当たった時と同じ音だと、
       // 撃ったのか斬ったのかが耳から判別できない
       if (def.melee) this.audio.stab(enemyHit.point, this.camera, 'flesh');
@@ -1585,8 +1588,8 @@ class Game {
       if (drawTracer) this.effects.tracer(muzzle, enemyHit.point, 0.03);
     } else if (worldHit) {
       const normal = worldHit.face
-        ? worldHit.face.normal.clone().transformDirection(worldHit.object.matrixWorld)
-        : dir.clone().negate();
+        ? this._hitNormal.copy(worldHit.face.normal).transformDirection(worldHit.object.matrixWorld)
+        : this._hitNormal.copy(dir).negate();
       const kind = this.kindOf.get(worldHit.object.material) ?? 'concrete';
       // 近接は弾ではない。壁を刃で擦っても火花は散らないし着弾痕も残らない。
       // ここを素通ししていたせいで、ナイフを振るたびに銃の着弾と同じ
@@ -1602,7 +1605,7 @@ class Game {
       }
       if (drawTracer) this.effects.tracer(muzzle, worldHit.point, 0.03);
     } else if (drawTracer) {
-      const far = origin.clone().addScaledVector(dir, def.range);
+      const far = this._hitNormal.copy(origin).addScaledVector(dir, def.range);
       this.effects.tracer(muzzle, far, 0.025);
     }
   }
