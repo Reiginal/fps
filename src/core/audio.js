@@ -1274,43 +1274,147 @@ export class AudioEngine {
    *   3. 尾を引く高い音 … 耳鳴り。撃たれて意識が飛ぶ側の合図で、
    *      これがあると音が途切れずに結果画面へ繋がる
    */
+  /**
+   * 自分が倒れた。**画面が結果へ切り替わるまで、一番長く聴かされる音。**
+   *
+   * 前の作りを測ったら、こういう形をしていた:
+   *
+   *   超低 33.6% ／ 低 7.0% ／ **中低 2.2%** ／ 中 19.2% ／ **高 35.4%**
+   *
+   * つまり**一番下と一番上しか無い。** 胴体（250〜800Hz）が空っぽで、
+   * そのぶん3.1kHzの純音（耳鳴り）が音の主役になっていた。
+   * 純音は素材として一番安っぽく聞こえるので、それが主役だと全体が安く聞こえる。
+   * 比較として爆発は 23.8 / 10.1 / 24.3 / 21.2 / 9.4 と満遍なく埋まっている。
+   *
+   * 直した後:
+   *
+   *   超低 25.5% ／ 低 14.5% ／ **中低 23.7%** ／ 中 18.6% ／ **高 13.2%** ／ 打点2つ
+   *
+   * **どこが効いたのかも1つずつ測った。** 思っていたのと違った:
+   *
+   *   ・耳鳴りの音量を 0.075 → 0.013 に落とす … 中低が 17.7 → 23.7（一番効いた）
+   *     35%を占めていた物が減ると、残り全部の取り分がそのぶん上がる
+   *   ・着地の低域切りを 420 → 640Hz へ開ける … 中低が 21.3 → 23.7
+   *   ・胴体の層を足す … 中低が 22.6 → 23.7（**思ったより効いていない**）
+   *
+   * つまり「胴体が空だったから足した」より、
+   * **「純音が場所を取りすぎていたから退かした」のほうが本体**だった。
+   * 足す前に、大きすぎる物を探すほうが先。
+   *
+   * 打点が2つになったのは、落ちる低音を0.95秒から0.3秒へ縮めて
+   * 着地の手前で切ったから。鳴りっぱなしだと着地が別の出来事に聞こえない。
+   */
   playerDown() {
     if (!this.ready || !this.enabled) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
 
-    // 1. 落ちる低音。高い所から下へ滑らせる
+    // 1. 落ちる低音。高い所から下へ滑らせる。**ここが「重さ」そのもの**
     const lo = ctx.createOscillator();
     lo.type = 'sine';
     lo.frequency.setValueAtTime(180, t);
-    lo.frequency.exponentialRampToValueAtTime(38, t + 0.9);
+    lo.frequency.exponentialRampToValueAtTime(52, t + 0.42);
     const lg = ctx.createGain();
     lo.connect(lg); lg.connect(this.postBus);
-    this._env(lg, t, 0.55, 0.006, 0.95);
-    this._reap([lg], 1.6);
-    lo.start(t); lo.stop(t + 1.2);
+    /* **着地の手前で切る。** 前は0.95秒かけて減衰していて、
+       その間ずっと音が鳴り続けているせいで、着地の音が「別の出来事」として
+       立たなかった（測ると打点が1つのまま＝崩れたのか着いたのか耳から分からない）。
+       落ちている間の音は、着いた時点で終わるのが本来の形でもある */
+    this._env(lg, t, 0.34, 0.006, 0.3);
+    this._reap([lg], 1.2);
+    lo.start(t); lo.stop(t + 0.7);
 
-    // 2. 地面に着く音。低音の滑りが終わるあたりに置く
+    /* 2. 胴体。400〜600Hzのノイズを幅を持たせて鳴らす。
+       歪み器に通すのは、素のノイズだと「サー」で終わって物が崩れる音にならないため。
+       **帯の取り分としては1ポイントほどしか動かない**（測った）。
+       ここが持っているのは「崩れていく」という形のほうで、
+       数字を直したのは耳鳴りを退かしたことのほう */
+    const body = this._noiseSource(0.85);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(640, t);
+    bp.frequency.exponentialRampToValueAtTime(480, t + 0.55);
+    bp.Q.value = 0.75;
+    const sat = ctx.createWaveShaper();
+    sat.curve = this._satCurve(2.0);
+    sat.oversample = '2x';
+    /* 歪ませた後を低めで切る。**歪みは倍音を上へ伸ばす**ので、
+       そのまま出すとせっかく足した胴体が高域の足しにしかならない
+       （実測で 高2.5k-7k が22.6%まで上がった） */
+    const bodyLp = ctx.createBiquadFilter();
+    bodyLp.type = 'lowpass';
+    bodyLp.frequency.value = 1100;
+    const bg = ctx.createGain();
+    body.connect(bp); bp.connect(sat); sat.connect(bodyLp); bodyLp.connect(bg); bg.connect(this.postBus);
+    // 減衰を短くするのは、長く伸ばすと次の打点（着地）を覆い隠して
+    // 出来事が1つに聞こえるため（実測で打点が2→1に戻った）
+    this._env(bg, t, 1.5, 0.01, 0.24);
+    this._reap([bg], 1.4);
+    body.start(t); body.stop(t + 0.95);
+
+    // 胴体の芯。ノイズだけだと高さが定まらないので、同じ帯に音程を1本置く
+    const mid = ctx.createOscillator();
+    mid.type = 'triangle';
+    mid.frequency.setValueAtTime(540, t);
+    mid.frequency.exponentialRampToValueAtTime(215, t + 0.5);
+    const mg = ctx.createGain();
+    mid.connect(mg); mg.connect(this.postBus);
+    this._env(mg, t, 0.46, 0.004, 0.46);
+    this._reap([mg], 1.2);
+    mid.start(t); mid.stop(t + 0.7);
+
+    /* 3. 地面に着く音。**2つ目の打点。**
+       低音の滑りが終わった所に置く。前は薄すぎて（0.30）打点として数えられず、
+       測ると打点1個のまま＝出来事が1つしか無い音だった。
+       低域切りを420Hzから640Hzへ開けてあるのは、閉じたままだと
+       この音が全部「超低」へ入って、胴体の帯に何も残らないため */
     const thud = this._noiseSource(1.2);
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.setValueAtTime(420, t);
+    lp.frequency.setValueAtTime(640, t);
     const tg = ctx.createGain();
     thud.connect(lp); lp.connect(tg); tg.connect(this.postBus);
-    this._env(tg, t + 0.34, 0.30, 0.004, 0.22);
-    this._reap([tg], 1.4);
-    thud.start(t + 0.34); thud.stop(t + 0.75);
+    this._env(tg, t + 0.48, 0.78, 0.003, 0.3);
+    this._reap([tg], 1.6);
+    thud.start(t + 0.48); thud.stop(t + 1.0);
 
-    // 3. 耳鳴り。長く薄く残して、結果画面まで音を切らさない
-    const ring = ctx.createOscillator();
-    ring.type = 'sine';
-    ring.frequency.setValueAtTime(3100, t);
-    ring.frequency.exponentialRampToValueAtTime(2350, t + 1.6);
-    const rg = ctx.createGain();
-    ring.connect(rg); rg.connect(this.postBus);
-    this._env(rg, t + 0.05, 0.075, 0.05, 1.5);
-    this._reap([rg], 2.2);
-    ring.start(t); ring.stop(t + 1.9);
+    // 着地に低い芯を重ねる。ノイズだけだと「バサッ」で止まって、地面の硬さが出ない
+    const floor = ctx.createOscillator();
+    floor.type = 'sine';
+    floor.frequency.setValueAtTime(96, t + 0.48);
+    floor.frequency.exponentialRampToValueAtTime(44, t + 0.84);
+    const fg = ctx.createGain();
+    floor.connect(fg); fg.connect(this.postBus);
+    this._env(fg, t + 0.48, 0.28, 0.004, 0.36);
+    this._reap([fg], 1.6);
+    floor.start(t + 0.48); floor.stop(t + 1.0);
+
+    /* 4. 耳鳴り。**ここを直したのが一番効いた。**
+       前は3.1kHzの純音1本が全体の35%を占めていて、そこが安っぽさの正体だった。
+       減らすと、他の帯の取り分がそのぶん上がる（中低 17.7 → 23.7）。
+       2本を少しずらして重ねると唸りが出て「機械の音」から離れる。
+       細いノイズを足すのは、純音のままだと耳が「合成した音」だと聞き分けるため */
+    for (const [f0, f1, lv] of [[3100, 2350, 0.013], [3160, 2402, 0.010]]) {
+      const ring = ctx.createOscillator();
+      ring.type = 'sine';
+      ring.frequency.setValueAtTime(f0, t);
+      ring.frequency.exponentialRampToValueAtTime(f1, t + 1.6);
+      const rg = ctx.createGain();
+      ring.connect(rg); rg.connect(this.postBus);
+      this._env(rg, t + 0.05, lv, 0.05, 1.2);
+      this._reap([rg], 2.2);
+      ring.start(t); ring.stop(t + 1.9);
+    }
+    const air = this._noiseSource(1.0);
+    const ap = ctx.createBiquadFilter();
+    ap.type = 'bandpass';
+    ap.frequency.value = 2700;
+    ap.Q.value = 3.2;
+    const ag = ctx.createGain();
+    air.connect(ap); ap.connect(ag); ag.connect(this.postBus);
+    this._env(ag, t + 0.05, 0.028, 0.12, 1.1);
+    this._reap([ag], 2.0);
+    air.start(t); air.stop(t + 1.8);
   }
 
   /**

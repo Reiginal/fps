@@ -11,6 +11,16 @@ import { OfflineCtx } from './offline-audio.mjs';
 
 export const SR = 48000;
 
+/* 並びの最大値。**Math.max(...arr) を使わない。**
+   3秒ぶんの波形（14万点）を展開すると引数が積めなくなって
+   「Maximum call stack size exceeded」で落ちる。
+   2.6秒までは通っていたので、長い音を測ろうとした時に初めて出た */
+function maxOf(arr, floor = 0) {
+  let m = floor;
+  for (let i = 0; i < arr.length; i++) if (arr[i] > m) m = arr[i];
+  return m;
+}
+
 /* ------------------------------------------------------------ 波形の解析 */
 
 // 基数2のFFT。実部と虚部をその場で書き換える
@@ -102,7 +112,7 @@ export function analyze(L, R) {
     for (let k = Math.max(0, i - 2); k <= Math.min(raw.length - 1, i + 2); k++) { sm += raw[k]; c++; }
     env[i] = sm / c;
   }
-  const envPeak = Math.max(...env, 1e-9);
+  const envPeak = maxOf(env, 1e-9);
 
   // 一度おさまってから、また大きくなった所を次の打点として数える。
   // 山の形を調べる方式も書いてみたが、余韻の細かい揺れの扱いで
@@ -161,7 +171,7 @@ export function analyze(L, R) {
 
   // 目立つ山。倍音がいくつ立っているかの目安
   const peaks = [];
-  const maxMag = Math.max(...mag);
+  const maxMag = maxOf(mag, 0);
   for (let i = 2; i < half - 2; i++) {
     if (mag[i] > mag[i - 1] && mag[i] > mag[i + 1] && mag[i] > maxMag * 0.12) {
       peaks.push({ hz: (i * SR) / N, m: mag[i] });

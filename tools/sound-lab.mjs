@@ -34,6 +34,9 @@ targets.push({
   }, null, null),
 });
 targets.push({ name: 'explosion', label: '爆発', play: (a) => a.explosion(null, null) });
+// 自分が倒れた時の音。**一番長く聴かされる音**（結果画面まで鳴っている）なのに
+// 一度も測っていなかった。3秒取るのは、耳鳴りの尻尾まで含めて見るため
+targets.push({ name: 'player-down', label: '自分が倒れた', play: (a) => a.playerDown(), seconds: 3.0 });
 targets.push({ name: 'swing', label: 'ナイフを振る', play: (a) => a.swing() });
 // 刃が当たった音は材質で分かれる。金属だけ「カンッ」と長く残るのが狙いなので、
 // 4つとも書き出して長さと重心を並べて見る
