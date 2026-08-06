@@ -620,6 +620,12 @@ export class Room {
       slot.sim.kills = back.kills;
       slot.sim.deaths = back.deaths;
       if (back.seat !== null && !this._seatTaken(back.seat)) slot.seat = back.seat;
+      // 席も返した時は、見た目の重複もここで解く。takeSeatは同じ姿の2人が
+      // 席に並ぶのを「最後の砦」で防いでいるが、この復帰経路はtakeSeatを
+      // 通さずに座らせるので、抜けている間に誰かが同じ姿で座っていると、
+      // キルフィードでも戦闘でも見分けのつかない2人が並んでしまう。
+      // 席に着いている相手にだけ使われている姿なら、空いている物へ寄せる
+      if (slot.seat !== null && this._charTaken(slot.chr, slot)) slot.chr = this._freeChar(slot);
       slot.back = true;
     }
 
