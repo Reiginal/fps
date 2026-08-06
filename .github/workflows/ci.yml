@@ -1,12 +1,18 @@
 # push と PR のたびに、手元でやっているのと同じ検査を自動で走らせる。
 #
-# なぜ要るか: このリポジトリの検査(tools/check-*.mjs)は510項目あるが、
+# なぜ要るか: このリポジトリの検査は1400項目あるが、
 # 走らせるのを忘れたら意味がない。忘れられない場所に置くのがCIの役目。
 #
-# 検査を1本ずつ別のステップに分けてあるのは、まとめて1ステップにすると
-# 最初に落ちた1本で止まって、残りが走らないため。
-# 分けておくと「どれが赤いか」が画面でそのまま見えるし、
-# 1回の実行で壊れている箇所を全部数えられる。
+# ---------------------------------------------------------------------------
+# **ここは速さを最優先にしてある。** 2026-08-07に2分30秒から30秒前後へ削った。
+#
+# 個人開発なので、PRを出してから緑になるまでが待ち時間そのものになる。
+# 2分待つと、その間に別の事を始めてしまって戻ってこない。
+# 「ほぼ待たない」まで縮めば、検査は開発のテンポの外側に出る。
+#
+# 何を削って何を残したかは、下のそれぞれの場所にコメントで書いてある。
+# **削った物は考え方としては良い物なので、戻せる形で残してある。**
+# ---------------------------------------------------------------------------
 
 name: CI
 
@@ -24,25 +30,38 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    name: 検査
 
-    strategy:
-      # 片方が落ちてももう片方は最後まで走らせる。
-      # 「20だけ落ちた」のか「両方落ちた」のかで原因が変わる
-      fail-fast: false
-      matrix:
-        # 手元はv24だが、他の版で動くか一度も確かめていない。
-        # 20はこのリポジトリが動く下限として package.json の engines に書いた版、
-        # 22はその次の長期サポート版
-        node: [20, 22]
-
-    name: Node ${{ matrix.node }}
+    # ------------------------------------------------------------------
+    # **Node 20と22の2本立てをやめた。**
+    #
+    # 元の狙いは「手元のv24以外でも動くか」を見ることで、それ自体は正しい。
+    # ただ実際に走らせた記録を見ると、20と22で結果が割れた事が1度も無い。
+    # このリポジトリはNodeの新しい機能を使っておらず、
+    # サーバー側もwsとnode:httpだけで、版で挙動が変わる所を踏んでいない。
+    #
+    # 2本にすると、同じ検査を2回やるぶん実行の枠を2つ使う。
+    # 待ち時間は変わらない（並ぶので）が、混んでいる時に順番待ちが起きる。
+    # 版の食い違いを見たくなったら、ここを戻す:
+    #
+    #   strategy:
+    #     fail-fast: false
+    #     matrix:
+    #       node: [20, 22]
+    #   name: Node ${{ matrix.node }}
+    #   ...
+    #     node-version: ${{ matrix.node }}
+    #
+    # 下限(20)で動くかは package.json の engines に書いてあるだけの約束になる。
+    # そこが心配になったら、月1回だけ走らせる形（schedule）にするのも手
+    # ------------------------------------------------------------------
 
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/setup-node@v5
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 22
           # package-lock.json を鍵にして依存のダウンロードを使い回す
           cache: npm
 
@@ -54,161 +73,50 @@ jobs:
       - name: 静的解析
         run: npm run lint
 
-      # tools/check-*.mjs は import した物しか見ない。
-      # 読み込まれないファイル（src/world/level.js など）の構文の壊れは
-      # ここで拾う
-      - name: 構文チェック
-        run: |
-          fail=0
-          for f in $(find src server tools \( -name '*.js' -o -name '*.mjs' \)); do
-            node --input-type=module --check < "$f" || { echo "構文NG $f"; fail=1; }
-          done
-          exit $fail
+      # ------------------------------------------------------------------
+      # **検査を1本ずつ別のステップに並べるのをやめた。**
+      #
+      # 元は33本を33ステップに分けてあった。狙いは「どれが赤いか画面で見える」
+      # ことで、これも正しい。ただ、そのために1本ずつ順番に走らせることになり、
+      # 33本で55秒かかっていた。うち音の質の1本だけで15秒あり、
+      # 残り32本はその間ずっと待っていた。
+      #
+      # 今は tools/run-checks.mjs が中でCPUの数だけ同時に走らせる。
+      # 落ちた物だけ中身を全部出すので、「どれが赤いか」は結局そのまま見える。
+      #
+      # 走らせる検査の一覧はどこにも書かない。あちらが tools/ を読んで見つける。
+      # **検査を足したらここを直す必要が無い**（前は3箇所を手で揃えていた）
+      # ------------------------------------------------------------------
+      - name: 検査
+        run: npm run check
 
-      # 一番先に走らせる。検査を書いたのに繋ぎ忘れている、を真っ先に知りたい
-      - name: 検査 検査そのものの繋がり
-        run: node tools/check-meta.mjs
-
-      - name: 検査 呼び先とHUDの部品
-        run: node tools/check-calls.mjs
-
-      - name: 検査 外へ配る物
-        run: node tools/check-serve.mjs
-
-      - name: 検査 HUD
-        run: node tools/check-hud.mjs
-
-      - name: 検査 武器
-        run: node tools/check-weapons.mjs
-
-      - name: 検査 持ち物
-        run: node tools/check-loadout.mjs
-
-      - name: 検査 音が例外にならないか
-        run: node tools/check-audio.mjs
-
-      - name: 検査 音のノードが解放されるか
-        run: node tools/check-audio-leak.mjs
-
-      - name: 検査 音の質
-        run: node tools/check-sound.mjs
-
-      - name: 検査 包帯
-        run: node tools/check-heal.mjs
-
-      - name: 検査 ロビー
-        run: node tools/check-lobby.mjs
-
-      - name: 検査 遊び方
-        run: node tools/check-modes.mjs
-
-      - name: 検査 敵の散らばり
-        run: node tools/check-swarm.mjs
-
-      - name: 検査 狙いの当たり具合
-        run: node tools/check-aim.mjs
-
-      - name: 検査 発言
-        run: node tools/check-chat.mjs
-
-      - name: 検査 キャラクター選択
-        run: node tools/check-character.mjs
-
-      - name: 検査 当たり判定と見た目
-        run: node tools/check-hitbox.mjs
-
-      - name: 検査 エラーの受け口
-        run: node tools/check-report.mjs
-
-      - name: 検査 電文の食い違い
-        run: node tools/check-protocol.mjs
-
-      # 電文の項目名が揃っていても、中身のビットの読み替えがずれると
-      # 同じキーを押したのに片側だけ効かない。そこは実際に両方走らせて比べる
-      - name: 検査 手元とサーバーで移動が一致するか
-        run: node tools/check-parity.mjs
-
-      - name: 検査 ログ
-        run: node tools/check-logs.mjs
-
-      - name: 検査 装填
-        run: node tools/check-reload.mjs
-
-      - name: 検査 キーボードと全画面
-        run: node tools/check-input.mjs
-
-      - name: 検査 画面効果
-        run: node tools/check-postfx.mjs
-
-      - name: 検査 倒れている間のカメラ
-        run: node tools/check-deathcam.mjs
-
-      - name: 検査 設定
-        run: node tools/check-settings.mjs
-
-      - name: 検査 戦績と実績
-        run: node tools/check-stats.mjs
-
-      - name: 検査 回線が切れた後の復帰
-        run: node tools/check-rejoin.mjs
-
-      - name: 検査 地面に落ちている物
-        run: node tools/check-drops.mjs
-
-      - name: 検査 2対2
-        run: node tools/check-teams.mjs
-
-      - name: 検査 終了
-        run: node tools/check-quit.mjs
-
-      - name: 検査 声で話す
-        run: node tools/check-voice.mjs
-
-      - name: 検査 地形のメモリ
-        run: node --expose-gc tools/check-world.mjs
-
-  # ------------------------------------------------------------------
-  # 本物のブラウザで開く検査。**上の1372項目が一切届いていない層。**
+  # --------------------------------------------------------------------
+  # **本物のブラウザで開く検査は、ここから外した。**
   #
-  # あちらはNodeの中でクラスを動かしているだけなので、
-  # index.htmlとimportmapが噛み合っているか・全部のモジュールが本当に
-  # 読み込めるか・開いた結果ホーム画面まで来るかを1つも見ていない。
-  # **importを1行書き間違えただけで、1372項目は全部通ったまま、
-  # 開いたら真っ黒**という形が作れる（実際に壊して確かめた）。
+  # 消したのではなく、本番へ出す直前(.github/workflows/deploy.yml)へ移した。
+  # 繋がっているかは tools/check-meta.mjs の[5]が見張っている。
   #
-  # 別の仕事にしてあるのは、これがブラウザの検査だから。
-  # Node 20と22で2回やっても、同じブラウザで同じ事を2回やるだけになる
-  e2e:
-    runs-on: ubuntu-latest
-    name: ブラウザで開く
-
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: 依存を入れる
-        run: npm ci
-
-      # ブラウザ本体を落とす。--with-deps は動かすのに要るライブラリも入れる
-      - name: ブラウザを入れる
-        run: npx playwright install --with-deps chromium
-
-      # サーバーの起動と停止は playwright.config.mjs がやる
-      - name: 開いて確かめる
-        run: npm run e2e
-
-      # 落ちた時だけ、その瞬間の画像と記録を残す。
-      # **ブラウザの中で起きた事は、これが無いと後から何も分からない**
-      - name: 落ちた時の記録を残す
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-failure
-          path: |
-            test-results/
-            playwright-report/
-          retention-days: 7
+  # 外した理由は時間。GPUの無い機械でこの場面をCPUで塗るので、
+  # ブラウザ本体を落とすのに31秒、開いて確かめるのに81秒かかっていた。
+  # **CI全体の2分30秒のうち、2分5秒がこれ1本。**
+  #
+  # 一方でこれが拾う失敗（importの書き間違いで真っ黒）は、
+  # tools/check-imports.mjs がブラウザ無しで0.1秒で拾えるようになった。
+  # 読み込みの繋がりをそっくり辿って、importmapで行き先が決まるか・
+  # ファイルがあるか・外へ配る決まりがあるかを見ている。
+  #
+  # 残った差は「本当に画が出るか」だけ。そこは出す直前に1回見れば足りる。
+  #
+  # PRのたびに見たくなったら、ここを戻す:
+  #
+  #   e2e:
+  #     runs-on: ubuntu-latest
+  #     name: ブラウザで開く
+  #     steps:
+  #       - uses: actions/checkout@v5
+  #       - uses: actions/setup-node@v5
+  #         with: { node-version: 22, cache: npm }
+  #       - run: npm ci
+  #       - run: npx playwright install --with-deps chromium
+  #       - run: npm run e2e
+  # --------------------------------------------------------------------
