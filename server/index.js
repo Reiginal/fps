@@ -299,9 +299,12 @@ function onJoin(conn, m) {
     // eslint-disable-next-line no-control-regex -- 制御文字を消すのが目的の正規表現
     ? m.name.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 16) || '名無し'
     : '名無し';
+  // 前に入った時の合言葉。回線が切れて入り直した時、これが合えば
+  // 席・点数・ラウンド数が返る。文字でなければ黙って無視する
+  const token = typeof m.tk === 'string' ? m.tk.slice(0, 64) : null;
   // 部屋はサーバーに1つだけ。繋いだ人は全員そこへ入る
   const room = getRoom(world);
-  const slot = room.join(conn, name);
+  const slot = room.join(conn, name, token);
   if (!slot) {
     conn.send({ t: Sv.FULL, why: 'この部屋は満員' });
     conn.close('full');
@@ -313,8 +316,10 @@ function onJoin(conn, m) {
   // ロビーはお迎えの後で配る。順番が逆だと、入ってきた本人の画面は
   // まだ受け口を繋いでいないので、先にいた人が誰も映らないまま始まる
   room.sendLobby();
-  console.log(`[net] ${name} が入った (${room.slots.size}人)`);
-  logs.add('join', { name, count: room.slots.size });
+  // 復帰かどうかをログに残す。「切れた人が戻れているのか」は
+  // 遊んでいる本人に聞いても「なんか切れた」しか返ってこないので、ここでしか分からない
+  console.log(`[net] ${name} が${slot.back ? '戻ってきた' : '入った'} (${room.slots.size}人)`);
+  logs.add('join', { name, count: room.slots.size, back: slot.back || undefined });
 }
 
 function onInput(conn, m) {

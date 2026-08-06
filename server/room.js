@@ -46,6 +46,11 @@ export class Room {
   constructor(world) {
     this.world = world;
     this.slots = new Map();      // id -> slot
+    /* 回線が切れた人の記録。合言葉 -> { at, chr, seat, rounds, kills, deaths, stage }。
+       **席そのものは押さえない。** 押さえると、抜けた人が戻ってこない時に
+       その席が60秒間ずっと空かず、残った人が始められなくなる。
+       戻ってきた時に空いていれば返す、くらいの弱い持ち方にしてある */
+    this.parked = new Map();
     this.nextId = 1;
     this.tick = 0;
     this.events = [];
@@ -97,9 +102,7 @@ export class Room {
     }
     if (!Number.isInteger(seat) || seat >= SEATS) return;
     if (slot.seat === seat) return;   // 今いる席
-    for (const s of this.slots.values()) {
-      if (s !== slot && s.seat === seat) return;   // 埋まっている
-    }
+    if (this._seatTaken(seat, slot)) return;   // 埋まっている
     slot.seat = seat;
     // 座った時点で、見た目が先客とかぶっていたら空いている物へ寄せる。
     // 立っている人同士は見た目がかぶれるので（席に着いている人しか見張っていない）、
@@ -311,13 +314,74 @@ export class Room {
     return '';
   }
 
-  join(conn, name) {
+  /** その席に誰か座っているか。except は自分（自分の席は埋まっている扱いにしない） */
+  _seatTaken(seat, except = null) {
+    for (const s of this.slots.values()) {
+      if (s !== except && s.seat === seat) return true;
+    }
+    return false;
+  }
+
+  /* -------------------------------------------- 回線が切れた人の記録 */
+
+  /**
+   * 抜けた人の記録を取っておく。**戻ってきた時に0から始めさせないため。**
+   *
+   * 電車でトンネルに入った・Wi-Fiが切り替わった、で1試合ぶんの
+   * ラウンドと撃破が消えるのは、遊ぶ側からするとただの理不尽になる。
+   * 自分で「ホームへ戻る」を押した時とは区別が付かないが、区別する必要も無い
+   * （自分で抜けた人が入り直したら、続きから始まるだけ）
+   */
+  _park(slot) {
+    if (!slot.token) return;
+    // 何も持っていない人の記録は取らない。入ってすぐ閉じただけの人まで
+    // 溜め込むと、記憶が増えるだけで誰の役にも立たない
+    if (slot.seat === null && !slot.rounds && !slot.sim.kills && !slot.sim.deaths) return;
+    this.parked.set(slot.token, {
+      at: nowMs(),
+      chr: slot.chr | 0,
+      seat: slot.seat,
+      rounds: slot.rounds | 0,
+      kills: slot.sim.kills | 0,
+      deaths: slot.sim.deaths | 0,
+      stage: slot.stage | 0,
+    });
+  }
+
+  /* 期限切れを捨てる。人が入ってくる時にだけ回すので、専用のタイマーは要らない
+     （タイマーを持つと、誰もいない部屋でも動き続けることになる） */
+  _sweepParked(now = nowMs()) {
+    for (const [k, v] of this.parked) {
+      if (now - v.at > MATCH.REJOIN_S * 1000) this.parked.delete(k);
+    }
+  }
+
+  /** 合言葉に見合う記録を1回だけ取り出す。使ったら消す（二重に復帰させない） */
+  _claimParked(token) {
+    this._sweepParked();
+    if (!token || typeof token !== 'string') return null;
+    const v = this.parked.get(token);
+    if (!v) return null;
+    this.parked.delete(token);
+    return v;
+  }
+
+  /* 合言葉。当てられても取れるのは「その人の点数」だけで、
+     その人はもう繋がっていないので、なりすます相手がいない */
+  _newToken() {
+    return `${this.nextId}-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+  }
+
+  join(conn, name, token = null) {
     if (this.full) return null;
     const id = this.nextId++;
     const slot = {
       id,
       name,
       conn,
+      // 次に入り直した時に、この人だと分かるための合言葉。
+      // お迎え(WELCOME)で1回だけ渡す
+      token: this._newToken(),
       // ロビーの席。入った時点では立ったままで、自分で押して座る。
       // サーバーが勝手に割り振らないのは、どこに座るかを選べること自体が
       // ロビーを置く理由だから
@@ -357,7 +421,23 @@ export class Room {
       downed: false,
       // 生き返るまでの残り秒。ラウンドが無い遊び方でだけ減る
       respawnIn: 0,
+      // 回線が切れて戻ってきた人か。お迎えに載せて、画面に一言出すためだけの印
+      back: false,
     };
+    /* 合言葉が合えば、前の続きから。**席は空いている時だけ返す。**
+       抜けている間に誰かが座っていたら、その人を立たせてまで返さない
+       （戻ってきた側は少し損をするが、座って待っていた側を巻き込むほうが悪い） */
+    const back = this._claimParked(token);
+    if (back) {
+      slot.chr = back.chr;
+      slot.rounds = back.rounds;
+      slot.stage = back.stage;
+      slot.sim.kills = back.kills;
+      slot.sim.deaths = back.deaths;
+      if (back.seat !== null && !this._seatTaken(back.seat)) slot.seat = back.seat;
+      slot.back = true;
+    }
+
     this.slots.set(id, slot);
     this._respawn(slot);
     this.push({ e: EV.JOIN, id, name });
@@ -377,6 +457,9 @@ export class Room {
 
   leave(slot) {
     if (!this.slots.delete(slot.id)) return;
+    // 出て行く前に記録を取る。**消してから取ると席の情報がもう無い**ので、
+    // 順番を入れ替えてはいけない
+    this._park(slot);
     this.push({ e: EV.LEAVE, id: slot.id });
     // 抜けた所を残す。「途中で落ちた」のか「自分で抜けた」のかは
     // ここからは分からないが、**いつ何人になったか**が分かるだけで
@@ -435,6 +518,11 @@ export class Room {
       tick: this.tick,
       now: Math.round(nowMs()),
       you: { name: slot.name },
+      // 次に入り直す時の合言葉。**この電文でしか渡らない**ので、
+      // 受け取った側は必ず控えること（控えないと復帰できない）
+      tk: slot.token,
+      // 前の続きから始まったか。画面に一言出すためだけの印
+      back: !!slot.back,
       players,
     };
   }

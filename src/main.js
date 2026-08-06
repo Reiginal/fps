@@ -28,6 +28,12 @@ import {
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
+/* 回線が切れた時に、自分で入り直しにいく間隔（ミリ秒）。
+   短い所から始めて伸ばすのは、切れ方が2種類あるため。
+   電車のトンネルなら数秒で戻るが、サーバーの入れ替えは十数秒かかる。
+   合計19秒で、サーバーが記録を取っておく60秒（MATCH.REJOIN_S）に収まっている */
+const REJOIN_WAITS = [1000, 2000, 3000, 5000, 8000];
+
 // 倒れてから結果が出るまで。ここが短いと、撃たれた次の瞬間に文字が出て
 // 倒れ切るまでの秒数（1.3秒）は src/core/deathcam.js が持つ。
 // 何が起きたのかを見る時間が無いと短すぎ、長いと待たされる。1.3秒は
@@ -431,6 +437,11 @@ class Game {
     this.net = null;
     this.remotes = null;
     this.menu = null;
+    // 回線が切れた時に、次はどの待ち時間で入り直すか（REJOIN_WAITSの位置）。
+    // 入れたら0へ戻す
+    this._rejoinAt = 0;
+    this._rejoinTimer = null;
+    this._lastJoin = null;
     // 対戦は物理を60Hz固定で回す。可変dtのまま送ると、同じキーを同じ長さ押しても
     // 到達位置がサーバーと食い違い、補正が常時走ることになる
     this._acc = 0;
@@ -841,16 +852,31 @@ class Game {
   }
 
   async _joinMatch({ url, name }) {
+    // 切れた時に自分で入り直せるよう、入った先を覚えておく。
+    // 覚えないと、繋ぎ先を作るのが選択画面の中にあるので手が届かない
+    this._lastJoin = { url };
     const net = new NetClient();
     try {
       await net.connect(url, { name });
     } catch (err) {
+      // 繋がらなかった回も、まだ試す回数が残っていれば自分で戻りにいく。
+      // ここで諦めると、サーバーの入れ替え中の1回目で必ず終わる
+      if (this._rejoinAt > 0 && this._rejoinAt < REJOIN_WAITS.length) {
+        const wait = REJOIN_WAITS[this._rejoinAt++];
+        this.menu.setStatus(NET_MSG.rejoin, false);
+        clearTimeout(this._rejoinTimer);
+        this._rejoinTimer = setTimeout(() => this._joinMatch({ url, name }), wait);
+        return;
+      }
+      this._rejoinAt = 0;
       this.menu.setBusy(false);
       // 満員だけは「繋がらない」と原因が違うので、文言を分けて出す
       const msg = /満員|full/i.test(err.message) ? NET_MSG.full : NET_MSG.offline;
       this.menu.setStatus(msg, true);
       return;
     }
+    // 入れたので数え直す。次に切れた時はまた最初の待ち時間から
+    this._rejoinAt = 0;
 
     this.net = net;
     this.mode = 'versus';
@@ -889,6 +915,9 @@ class Game {
     // 前の顔ぶれを忘れてから入る。持ち越すと、2回目に入った時に
     // 「前にいた人」が新顔として数えられて、入った瞬間に鳴る
     this._lobbyIds = null;
+    // 前の続きから始まったなら、そう言う。**言わないと、席と点数が戻っているのに
+    // 本人には「入り直した」としか見えない**（戻ったのか0からなのか分からない）
+    if (net.wasBack) this.chat.push('', '回線が戻りました。前の続きから始めます', false);
     // 前に選んだ見た目をサーバーへ伝える。伝えないと、覚えていても
     // 相手からは既定の姿に見える（サーバーは0番のまま持っている）
     const myChar = loadChar();
@@ -942,10 +971,35 @@ class Game {
     }
   }
 
+  /**
+   * 回線が切れた。**自分で戻りにいく。**
+   *
+   * サーバーは切れた人の席・点数・ラウンド数を60秒取っておくので（MATCH.REJOIN_S）、
+   * その間に入り直せれば続きから遊べる。ただし入り直すのは手元の仕事で、
+   * 何もしなければ「接続が切れました」の赤字が出て終わるだけになる。
+   *
+   * 待ち時間を伸ばしながら数回試すのは、切れ方が2種類あるから。
+   * 電車のトンネルなら数秒で戻るが、サーバーの入れ替えは十数秒かかる。
+   * 1秒間隔で連打しても入れ替え中のサーバーには繋がらないし、
+   * 最初から8秒待つと、すぐ戻る場面で無駄に待たされる
+   */
   _onNetLost(why) {
     if (this.mode !== 'versus') return;
+    // 自分で抜けた時は戻らない（_quitMatchは受け口を外してから切るので普通は来ない）
+    const canRetry = why !== 'bye' && !!this.net?.token && this._rejoinAt < REJOIN_WAITS.length;
+    const name = this._myName;
+    const back = this._lastJoin;
     this._leaveMatch();
-    this.menu.setStatus(why || NET_MSG.lost, true);
+    if (!canRetry || !back) {
+      this._rejoinAt = 0;
+      this.menu.setStatus(why || NET_MSG.lost, true);
+      return;
+    }
+    const wait = REJOIN_WAITS[this._rejoinAt++];
+    this.menu.setBusy(true);
+    this.menu.setStatus(NET_MSG.rejoin, false);
+    clearTimeout(this._rejoinTimer);
+    this._rejoinTimer = setTimeout(() => this._joinMatch({ ...back, name }), wait);
   }
 
   /* 対戦の後片付けと、選択画面へ戻る所まで。
