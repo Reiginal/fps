@@ -790,11 +790,13 @@
       <div id="weapon">MK-4 カービン</div>
       <div id="ammoWrap"><div id="ammo">30</div><div id="reserve">/ 240</div></div>
       <div id="slots">
+        <!-- 並びは protocol.js の LOADOUT_IDS と揃える。
+             ショットガンは表には在るが持って出ない（人はそんなに持てない）。
+             tools/check-loadout.mjs が食い違いを見張る -->
         <div class="slot on">1 ライフル</div>
-        <div class="slot">2 ショットガン</div>
-        <div class="slot">3 ピストル</div>
-        <div class="slot">4 ナイフ</div>
-        <div class="slot">5 手榴弾</div>
+        <div class="slot">2 ピストル</div>
+        <div class="slot">3 ナイフ</div>
+        <div class="slot">4 手榴弾</div>
       </div>
       <div id="slots2">
         <!-- ここは「Fで包帯が出せる」を覚えてもらうための札。

@@ -33,6 +33,12 @@ const ok = (c, msg) => {
 const cam = new THREE.PerspectiveCamera(75, 1.6, 0.05, 900);
 const vcam = new THREE.PerspectiveCamera(55, 1.6, 0.002, 12);
 const ws = new WeaponSystem(new THREE.Scene(), cam, vcam, new THREE.Scene());
+// **ここでは表にある武器を全部見る。**
+// 既定の持ち物(protocol.jsのLOADOUT_IDS)にはショットガンが入っていないが、
+// 持って出ないだけで表からは消していない（ガンゲームで配る／将来の武器選択で選ぶ）。
+// 持ち物のままだと switchTo が断って、持って出ない武器を1つも測れなくなる。
+// 「誰が何を持てるか」は tools/check-loadout.mjs が別に見る
+ws.carry = ws.weapons.map((_, i) => i);
 cam.updateMatrixWorld(true);
 
 /* ------------------------------------------------ モデルが組めているか */
