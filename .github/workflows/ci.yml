@@ -99,6 +99,9 @@ jobs:
       - name: 検査 ロビー
         run: node tools/check-lobby.mjs
 
+      - name: 検査 遊び方
+        run: node tools/check-modes.mjs
+
       - name: 検査 敵の散らばり
         run: node tools/check-swarm.mjs
 

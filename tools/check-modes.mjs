@@ -1,0 +1,230 @@
+// 遊び方（デスマッチ／ガンゲーム）の検査。本物のRoomを動かす。
+//
+// なぜ要るか: **ガンゲームはデスマッチと進行の根本が違う。**
+// ラウンドが無く、倒れても数秒で生き返り、勝ちは取ったラウンド数ではなく
+// 「全部の武器で1回ずつ倒したか」で決まる。
+//
+// 一番怖いのは**デスマッチを壊すこと**。今まで動いていた対戦の進行に
+// 分岐を入れているので、ガンゲームを足したせいでラウンドが終わらなくなる、
+// といった形で壊れうる。なので両方を同じ検査で回す。
+//
+// 2番目に怖いのは**倒れたまま局面が動かないこと**。デスマッチは倒れた瞬間に
+// 局面がBREAKへ移るので「もう数えた」を持たなくて済んでいたが、
+// ガンゲームは局面が動かないので、目印が無いと毎刻み「落下で死んだ」が
+// 積み上がる（毎秒60回）。
+//
+//   node tools/check-modes.mjs
+import '../server/dom-stub.js';
+import { PHASE, MODE_IDS, GUN_ORDER, MATCH, TICK_DT } from '../src/net/protocol.js';
+
+const { getRoom } = await import('../server/room.js');
+const { buildWorld } = await import('../server/world.js');
+const { WEAPONS } = await import('../src/player/weapons.js');
+const { modeOf } = await import('../server/modes.js');
+
+const world = buildWorld();
+let bad = 0;
+const ok = (c, msg) => { console.log(`  ${c ? '○' : '× 失敗:'} ${msg}`); if (!c) bad++; };
+
+const mkConn = () => ({ sent: [], rtt: 0, send(m) { this.sent.push(m); } });
+const room = getRoom(world);
+const clear = () => { for (const s of [...room.slots.values()]) room.leave(s); };
+
+const join = (name) => {
+  const conn = mkConn();
+  const slot = room.join(conn, name);
+  conn.slot = slot;
+  return { conn, slot };
+};
+
+/** 全員を席に着かせて始める */
+const startWith = (names, mode) => {
+  clear();
+  room.phase = PHASE.WAIT;
+  room.setMode(mode);
+  const ps = names.map((n) => join(n));
+  ps.forEach((p, i) => room.takeSeat(p.slot, i));
+  ps.forEach((p) => room.setReady(p.slot, true));
+  return ps;
+};
+
+const idOf = (i) => WEAPONS[i]?.id;
+const down = (p) => { p.slot.sim.player.alive = false; p.slot.sim.player.health = 0; };
+
+console.log('\n[1] 遊び方を選べる');
+{
+  clear();
+  room.phase = PHASE.WAIT;
+  ok(MODE_IDS.length >= 2, `遊び方は ${MODE_IDS.length} 種類（${MODE_IDS.join('、')}）`);
+  room.setMode('dm');
+  ok(room.mode === 'dm', '既定はデスマッチ');
+  ok(room.setMode('gun') === true, 'ガンゲームへ変えられる');
+  ok(room.mode === 'gun', '変わっている');
+  ok(room.setMode('gun') === false, '同じ物をもう一度押しても何も起きない');
+  ok(room.setMode('しらない遊び方') === false, '知らない名前は断る');
+  ok(room.mode === 'gun', '断った後も元のまま');
+  room.setMode('dm');
+}
+
+console.log('\n[2] 試合が始まったら遊び方は変えられない');
+// 途中で決まりが変わると、遊んでいる側からは何が起きたのか読めない
+{
+  startWith(['あき', 'ばん'], 'dm');
+  ok(room.phase !== PHASE.WAIT, '試合が始まっている');
+  ok(room.setMode('gun') === false, '試合中は変えられない');
+  ok(room.mode === 'dm', 'デスマッチのまま');
+}
+
+console.log('\n[3] デスマッチは今まで通り（ラウンド制）');
+// ガンゲームを足したせいでこちらが壊れていないか。**ここが一番大事**
+{
+  const ps = startWith(['あき', 'ばん', 'しい'], 'dm');
+  ok(room.rules.rounds === true, 'ラウンド制である');
+  const round0 = room.round;
+
+  down(ps[0]);
+  room._checkRoundOver('kill');
+  ok(room.phase === PHASE.LIVE, '1人倒れてもラウンドは続く');
+  ok(room.round === round0, 'ラウンドが進んでいない');
+
+  down(ps[1]);
+  room._checkRoundOver('kill');
+  ok(room.phase !== PHASE.LIVE, '最後の1人になったら終わる');
+  ok(ps[2].slot.rounds === 1, '残った人がラウンドを取る');
+
+  // 持ち物は既定のまま（1本だけにされていない）
+  ok(ps[2].slot.sim.carry.length >= 3,
+    `持ち物は既定のまま ${ps[2].slot.sim.carry.length}本`);
+}
+
+console.log('\n[4] ガンゲームは倒すたびに武器が替わる');
+{
+  const ps = startWith(['あき', 'ばん'], 'gun');
+  ok(room.mode === 'gun', 'ガンゲームで始まった');
+  ok(room.rules.rounds === false, 'ラウンドを持たない');
+
+  const [a, b] = ps;
+  ok(a.slot.stage === 0, '最初は0段目');
+  ok(a.slot.sim.carry.length === 1,
+    `持ち物は1本だけ (${a.slot.sim.carry.map(idOf).join('、')})`);
+  ok(idOf(a.slot.sim.weapon) === GUN_ORDER[0],
+    `最初の武器は ${GUN_ORDER[0]}（今 ${idOf(a.slot.sim.weapon)}）`);
+
+  // 順番に倒していく
+  for (let st = 0; st < GUN_ORDER.length - 1; st++) {
+    room._kill(b.slot, a.slot, 1);
+    ok(a.slot.stage === st + 1, `${st + 1}段目へ進んだ`);
+    ok(idOf(a.slot.sim.weapon) === GUN_ORDER[st + 1],
+      `武器が ${GUN_ORDER[st + 1]} になった（今 ${idOf(a.slot.sim.weapon)}）`);
+    ok(a.slot.sim.carry.length === 1, '持ち物は1本のまま');
+    // 倒された側は生き返らせて次へ
+    room._respawn(b.slot);
+  }
+}
+
+console.log('\n[4.5] ガンゲームでは最後の1人になってもラウンドが終わらない');
+// ラウンドの判定をそのまま通すと、1人倒れただけで「決着」になって
+// 局面がBREAKへ移り、ガンゲームがデスマッチとして進んでしまう
+{
+  const ps = startWith(['あき', 'ばん'], 'gun');
+  const phase0 = room.phase;
+  down(ps[1]);
+  room._checkRoundOver('kill');
+  ok(room.phase === phase0, `局面が動かない (${room.phase})`);
+  ok(room.round === 1, `ラウンドが増えない (${room.round})`);
+  ok(ps[0].slot.rounds === 0, `残った人がラウンドを取らない (${ps[0].slot.rounds})`);
+}
+
+console.log('\n[5] 最後の武器で倒したら試合が終わる');
+{
+  const ps = startWith(['あき', 'ばん'], 'gun');
+  const [a, b] = ps;
+  const last = GUN_ORDER.length - 1;
+  a.slot.stage = last;
+  room._arm(a.slot);
+  ok(idOf(a.slot.sim.weapon) === GUN_ORDER[last],
+    `最後の武器を持っている (${GUN_ORDER[last]})`);
+
+  room._kill(b.slot, a.slot, 1);
+  ok(room.phase === PHASE.END, '試合が終わった');
+  const end = a.conn.sent.filter((m) => m.t === 'M').pop();
+  ok(!!end, '試合終了の知らせが届いている');
+}
+
+console.log('\n[6] ガンゲームでは自滅で進まない');
+// 進めてしまうと、崖から飛び降りるのが一番速い勝ち方になる
+{
+  const ps = startWith(['あき', 'ばん'], 'gun');
+  const a = ps[0];
+  const st0 = a.slot.stage;
+  room._kill(a.slot, a.slot, 1);        // 自分で自分を倒す扱い
+  ok(a.slot.stage === st0, `自分を倒しても段が進まない（${st0}段のまま）`);
+
+  room._killByFall(a.slot);
+  ok(a.slot.stage === st0, '落ちても進まない');
+  ok(room.phase === PHASE.LIVE, 'ラウンドが終わったりもしない');
+}
+
+console.log('\n[7] ガンゲームは倒れても生き返る');
+// ラウンドが無いので、生き返らないと倒れたまま試合が終わらない
+{
+  const ps = startWith(['あき', 'ばん'], 'gun');
+  const a = ps[0];
+  down(a);
+  a.slot.downed = true;
+  a.slot.respawnIn = MATCH.RESPAWN_S;
+  ok(!a.slot.sim.alive, '倒れている');
+
+  // 復活までの秒数ぶん回す
+  const need = Math.ceil(MATCH.RESPAWN_S / TICK_DT) + 4;
+  for (let i = 0; i < need; i++) room._tick();
+  ok(a.slot.sim.alive, `${MATCH.RESPAWN_S}秒で生き返った`);
+  ok(a.slot.downed === false, '倒れた印も消えている');
+}
+
+console.log('\n[8] 倒れている間に死亡が積み上がらない');
+// **ここがガンゲーム特有の壊れ方。** 局面が動かないので、
+// 「もう数えた」の目印が無いと毎刻み「落下で死んだ」が走る（毎秒60回）
+{
+  const ps = startWith(['あき', 'ばん'], 'gun');
+  const a = ps[0];
+  const d0 = a.slot.sim.deaths;
+  down(a);
+  // 復活する前に何刻みか回す
+  for (let i = 0; i < 30; i++) room._tick();
+  const added = a.slot.sim.deaths - d0;
+  ok(added === 1, `30刻み回しても死亡は1回だけ（${added}回）`);
+}
+
+console.log('\n[9] 遊び方を変えると持ち物も配り直る');
+{
+  clear();
+  room.phase = PHASE.WAIT;
+  room.setMode('dm');
+  const a = join('あき');
+  const dmCarry = a.slot.sim.carry.length;
+  ok(dmCarry >= 3, `デスマッチでは ${dmCarry}本`);
+  room.setMode('gun');
+  ok(a.slot.sim.carry.length === 1, `ガンゲームでは1本（${a.slot.sim.carry.map(idOf).join('')}）`);
+  room.setMode('dm');
+  ok(a.slot.sim.carry.length === dmCarry, `戻すと ${dmCarry}本に戻る`);
+}
+
+console.log('\n[10] 決まりはサーバーだけが持っている');
+// クライアントに決まりを持たせると、そちらを書き換えれば勝てる
+{
+  const dm = modeOf('dm');
+  const gun = modeOf('gun');
+  ok(typeof dm.onKill === 'function' && typeof gun.onKill === 'function',
+    '両方とも倒した時の決まりを持っている');
+  ok(gun.stagesOf(WEAPONS) === GUN_ORDER.length,
+    `ガンゲームの段数は ${gun.stagesOf(WEAPONS)}（武器の並びと同じ）`);
+  ok(modeOf('でたらめ').id === 'dm', '知らない名前はデスマッチへ寄せる');
+}
+
+clear();
+room.phase = PHASE.WAIT;
+room.setMode('dm');
+
+console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
+process.exit(bad === 0 ? 0 : 1);
