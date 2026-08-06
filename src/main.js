@@ -2089,6 +2089,15 @@ class Game {
       if (this.weapons.wantAds) bits |= K.ADS;
     }
 
+    // Spaceの立ち上がりを持ち越す。ジャンプは player.update の中で
+    // input.pressed('Space') の1フレームだけの立ち上がりで拾うが、対戦では
+    // player.update が下の固定刻みループの中でしか回らない。120/144Hzの画面だと
+    // 刻みが1回も回らないフレームが半分ほど出て、そのフレームに来たSpaceは
+    // フレーム末の endFrame() で消えてしまい、ジャンプが抜ける。ここで拾って
+    // 次に刻みが回った最初の1回へ渡す（サーバーはbitの立ち上がりで跳ぶので、
+    // これで手元の予測とサーバーの跳躍が同じ刻みに揃う）
+    this._pendingJump = this._pendingJump || input.pressed('Space');
+
     this._acc += dt;
     // 溜まりすぎたら捨てる。タブから戻った時に数百刻みを一気に流すと、
     // サーバーの受け皿が溢れて入力に穴が空き、その人だけ動けなくなる
@@ -2096,7 +2105,9 @@ class Game {
     while (this._acc >= TICK_DT) {
       this._acc -= TICK_DT;
       net.sendInput(bits, player.yaw, player.pitch);
-      player.update(TICK_DT, input, false);
+      player.update(TICK_DT, input, false, this._pendingJump);
+      // 持ち越したジャンプは最初の1刻みだけで使い切る（二重に跳ばせない）
+      this._pendingJump = false;
       net.correction(player, TICK_DT);
     }
 
