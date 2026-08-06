@@ -741,6 +741,11 @@ class Game {
     await frame();
     document.getElementById('loading').classList.add('done');
 
+    // 終了の画面から戻る口。**描画を止めた後なので、ここだけは
+    // ゲームループの外から繋ぐ**（ループが止まっていても押せる必要がある）
+    const back = document.getElementById('qtBack');
+    if (back) back.onclick = () => this._resumeFromQuit();
+
     this._bindUI();
     this._bindMenu();
     this.state = 'menu';
@@ -771,6 +776,7 @@ class Game {
        「今30人倒したのに通算が増えていない」は、壊れているようにしか見えない */
     this.statsMenu = new StatsMenu();
     menu.onStats = () => this.statsMenu.show(this.totalStats);
+    menu.onQuit = () => this._quitGame();
 
     // タブを閉じる・別のタブへ移る時に、今回ぶんを書き出す。
     // これが無いと、対戦の途中でブラウザを閉じた回は丸ごと消える。
@@ -836,6 +842,53 @@ class Game {
       this._joinMatch(opt);
     };
     menu.show();
+  }
+
+  /**
+   * 遊ぶのをやめる。**ブラウザのゲームには「閉じる」が無い。**
+   *
+   * タブを開いたままにしておくと、見ていない間もずっと3Dを描き続ける。
+   * このゲームは元々「描画が増えるとパソコンが熱くなる」を抱えているので、
+   * やめた後まで回し続けるのは実害が大きい。
+   *
+   * window.close() は**自分で開いたタブしか閉じられない**決まりなので、
+   * URLを踏んで来た人の画面では何も起きない。だから閉じるのは頼むだけにして、
+   * 閉じられなかった時のために「描画を止めて、その事を画面に出す」を必ずやる。
+   *
+   * 戻れるようにしてあるのは、押し間違いで作業が終わってしまわないため
+   */
+  _quitGame() {
+    // やめる前に今回ぶんの戦績を書き出す。書かないと、最後の1戦が丸ごと消える
+    this._flushStats();
+    if (this.mode === 'versus') this._quitMatch();
+    this.menu.hide();
+    this.settings?.hide();
+    this.statsMenu?.hide();
+    this.hud.show(false);
+    this.hud.hideOverlay();
+    this.chat.hide();
+    this.charView?.stop();
+    this.input.exitFullscreen();
+    document.exitPointerLock?.();
+    // 描画を止める。ここが本体で、下のwindow.close()はおまけ
+    this.renderer?.setAnimationLoop(null);
+    this.state = 'quit';
+    document.getElementById('quit')?.classList.remove('hidden');
+    const note = document.getElementById('qtNote');
+    if (note) {
+      note.textContent = '画面の描画を止めました。このタブは閉じて構いません。';
+    }
+    // 自分で開いたタブなら閉じる。踏んで来た人の画面では何も起きない
+    try { window.close(); } catch { /* 閉じられないだけ */ }
+  }
+
+  /** 終了の画面から戻る。描画を動かし直す */
+  _resumeFromQuit() {
+    document.getElementById('quit')?.classList.add('hidden');
+    this.state = 'menu';
+    this._lastTime = performance.now();
+    this.renderer?.setAnimationLoop(() => this._loop());
+    this.menu.show();
   }
 
   /* 音を起こす。ブラウザは操作を起点にしないとWebAudioを走らせてくれないので、

@@ -158,5 +158,8 @@ jobs:
       - name: 検査 2対2
         run: node tools/check-teams.mjs
 
+      - name: 検査 終了
+        run: node tools/check-quit.mjs
+
       - name: 検査 地形のメモリ
         run: node --expose-gc tools/check-world.mjs

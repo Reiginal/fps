@@ -37,7 +37,7 @@ export class NetMenu {
       root: $('netmenu'),
       name: $('nmName'),
       status: $('nmStatus'), solo: $('nmSolo'), join: $('nmJoin'),
-      settings: $('nmSettings'), stats: $('nmStats'),
+      settings: $('nmSettings'), stats: $('nmStats'), quit: $('nmQuit'),
     };
 
     // 統合側が差し替える。初期値を空関数にしておくと、繋ぎ忘れても画面が落ちない
@@ -47,11 +47,16 @@ export class NetMenu {
     this.onSettings = () => {};
     // 戦績を開く口。同じく src/ui/statsmenu.js が持っている
     this.onStats = () => {};
+    /* 終了する口。**ブラウザのゲームには「閉じる」が無い。**
+       タブを閉じるまで裏で3Dを描き続けるので、見ていないのにパソコンが熱くなる。
+       やめる意思をここで受け取って、描画を止める（統合側の仕事） */
+    this.onQuit = () => {};
     this.busy = false;
 
     this.el.name.value = load(SAVE.name, '');
     this.el.settings.onclick = () => this.onSettings();
     this.el.stats.onclick = () => this.onStats();
+    this.el.quit.onclick = () => this.onQuit();
 
     // addEventListenerではなく代入で持つ。DOMはindex.html側に1組しかないので、
     // 2回作られた時に古い方の処理まで動いて二重に始まるのを防ぐ
