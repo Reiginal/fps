@@ -1528,6 +1528,8 @@ export class Enemy {
     for (const g of this.parts.detail) g.visible = true;
     this._pickUpGun();
     this._resetPose();
+    // 湧いた直後、まだ一度もupdate()（→_animate()→_syncHitboxesFromBones()）が
+    // 回っていない一瞬だけの仮の値。骨から作る本物に次のフレームで上書きされる
     this._syncHitboxes();
   }
 
@@ -1788,7 +1790,6 @@ export class Enemy {
       return;
     }
 
-    this._syncHitboxes();
     const playerEye = this._playerEye.set(
       player.collider.start.x,
       player.feetY + player.height - 0.16,
@@ -1971,7 +1972,6 @@ export class Enemy {
       this._collide();
     }
     if (this.collider.start.y < -20) this.spawn(this.level.enemySpawns[0]);
-    this._syncHitboxes();
 
     /* -------------------------------------------------------- 照準 */
     const wantYaw = Math.atan2(-toPlayer.x, -toPlayer.z);
@@ -2686,7 +2686,12 @@ export class Director {
     this.slotCounter = 0;
   }
 
-  get aliveCount() { return this.active.filter((e) => e.alive).length; }
+  // 毎フレーム呼ばれる（HUDの残り表示・波の切り替え判定）ので、配列を作らず数える
+  get aliveCount() {
+    let n = 0;
+    for (const e of this.active) if (e.alive) n++;
+    return n;
+  }
 
   update(dt, player, ctx) {
     // ウェーブが片付いたら次を用意する
