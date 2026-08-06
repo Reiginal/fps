@@ -407,7 +407,7 @@ export class Player {
     }
   }
 
-  update(dt, input, lookEnabled = true) {
+  update(dt, input, lookEnabled = true, jumpQueued = false) {
     const prevYaw = this.yaw;
 
     if (lookEnabled) {
@@ -585,7 +585,10 @@ export class Player {
 
     /* -------------------------------------------------------- 跳躍 */
     this._airTime = this.onFloor ? 0 : this._airTime + dt;
-    this._jumpBuffer = input.pressed('Space')
+    // jumpQueuedは、刻みが回らなかったフレームで拾ったSpaceの立ち上がりを
+    // 呼び手が持ち越して渡してくる分（対戦の120Hz対策。詳しくは_versusFrame）。
+    // ソロやparity検査は渡さないので既定のfalse＝これまで通りpressed()だけを見る
+    this._jumpBuffer = (input.pressed('Space') || jumpQueued)
       ? JUMP_BUFFER
       : Math.max(0, this._jumpBuffer - dt);
     // しゃがんだままでも跳べる。以前は!this.crouchingで弾いていたので、

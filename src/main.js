@@ -2049,8 +2049,7 @@ class Game {
 
   /* 対戦の1フレーム。物理だけ60Hz固定で回す。
      可変dtのまま送ると、同じキーを同じ長さ押してもサーバーと到達位置が食い違う */
-  _versusFrame(dt) {
-    const input = this.input;
+  _versusFrame(dt, input) {
     const net = this.net;
     const player = this.player;
 
@@ -2090,6 +2089,15 @@ class Game {
       if (this.weapons.wantAds) bits |= K.ADS;
     }
 
+    // Spaceの立ち上がりを持ち越す。ジャンプは player.update の中で
+    // input.pressed('Space') の1フレームだけの立ち上がりで拾うが、対戦では
+    // player.update が下の固定刻みループの中でしか回らない。120/144Hzの画面だと
+    // 刻みが1回も回らないフレームが半分ほど出て、そのフレームに来たSpaceは
+    // フレーム末の endFrame() で消えてしまい、ジャンプが抜ける。ここで拾って
+    // 次に刻みが回った最初の1回へ渡す（サーバーはbitの立ち上がりで跳ぶので、
+    // これで手元の予測とサーバーの跳躍が同じ刻みに揃う）
+    this._pendingJump = this._pendingJump || input.pressed('Space');
+
     this._acc += dt;
     // 溜まりすぎたら捨てる。タブから戻った時に数百刻みを一気に流すと、
     // サーバーの受け皿が溢れて入力に穴が空き、その人だけ動けなくなる
@@ -2097,7 +2105,9 @@ class Game {
     while (this._acc >= TICK_DT) {
       this._acc -= TICK_DT;
       net.sendInput(bits, player.yaw, player.pitch);
-      player.update(TICK_DT, input, false);
+      player.update(TICK_DT, input, false, this._pendingJump);
+      // 持ち越したジャンプは最初の1刻みだけで使い切る（二重に跳ばせない）
+      this._pendingJump = false;
       net.correction(player, TICK_DT);
     }
 
@@ -2643,9 +2653,12 @@ class Game {
         this.chat.open();
       }
       const input = typing ? this._noInput : this.input;
-      // 打っている間も、押した印は毎フレーム捨てる。
-      // 溜めたままにすると、打ち終わった瞬間に溜まっていた分が一度に効く
-      if (typing) this.input.endFrame();
+      // 打っている間も、押した印とマウスの移動量は毎フレーム捨てる。
+      // 溜めたままにすると、打ち終わった瞬間に溜まっていた分が一度に効く。
+      // 特にlookは、掴んだままなのでmousemoveが溜まり続け、捨てないと
+      // 打ち終わりに視点が一気に飛ぶ（_versusFrameは凍結inputを見るので
+      // 打っている間はtakeLook()を呼ばず、ここで捨てないと溜まりっぱなしになる）
+      if (typing) { this.input.endFrame(); this.input.takeLook(); }
 
       // 対戦では倒れている間の操作を受け付けない。復帰待ちの3秒に装填や持ち替えを
       // 通すと、湧いた瞬間の弾数がサーバーと食い違う
@@ -2686,7 +2699,7 @@ class Game {
       }
 
       if (this.mode === 'versus') {
-        this._versusFrame(dt);
+        this._versusFrame(dt, input);
       } else {
         this.player.update(dt, input, true);
         this.weapons.update(dt, input, this.player, {

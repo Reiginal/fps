@@ -620,6 +620,12 @@ export class Room {
       slot.sim.kills = back.kills;
       slot.sim.deaths = back.deaths;
       if (back.seat !== null && !this._seatTaken(back.seat)) slot.seat = back.seat;
+      // 席も返した時は、見た目の重複もここで解く。takeSeatは同じ姿の2人が
+      // 席に並ぶのを「最後の砦」で防いでいるが、この復帰経路はtakeSeatを
+      // 通さずに座らせるので、抜けている間に誰かが同じ姿で座っていると、
+      // キルフィードでも戦闘でも見分けのつかない2人が並んでしまう。
+      // 席に着いている相手にだけ使われている姿なら、空いている物へ寄せる
+      if (slot.seat !== null && this._charTaken(slot.chr, slot)) slot.chr = this._freeChar(slot);
       slot.back = true;
     }
 
@@ -754,6 +760,12 @@ export class Room {
   shot(slot, seq, origin, dir) {
     const sim = slot.sim;
     if (!sim.alive) return;
+    // LIVE以外は当たり判定を通さない。ロビー(WAIT)でも全員が生存・湧き済みなので、
+    // ここが無いとロビーで撃って相手を「殺せて」しまう。WAITには落下死のような
+    // 復活処理が無い（_killByFallはLIVE限定）ので、撃たれた側は試合開始まで
+    // 倒れたまま動けず、幽霊キルフィードだけが全員に配られる。
+    // throwNade・_explodeが持っているのと同じガードをここにも置く
+    if (this.phase !== PHASE.LIVE) return;
     // 持ち替えの最中は撃てない。切り替えを撃つ度に挟む撃ち方を成立させない
     if (sim.swapIn > 0) return;
     // rpmを超える連射は捨てる。弾数はクライアントが持つが、
@@ -915,6 +927,11 @@ export class Room {
 
     const thrower = this.slots.get(g.by) || null;
     for (const s of [...this.slots.values()]) {
+      // 巻き添えは1人ずつ順に解決する。最初の1人の死でラウンドが決まると
+      // （_kill→_checkRoundOver で局面がBREAKへ動く）、残りの相手に爆風を
+      // 入れ続けても、もう終わったラウンドのキルフィードが増えるだけになる。
+      // 局面が動いた時点で止める（throwNade/shotがLIVE限定なのと揃える）
+      if (this.phase !== PHASE.LIVE) break;
       const sim = s.sim;
       if (!sim.alive) continue;
       if (this._sameTeam(s, thrower)) continue;
