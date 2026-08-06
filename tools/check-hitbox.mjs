@@ -20,6 +20,7 @@ import { HITBOX, CHARACTERS, PART } from '../src/net/protocol.js';
 const { buildLevel } = await import('../src/world/level.js');
 const { RemotePlayers } = await import('../src/net/remote.js');
 const { hitPose } = await import('../server/sim.js');
+const { WEAPONS } = await import('../src/player/weapons.js');
 
 let bad = 0;
 const ok = (c, msg) => { console.log(`  ${c ? '○' : '× 失敗:'} ${msg}`); if (!c) bad++; };
@@ -97,10 +98,22 @@ console.log('\n[3.5] 相手が武器を持ち替えると見た目が変わる')
       p.heldNade.visible && '手榴弾',
     ].filter(Boolean);
   };
-  for (const [w, want] of [[0, 'ライフル'], [1, '散弾銃'], [2, 'ナイフ'], [3, '手榴弾']]) {
+  // **番号ではなくidで見る。** 番号を直書きすると、武器を1本足しただけで
+  // 後ろが全部ずれて、検査のほうが嘘になる（実際ピストルを足した時にそうなった）。
+  //
+  // 専用の見た目を持つのは散弾銃・ナイフ・手榴弾の3つで、それ以外は
+  // まとめてライフルの形で出す。**大事なのは「必ず1つだけ出る」ほう。**
+  // 0個だと素手で構えて撃つ絵になり、2個だとナイフを持ちながら銃も構える絵になる
+  const OWN = { shotgun: '散弾銃', knife: 'ナイフ', nade: '手榴弾' };
+  WEAPONS.forEach((d, w) => {
+    const want = OWN[d.id] || 'ライフル';
     const shown = holdOf(w);
-    ok(shown.length === 1 && shown[0] === want, `${w}番を持つと「${shown.join('と') || '何も出ない'}」が見える（欲しいのは${want}）`);
-  }
+    ok(shown.length === 1 && shown[0] === want,
+      `${w}番(${d.id})を持つと「${shown.join('と') || '何も出ない'}」が見える（欲しいのは${want}）`);
+  });
+  // 知らない番号が来ても素手にはしない。取りこぼしや将来の追加で
+  // 「何も持っていないのに撃ってくる」相手が出ないようにする
+  ok(holdOf(WEAPONS.length + 5).length === 1, '知らない番号でも必ず1つ出る');
   // 持ち替えて戻れること。1回変えたら戻らない作りになっていないか
   ok(holdOf(0)[0] === 'ライフル', 'ライフルへ戻せる');
 }
