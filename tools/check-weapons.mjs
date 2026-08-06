@@ -372,5 +372,52 @@ ws.switchTo(0);
 ok(ws.swing === 0, '銃へ持ち替えたら振りの状態が消える');
 ok(ws.burstLeft === 0 && ws.adsHeld === false, '覗きとバーストの残りも消える');
 
+/* -------------------------------------- サーバーの退避表が本物とずれていないか */
+
+console.log('\n[6] server/sim.js の退避武器表');
+
+// server/sim.js は weapons.js を読み込めなかった時のために、
+// 武器の数字を**手で写した表**を内蔵している。
+// 写しなので、weapons.js を触ると黙ってずれる。
+//
+// ずれても普段は何も起きない（読み込みが成功する限り使われない）。
+// **問題は、使われる日が「weapons.jsが壊れている日」だということ。**
+// その日はただでさえ混乱しているのに、弾の強さと距離減衰まで別物のサーバーが動く。
+// 遊んでいる側からは「今日はやけに固い」としか分からない。
+//
+// 並びも見る。sim.js のコメントにある通り**番号がずれると別の武器になる**ので、
+// 手榴弾を1本足しただけで、ナイフを撃ったつもりが手榴弾の数字で判定される
+{
+  const { FALLBACK_WEAPONS, weaponsSource } = await import('../server/sim.js');
+  const { WEAPONS } = await import('../src/player/weapons.js');
+
+  // まず、そもそも今どちらを使っているか。
+  // 読み込みに失敗していると黙って退避へ落ちるので、静かな異常として一番先に見る
+  ok(weaponsSource === 'weapons.js',
+    `サーバーは本物の表を読めている（${weaponsSource}）`
+    + (weaponsSource === 'weapons.js' ? '' : '  ← 退避表で動いている'));
+
+  ok(FALLBACK_WEAPONS.length === WEAPONS.length,
+    `本数が同じ 退避${FALLBACK_WEAPONS.length} / 本物${WEAPONS.length}`);
+
+  // サーバーが実際に読む項目だけを見る。
+  // 見た目・音・反動は退避表が持たない（持たせても誰も読まない）
+  const USED = [
+    'id', 'damage', 'rpm', 'pellets', 'mag', 'reloadTime', 'adsTime',
+    'range', 'falloffStart', 'falloffEnd', 'falloffMin',
+  ];
+
+  const n = Math.min(FALLBACK_WEAPONS.length, WEAPONS.length);
+  for (let i = 0; i < n; i++) {
+    const fb = FALLBACK_WEAPONS[i];
+    const real = WEAPONS[i];
+    const diff = USED.filter((k) => fb[k] !== real[k]);
+    ok(diff.length === 0,
+      `${i}番 ${real.id}`
+      + (diff.length === 0 ? ' … 写しが本物と一致している'
+        : `  ← ${diff.map((k) => `${k} 退避${fb[k]} / 本物${real[k]}`).join('、')}`));
+  }
+}
+
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);
 process.exit(bad === 0 ? 0 : 1);

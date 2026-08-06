@@ -15,8 +15,13 @@ import {
 /* ------------------------------------------------------------ 武器の表 */
 
 // weapons.jsが読めなかった時の退避。サーバーが要るのは弾の強さと距離減衰だけなので、
-// 見た目・音・反動は持たない。値はweapons.jsのWEAPONSから写したもの
-const FALLBACK_WEAPONS = [
+// 見た目・音・反動は持たない。値はweapons.jsのWEAPONSから写したもの。
+//
+// **写しなので、weapons.js側を触ると黙ってずれる。**
+// ずれたまま退避へ落ちた日は、弾の強さも距離減衰も別物のサーバーで対戦することになり、
+// 「今日はやけに固い」としか分からない。tools/check-weapons.mjs の[6]が写し間違いを見張るので、
+// 検査から読めるようにexportしてある
+export const FALLBACK_WEAPONS = [
   {
     id: 'rifle', name: 'MK-4 カービン', damage: 27, rpm: 640, pellets: 1,
     mag: 30, reloadTime: 2.15, adsTime: 0.16,
