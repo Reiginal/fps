@@ -347,8 +347,12 @@ function onInput(conn, m) {
   const frames = [];
   for (let i = skip; i < m.f.length; i++) {
     const f = m.f[i];
-    if (!Array.isArray(f) || f.length < 3) return;
-    if (!isNum(f[0]) || !isNum(f[1]) || !isNum(f[2])) return;
+    // 壊れた1本が出た所で打ち切る（続きを見ない）。
+    // 配列の並び=連番のseqという前提なので、途中を抜いて後ろを詰めると
+    // それより後ろのフレームが全部1つずつ違うseqとして届いてしまう。
+    // 打ち切ってそこまでの分だけ使えば、位置と連番の対応はずれない
+    if (!Array.isArray(f) || f.length < 3) break;
+    if (!isNum(f[0]) || !isNum(f[1]) || !isNum(f[2])) break;
     frames.push([
       Math.round(f[0]) & KEY_MASK,
       wrapAngle(f[1]),
