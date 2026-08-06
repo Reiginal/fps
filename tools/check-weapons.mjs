@@ -537,10 +537,55 @@ console.log('\n[モデル差し替え] 買ったモデルを被せられるか')
     ok(hidden.length === 1, `隠したのは1つだけ（${hidden.length}）`);
   }
 
-  // 買った物は向きも大きさもばらばら。そのまま置くと巨大な銃が横を向いて出る
+  /* 買った物は向きも大きさもばらばら。そのまま置くと巨大な銃が横を向いて出る。
+     **どちらが銃口かも見る。** 間違えると、銃が自分のほうを向いた状態で構えることになる
+     （実際、最初の作りは向きを見ていなくて後ろ向きになった）。
+     細いほうが銃身、太いほうが銃床と弾倉 */
+
+  // 銃のかたちを作る。thinAt で細い側（＝銃身）がどちらかを決める
+  const mkGun = (axis, thinAt) => {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshBasicMaterial();
+    // 銃身（細くて長い）と銃床（太くて短い）
+    const barrel = new THREE.Mesh(new THREE.BoxGeometry(...(axis === 'x' ? [6, 0.2, 0.2] : [0.2, 0.2, 6])), mat);
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(...(axis === 'x' ? [2, 1.2, 0.6] : [0.6, 1.2, 2])), mat);
+    const s = thinAt === 'min' ? 1 : -1;
+    if (axis === 'x') { barrel.position.x = -3 * s; stock.position.x = 3.5 * s; }
+    else { barrel.position.z = -3 * s; stock.position.z = 3.5 * s; }
+    g.add(barrel, stock);
+    return g;
+  };
+
+  // 合わせた後、前(-z)側が細くなっていること
+  const frontIsThin = (g) => {
+    g.updateMatrixWorld(true);
+    const pts = [];
+    const v = new THREE.Vector3();
+    g.traverse((o) => {
+      if (!o.isMesh) return;
+      const p = o.geometry.attributes.position;
+      for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld); pts.push(v.clone()); }
+    });
+    const zs = pts.map((p) => p.z);
+    const lo = Math.min(...zs); const hi = Math.max(...zs);
+    const thick = (a, b) => {
+      const sel = pts.filter((p) => p.z >= lo + (hi - lo) * a && p.z < lo + (hi - lo) * b);
+      const ys = sel.map((p) => p.y);
+      return sel.length ? Math.max(...ys) - Math.min(...ys) : 0;
+    };
+    return thick(0, 0.2) < thick(0.8, 1);
+  };
+
+  for (const axis of ['x', 'z']) {
+    for (const thinAt of ['min', 'max']) {
+      const g = mkGun(axis, thinAt);
+      fitModel(g, -0.685);
+      ok(frontIsThin(g), `${axis}方向に長く、${thinAt === 'min' ? '手前' : '奥'}が銃身のモデル … 銃身が前を向く`);
+    }
+  }
+
   {
-    const big = new THREE.Group();
-    big.add(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 12), new THREE.MeshBasicMaterial()));
+    const big = mkGun('x', 'min');
     fitModel(big, -0.685);
     const box = new THREE.Box3().setFromObject(big);
     const size = new THREE.Vector3();
@@ -550,13 +595,6 @@ console.log('\n[モデル差し替え] 買ったモデルを被せられるか')
     const c = new THREE.Vector3();
     box.getCenter(c);
     ok(Math.abs(c.x) < 0.02 && Math.abs(c.z) < 0.02, '真ん中が原点へ来る');
-  }
-  // 長辺が横向きのモデルは回して前へ向ける
-  {
-    const sideways = new THREE.Group();
-    sideways.add(new THREE.Mesh(new THREE.BoxGeometry(8, 0.3, 0.3), new THREE.MeshBasicMaterial()));
-    fitModel(sideways, -0.685);
-    ok(Math.abs(sideways.rotation.y) > 1, '横を向いたモデルは回す');
   }
 }
 

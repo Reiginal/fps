@@ -50,31 +50,79 @@ export function hideBuiltMeshes(inner) {
  *
  * **モデルごとに向きも大きさもばらばら。** 買った物をそのまま置くと、
  * 10倍の大きさで横を向いた銃が目の前に出る。
- * 銃口の位置（元の組み立てが持っている印）を手掛かりにして、
- * 銃身の長さが合うように縮める。
+ * 銃口の位置（元の組み立てが持っている印）を手掛かりにして銃身の長さを合わせ、
+ * **細いほう（銃身）が前を向くように回す。**
  *
- * @param target 置き先（元のinner）
- * @param scene  読み込んだモデル
- * @param aimZ   元の銃の銃口のz（マイナスが前）。ここへ長さを合わせる
+ * @param scene 読み込んだモデル
+ * @param aimZ  元の銃の銃口のz（マイナスが前）。ここへ長さを合わせる
  */
 export function fitModel(scene, aimZ) {
-  const box = new THREE.Box3().setFromObject(scene);
-  const size = new THREE.Vector3();
-  box.getSize(size);
-  const longest = Math.max(size.x, size.y, size.z, 1e-6);
-  // 一番長い辺を銃身の長さへ合わせる。多くの銃モデルは長辺が銃身
+  scene.updateMatrixWorld(true);
+  const pts = collectPoints(scene);
+  if (!pts.length) return 1;
+
+  // 一番長い向きを探す。銃はほぼ必ずその向きが銃身
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (const p of pts) {
+    for (let a = 0; a < 3; a++) {
+      if (p[a] < min[a]) min[a] = p[a];
+      if (p[a] > max[a]) max[a] = p[a];
+    }
+  }
+  const size = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+  const long = size[0] >= size[2] ? 0 : 2;   // 横長か、前後に長いか
+  const span = size[long] || 1e-6;
+
+  /* **どちらが銃口か。** 細いほうが銃身、太いほうが銃床と弾倉。
+     ここを間違えると、銃が自分のほうを向いた状態で構えることになる
+     （実際、最初の作りは向きを見ていなくて後ろ向きになった）。
+     両端2割ずつの太さを比べる */
+  const thickness = (from, to) => {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const p of pts) {
+      const t = (p[long] - min[long]) / span;
+      if (t < from || t >= to) continue;
+      if (p[1] < lo) lo = p[1];
+      if (p[1] > hi) hi = p[1];
+    }
+    return hi > lo ? hi - lo : 0;
+  };
+  const headThin = thickness(0, 0.2) < thickness(0.8, 1);
+
+  /* 細いほうを前（-z）へ向ける。
+       横長 … 小さい側が細いなら -90度、大きい側が細いなら +90度
+       前後長 … 小さい側が細いならそのまま、大きい側が細いなら180度 */
+  if (long === 0) scene.rotation.y = headThin ? -Math.PI / 2 : Math.PI / 2;
+  else scene.rotation.y = headThin ? 0 : Math.PI;
+
+  // 銃身の長さへ合わせる。実寸のまま置くと、10倍の大きさの銃が目の前に出る
   const want = Math.abs(aimZ) * 1.35;
-  const k = want / longest;
+  const k = want / span;
   scene.scale.setScalar(k);
 
-  // 中心を原点へ寄せてから、銃口が前（-z）へ来るように置く。
-  // モデルによっては長辺がxのことがあるので、その時は回す
-  if (size.x > size.z) scene.rotation.y = Math.PI / 2;
-  const box2 = new THREE.Box3().setFromObject(scene);
+  // 真ん中を原点へ寄せる。寄せないと、モデルの原点次第で銃が視界の外へ飛ぶ
+  const box = new THREE.Box3().setFromObject(scene);
   const c = new THREE.Vector3();
-  box2.getCenter(c);
+  box.getCenter(c);
   scene.position.sub(c);
   return k;
+}
+
+/* 頂点を世界の座標で集める。向きと太さを測るのに要る */
+function collectPoints(scene) {
+  const out = [];
+  const v = new THREE.Vector3();
+  scene.traverse((o) => {
+    if (!o.isMesh || !o.geometry?.attributes?.position) return;
+    const p = o.geometry.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld);
+      out.push([v.x, v.y, v.z]);
+    }
+  });
+  return out;
 }
 
 /**
