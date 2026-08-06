@@ -63,5 +63,52 @@ console.log('\n[3] 覗いた時の締まりは残っている');
   ok(/uScopeShadow:\s*\{\s*value:\s*0\.[1-9]/.test(src), '接眼のケラレが残っている');
 }
 
+console.log('\n[時間帯] 遊びに来た時刻で太陽が変わる');
+/* **夜を作っていないことが肝。** 暗くすると当てる所が見えなくなって、
+   遊びとして別物になる。何時に来ても朝・昼・夕方のどれかへ寄せる。
+   仰角が0以下だと太陽が地面の下に行って、影の計算（仰角のtanで割る）が壊れる */
+{
+  const { TIME_OF_DAY, timeOfDayAt, timeOfDay, currentTimeOfDay } = await import('../src/world/sun.js');
+
+  ok(TIME_OF_DAY.length >= 2, `時間帯は ${TIME_OF_DAY.length} 種類（${TIME_OF_DAY.map((t) => t.name).join('、')}）`);
+  for (const t of TIME_OF_DAY) {
+    const [x, y, z] = t.dir;
+    ok(Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z), `${t.name} … 向きが数`);
+    // 地面の下から照らすと、影カメラの奥行き（仰角のtanで割る）が壊れる
+    ok(y > 0.15, `${t.name} … 太陽が地面の上にある（仰角 ${(Math.atan2(y, Math.hypot(x, z)) * 57.3).toFixed(0)}度）`);
+    ok(y < 0.95, `${t.name} … 真上ではない（真上だと影が物の真下に潰れて画が平らになる）`);
+    ok(Number.isInteger(t.color) && t.color > 0, `${t.name} … 日射しの色がある`);
+  }
+
+  /* **24時間どこにも入らない時刻があってはいけない。**
+     夕方だけ日をまたぐので、範囲の見方を間違えると夜が抜ける。
+
+     表そのものを見る。timeOfDayAt() には「どこにも入らなければ夕方」という
+     逃げ道があるので、返り値だけ見ていると穴が空いていても気づけない
+     （実際、範囲を [16,24] に壊しても検査が通ってしまった） */
+  const covers = (t, h) => {
+    const [from, to] = t.hours;
+    return from < to ? (h >= from && h < to) : (h >= from || h < to);
+  };
+  for (let h = 0; h < 24; h++) {
+    ok(TIME_OF_DAY.some((t) => covers(t, h)), `${h}時 … 表のどれかの範囲に入っている`);
+  }
+
+  const seen = new Set();
+  for (let h = 0; h < 24; h++) {
+    const t = timeOfDayAt(h);
+    ok(!!t && TIME_OF_DAY.includes(t), `${h}時 … ${t?.name || 'どこにも入らない'}`);
+    seen.add(t?.id);
+  }
+  ok(seen.size === TIME_OF_DAY.length, `24時間で全部の時間帯が出る（${seen.size} / ${TIME_OF_DAY.length}）`);
+
+  // 壊れた時刻でも画が出る
+  for (const junk of [NaN, undefined, -3, 99]) {
+    ok(!!timeOfDayAt(junk)?.dir, `${String(junk)} を渡されても向きが返る`);
+  }
+  ok(timeOfDay('でたらめ') === TIME_OF_DAY[2], '知らない名前は夕方（今まで通りの画）へ寄せる');
+  ok(!!currentTimeOfDay()?.dir, '今の時刻でも向きが返る');
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);
