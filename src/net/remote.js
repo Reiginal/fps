@@ -126,13 +126,20 @@ export class RemotePlayers {
     // 出るのは常に1つだけ。全部消してから1つ出す形にすると、
     // 武器を足した時に消し忘れが起きない
     const id = WEAPONS[index]?.id;
-    p.gun.visible = id === 'rifle';
     if (p.gunShotgun) p.gunShotgun.visible = id === 'shotgun';
     if (p.heldKnife) p.heldKnife.visible = id === 'knife';
     if (p.heldNade) p.heldNade.visible = id === 'nade';
-    // 知らない武器が来たら、とりあえずライフルを出す。
-    // 何も出ないと素手で構えている絵になり、何を持っているのか読めない
-    if (!id) p.gun.visible = true;
+    // 専用の見た目を持たない武器は、まとめてライフルの形で出す。
+    //
+    // **「知らない番号だけ」を拾う書き方にしていると、武器を足した時に
+    // 誰も持っていない絵になる。** 実際ピストルを足した時、idは引けるので
+    // 下の !id に入らず、上のどれにも一致せず、**素手で構えて撃つ**状態だった。
+    // 「持っていない物を持って見える」のは嘘だが、
+    // 「持っている物が何も見えない」のはもっと読めない
+    const hasOwnModel = (p.gunShotgun && p.gunShotgun.visible)
+      || (p.heldKnife && p.heldKnife.visible)
+      || (p.heldNade && p.heldNade.visible);
+    p.gun.visible = !hasOwnModel;
   }
 
   get(id) {

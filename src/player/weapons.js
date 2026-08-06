@@ -1916,6 +1916,112 @@ function buildShotgun() {
 //
 // 弾を持たないので mag に大きい数を入れて装填を起こさせない。
 // muzzle/eject/sight の3つは武器側が必ず参照するので、銃が無くても印だけは置く
+// 拳銃。サイドアーム。
+//
+// 足した理由は2つ。1つはガンゲーム（キルごとに武器が替わるモード）で、
+// 武器が4本しかないと1周が短すぎたこと。もう1つは、
+// ライフルとショットガンの間に「軽くて素早いが火力が低い」枠が無かったこと。
+//
+// 形は詰め込まない。全長19cmしかないので、ライフルと同じ密度で部品を置くと
+// 画面上では潰れた塊にしかならない。スライド・フレーム・握把・照準の
+// 4つの塊が読めれば拳銃に見える
+const P_BORE = 0.012;       // 銃身の芯の高さ
+const P_GRIP_TILT = -0.30;  // 握把の傾き。垂直だと握った手が不自然に立つ
+
+function buildPistol(view = {}) {
+  const g = new THREE.Group();
+  const grip = view.grip || {};
+
+  /* ---- スライド。一番大きい塊なので、ここで拳銃に見えるかが決まる */
+  g.add(part(cboxG(0.030, 0.028, 0.170), MATS.anodized, 0, P_BORE + 0.002, -0.050));
+  // 天面の細い段。真っ平らな箱だと「弁当箱」に見える
+  g.add(part(boxG(0.013, 0.004, 0.168), MATS.anodized, 0, P_BORE + 0.017, -0.050));
+  // 後端の滑り止め。等間隔の溝を数本入れるだけで金属の板に見える
+  for (let i = 0; i < 5; i++) {
+    const z = 0.012 - i * 0.010;
+    g.add(part(boxG(0.032, 0.016, 0.003), MATS.phosphate, 0, P_BORE + 0.002, z));
+  }
+  // 排莢口。開けっ放しにすると穴が抜けるので奥を塞ぐ
+  g.add(part(boxG(0.004, 0.016, 0.040), MATS.enamel, 0.014, P_BORE + 0.006, -0.014));
+
+  /* ---- 銃身。スライドの先から少しだけ出す */
+  g.add(part(cylG(0.0075, 0.0075, 0.020, 10), MATS.steel, 0, P_BORE, -0.140, Math.PI / 2));
+  g.add(part(cylG(0.0055, 0.0055, 0.008, 10), MATS.phosphate, 0, P_BORE, -0.148, Math.PI / 2));
+
+  /* ---- フレーム。スライドの下に一段細い箱を通す */
+  g.add(part(cboxG(0.026, 0.018, 0.120), MATS.polymer, 0, -0.006, -0.040));
+  // 銃身の下の覆い。ここが無いと銃身が宙に浮いて見える
+  g.add(part(cboxG(0.022, 0.014, 0.062), MATS.polymer, 0, -0.004, -0.096));
+
+  /* ---- 用心金と引き金 */
+  g.add(part(boxG(0.020, 0.007, 0.007), MATS.polymer, 0, -0.034, -0.016));
+  g.add(part(boxG(0.020, 0.006, 0.032), MATS.polymer, 0, -0.038, 0.002));
+  g.add(part(boxG(0.007, 0.019, 0.006), MATS.steel, 0, -0.026, 0.006));
+
+  /* ---- 握把。後ろへ傾ける。垂直だと手首が立って人形の手になる */
+  g.add(part(cboxG(0.029, 0.088, 0.040), MATS.polymer, 0, -0.062, 0.036, P_GRIP_TILT));
+  // 側面の滑り止め
+  for (let i = 0; i < 3; i++) {
+    g.add(part(boxG(0.031, 0.004, 0.026), MATS.rubber, 0, -0.046 - i * 0.020, 0.041 + i * 0.006, P_GRIP_TILT));
+  }
+  // 弾倉の底板。握把の下端に少しはみ出させると「入っている」が読める
+  g.add(part(cboxG(0.032, 0.008, 0.046), MATS.phosphate, 0, -0.104, 0.049, P_GRIP_TILT));
+
+  /* ---- 照準。前後を離して置くと、覗いた時に線が通る */
+  g.add(part(boxG(0.004, 0.009, 0.005), MATS.phosphate, 0, P_BORE + 0.023, -0.128));
+  g.add(part(boxG(0.020, 0.007, 0.007), MATS.phosphate, 0, P_BORE + 0.022, 0.026));
+  g.add(part(boxG(0.006, 0.008, 0.008), MATS.steel, 0.007, P_BORE + 0.023, 0.026));
+  g.add(part(boxG(0.006, 0.008, 0.008), MATS.steel, -0.007, P_BORE + 0.023, 0.026));
+
+  /* ---- 銃側が必ず読む3つの印 */
+  const muzzle = new THREE.Object3D();
+  muzzle.position.set(0, P_BORE, -0.155);
+  g.add(muzzle);
+  g.userData.muzzle = muzzle;
+  const eject = new THREE.Object3D();
+  eject.position.set(0.020, P_BORE + 0.008, -0.010);
+  g.add(eject);
+  g.userData.eject = eject;
+  // 覗いた時の寄せ先。照門の高さに置くと照準線が画面の中心へ来る
+  const sight = new THREE.Object3D();
+  sight.position.set(0, P_BORE + 0.026, -0.050);
+  g.add(sight);
+  g.userData.sight = sight;
+
+  /* ---- 手。両手で持つ。片手だと的当ての構えになって緊張感が出ない */
+  const handR = buildHand(1, {
+    gripR: 0.019, wrap: 0.58, trigger: true,
+    armDir: grip.armDir || [0.36, -0.78, 0.34],
+    armLen: grip.armLen != null ? grip.armLen : 0.34,
+  });
+  handR.position.fromArray(grip.pos || [0, -0.052, 0.034]);
+  handR.rotation.fromArray(grip.rot || [P_GRIP_TILT, 0, 0]);
+  g.add(handR);
+  g.userData.handR = handR;
+
+  // 添え手。右手の握りを下から包む位置に置く。
+  // ライフルの支え手と違って掴む対象が「手」なので、gripRは指の太さぶん大きくする
+  const handL = buildHand(-1, {
+    gripR: 0.026, wrap: 0.50, tip: -0.26, roll: 0.34, skew: 0.18,
+    wrist: [0.046, -0.052, -0.038], armDir: [-0.34, -0.86, -0.30],
+  });
+  handL.position.set(-0.020, -0.066, 0.044);
+  handL.rotation.set(P_GRIP_TILT, 0, 0.34);
+  g.add(handL);
+  g.userData.handL = handL;
+
+  // 装填中に添え手が辿る位置。弾倉を抜いて、下から新しいのを入れて、戻る
+  g.userData.holdL = {
+    rest: [[-0.020, -0.066, 0.044], [P_GRIP_TILT, 0, 0.34]],
+    mag: [[0.010, -0.150, 0.060], [0.24, 0.20, -0.18]],
+    low: [[0.030, -0.290, 0.100], [0.50, 0.34, -0.28]],
+    charge: [[0.026, 0.040, 0.020], [0.80, 0.06, 0.30]],
+  };
+
+  bakeStatic(g);
+  return g;
+}
+
 function buildKnife(view = {}) {
   const g = new THREE.Group();
   // 握り方は def.view.grip が持つ。持っていなければ今まで通りの値
@@ -2146,6 +2252,46 @@ export const WEAPONS = [
       // 1発が重い銃なので大きく蹴り上げる。バネが柔らかい（kickK 205）ぶん戻りも遅い
       kickUp: 2.20, kickSide: 0.70,
       boltTravel: 0, boltTime: 0.10, lower: 0.29,
+    },
+  },
+  {
+    id: 'pistol', name: 'P-9 サイドアーム', build: buildPistol,
+    // ライフルとショットガンの間に「軽くて素早いが火力が低い」枠が無かった。
+    // 体力130に対して胴26＝5発。ライフルと同じ発数だが、
+    // 連射が400/分（ライフルは640）なので**当て続ける時間が1.6倍かかる**。
+    // 撃ち合いを正面から始めたら勝てない、という位置付けにする
+    damage: 26, headMult: 2.0, rpm: 400, auto: false, pellets: 1,
+    // 弾倉15発は「1人倒すと3発しか残らない」量。2人目に会う前に入れ直す判断が要る
+    mag: 15, reserve: 75, reloadTime: 1.55,
+    // 腰だめはライフル(0.024)より広い。近い距離だけ成立する形は同じだが、
+    // 覗いた時の集束はライフルより甘くして、遠距離では選ばれないようにする
+    spreadHip: 0.030, spreadAds: 0.0032, spreadPerShot: 0.0050, spreadMax: 0.062, spreadRecover: 0.14,
+    recoilPitch: 0.0165, recoilYaw: 0.0052, kick: 0.045, adsFov: 55, adsTime: 0.11,
+    // 射程はライフルの半分ほど。40mを超えると半分以下の威力になる
+    range: 70, falloffStart: 18, falloffEnd: 46, falloffMin: 0.42,
+    // 小さい銃なので胴を高めに、余韻を短く。ライフルの300Hzより上げて
+    // 「パン」と切れる音にする。腹に来る低音(thump)は持たせない
+    sound: { volume: 0.62, bodyFreq: 420, crackFreq: 3900, bodyDecay: 0.13, tailDecay: 0.38, thumpFrom: 150, thumpTo: 62 },
+    casing: true,
+    reloadKind: 'mag', holdOpen: true,
+    // 軽いぶん速く歩ける。ナイフ(1.35)ほどではない
+    moveMul: 1.12,
+    view: {
+      // 全長19cmしかないので、ライフルと同じ縮尺だと画面で豆粒になる。
+      // 1.0だと本体が画面の6〜10%しか占めず、何を持っているのか読めなかった
+      scale: 1.28, adsScale: 0.86, adsDist: 0.125,
+      // 握把と弾倉が画面の下へ抜けるのは拳銃では正常で、どのFPSもそう描く。
+      // 見せたいのはスライドと照準なので、そこが枠に入る高さまで持ち上げる。
+      // 総当たりで測ると、y=-0.150では本体の21.8%が枠外（弾倉の底が画面外）、
+      // -0.085まで上げると17.8%。上げすぎると今度は銃が視界の真ん中に立つ。
+      // 奥行きは-0.46。それより手前だと縮尺を上げた時に腕が目へ届く
+      hip: [0.185, -0.080, -0.460], hipRot: [-0.008, 0.013, 0.10],
+      grip: { armDir: [0.36, -0.78, 0.34], armLen: 0.34 },
+      // 小さい銃は揺れも反動も速い。跳ね上げはライフル(1.30)より大きいが、
+      // バネが硬い(kickK 340)ので戻りも速く、連射が効かないぶん撃つたびに収まる
+      bob: 1.15, sway: 0.90, kickK: 340, kickD: 23,
+      kickUp: 1.70, kickSide: 0.55,
+      boltTravel: 0.022, boltTime: 0.060, lower: 0.21,
     },
   },
   {
