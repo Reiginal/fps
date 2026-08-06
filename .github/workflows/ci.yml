@@ -149,5 +149,8 @@ jobs:
       - name: 検査 戦績と実績
         run: node tools/check-stats.mjs
 
+      - name: 検査 回線が切れた後の復帰
+        run: node tools/check-rejoin.mjs
+
       - name: 検査 地形のメモリ
         run: node --expose-gc tools/check-world.mjs

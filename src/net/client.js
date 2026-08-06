@@ -41,6 +41,11 @@ const PENDING_MAX = 300;
 // お迎えが来ないまま黙っているサーバーを待ち続けない
 const CONNECT_TIMEOUT_MS = 8000;
 
+/* 前に入った時の合言葉を置くところ。**localStorageではなくsessionStorage。**
+   タブごとに別なので、2つのタブで同じ画面を開いて遊んでも、
+   片方の合言葉でもう片方の席を取ってしまうことがない */
+const TOKEN_KEY = 'blackout.token';
+
 export class NetClient {
   constructor() {
     this.id = null;
@@ -94,6 +99,13 @@ export class NetClient {
     this._connectTimer = null;
     this._closed = false;
 
+    /* 前に入った時の合言葉。入る時にこれを添えると、回線が切れて入り直した時に
+       席・点数・ラウンド数が返ってくる。無ければ新しい人として入る */
+    this.token = null;
+    try { this.token = sessionStorage.getItem(TOKEN_KEY) || null; } catch { /* 読めないだけ */ }
+    // 前の続きから始まったか。お迎えで届く
+    this.wasBack = false;
+
     /* protocol.jsは「取りこぼしに備えて直近の未確認分も一緒に送る」と書いてあるが、
        既定では新しい刻みだけを送る。1パケット3刻みという前提を崩さないため。
        サーバー側が取りこぼしに弱いと分かったらここを1〜3にする */
@@ -125,7 +137,11 @@ export class NetClient {
       this._connectTimer.unref?.();
 
       ws.onopen = () => {
-        this._send({ t: C.JOIN, name: String(name).slice(0, 24) });
+        const join = { t: C.JOIN, name: String(name).slice(0, 24) };
+        // 合言葉は持っている時だけ添える。**空文字を送ってはいけない**
+        // （サーバー側で「合言葉あり」と数えられて、無駄に照合が走る）
+        if (this.token) join.tk = this.token;
+        this._send(join);
       };
       ws.onmessage = (ev) => this._recv(ev.data);
       // 切れ方の違いは遊ぶ側にはどうでもいい。理由の文字列だけ変えて同じ道を通す
@@ -272,6 +288,16 @@ export class NetClient {
   _welcome(m) {
     this.id = m.id;
     this.connected = true;
+    /* 次に入り直す時の合言葉。**この電文でしか渡らない。**
+       控えておかないと、回線が切れた時に席も点数も戻ってこない。
+       タブの記憶(sessionStorage)にも置くのは、ページを読み込み直した時に
+       手元の変数が消えるため（電車で切れた時は変数が生きているので要らないが、
+       「固まったから再読み込みした」が一番よくある戻り方） */
+    if (typeof m.tk === 'string' && m.tk) {
+      this.token = m.tk;
+      try { sessionStorage.setItem(TOKEN_KEY, m.tk); } catch { /* 覚えられないだけ */ }
+    }
+    this.wasBack = !!m.back;
     this._syncClock(m.now);
     this.players.clear();
     if (Array.isArray(m.players)) for (const p of m.players) this._touchPlayer(p);
