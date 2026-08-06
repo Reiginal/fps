@@ -291,6 +291,22 @@ export class SimPlayer {
     if (this.fireTokens > this._fireCap) this.fireTokens = this._fireCap;
   }
 
+  /**
+   * 持ち物を差し替える。ガンゲームで段が進んだ時にRoomが呼ぶ。
+   *
+   * 今握っている武器が新しい持ち物に入っていなければ、先頭へ持ち替える。
+   * **その時は持ち替えの間(swapIn)を必ず置く。** 置かないと、
+   * 倒した瞬間に次の武器で撃てることになり、連続で倒すのが強すぎる
+   */
+  setCarry(list) {
+    this.carry = Array.isArray(list) && list.length ? list.slice() : [0];
+    if (this.carry.includes(this.weapon)) return;
+    this.weapon = this.carry[0];
+    this.reloadIn = 0;
+    this.swapIn = SWAP_LOCK_S;
+    this._applyWeaponRate();
+  }
+
   setWeapon(i) {
     const n = i | 0;
     if (n < 0 || n >= WEAPONS.length || n === this.weapon) return false;

@@ -9,6 +9,7 @@
 // 遊んでいる側からは何が起きたのか読めない不具合になる。
 //
 //   node tools/check-lobby.mjs
+import { readFileSync } from 'node:fs';
 import '../server/dom-stub.js';
 import { PHASE, SEATS, MATCH } from '../src/net/protocol.js';
 
@@ -217,6 +218,44 @@ console.log('\n[15] 同じ見た目が2人並ばない');
 
   // 席は4つで見た目は6種類。座る人が全員別の姿になれることを数で確かめる
   ok(CHARACTERS.length >= SEATS, `見た目 ${CHARACTERS.length} 種 ≧ 席 ${SEATS} つ（必ず行き渡る）`);
+}
+
+console.log('\n[16] ロビーの1行の並びが作る側と読む側で揃っている');
+// **チーム制をやめた時に1つずれた所。**
+// 作る側は team を落としたのに、読む側(client.js)は6項目のまま読んでいて、
+// 見た目の番号がいつも undefined ＝ 0番になっていた。
+// 繋がるし席も座れるので誰も気づかず、**対戦中だけ全員が同じ姿で並ぶ**。
+{
+  clear();
+  const { LOBBY_ROW, LOBBY_ROW_LEN } = await import('../src/net/protocol.js');
+  const src = readFileSync(new URL('../src/net/client.js', import.meta.url), 'utf8');
+
+  const z = join('ぜっと');
+  room.setChar(z.slot, 2);
+  room.takeSeat(z.slot, 0);
+  const lob = z.conn.sent.filter((m) => m.t === 'L').pop();
+  ok(!!lob, 'ロビーが届いている');
+  const row = lob.rows.find((r) => r[LOBBY_ROW.ID] === z.slot.id);
+  ok(!!row, '自分の行がある');
+  ok(row.length === LOBBY_ROW_LEN, `1行は ${LOBBY_ROW_LEN} 項目 (${row.length})`);
+  ok(row[LOBBY_ROW.NAME] === 'ぜっと', `名前が読める (${row[LOBBY_ROW.NAME]})`);
+  ok(row[LOBBY_ROW.SEAT] === 0, `席が読める (${row[LOBBY_ROW.SEAT]})`);
+  ok(row[LOBBY_ROW.CHR] === z.slot.chr,
+    `見た目の番号が読める (${row[LOBBY_ROW.CHR]} / 実際は ${z.slot.chr})`);
+
+  // 読む側が番号を直に書いていないか。ここが直書きだと、
+  // 並びを変えた時にまた同じずれ方をする。
+  // 見るのはロビーの受け口の中だけ（点数の行は別の並びを持っている）。
+  // コメントは外す。この件の説明そのものに r[5] と書いてあるため
+  {
+    const at = src.indexOf('case Sv.LOBBY:');
+    const body = src.slice(at, src.indexOf('break;', at))
+      .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+    ok(at > 0, 'ロビーの受け口が見つかる');
+    ok(!/\br\[\d\]/.test(body),
+      `ロビーの行を番号で直に読んでいない${/\br\[\d\]/.test(body) ? `（${body.match(/\br\[\d\]/)[0]}）` : ''}`);
+    ok(/LOBBY_ROW\./.test(body), 'LOBBY_ROW で読んでいる');
+  }
 }
 
 clear();
