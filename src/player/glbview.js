@@ -50,13 +50,13 @@ export function hideBuiltMeshes(inner) {
  *
  * **モデルごとに向きも大きさもばらばら。** 買った物をそのまま置くと、
  * 10倍の大きさで横を向いた銃が目の前に出る。
- * 銃口の位置（元の組み立てが持っている印）を手掛かりにして銃身の長さを合わせ、
- * **細いほう（銃身）が前を向くように回す。**
+ * **元の銃が占めていた箱へ収める。** 長さも置き場所もそこから決まる。
+ * あわせて**細いほう（銃身）が前を向くように回す。**
  *
  * @param scene 読み込んだモデル
- * @param aimZ  元の銃の銃口のz（マイナスが前）。ここへ長さを合わせる
+ * @param box   元の銃（手を除いた本体）が占めていた箱。ここへ収める
  */
-export function fitModel(scene, aimZ) {
+export function fitModel(scene, box) {
   scene.updateMatrixWorld(true);
   const pts = collectPoints(scene);
   if (!pts.length) return 1;
@@ -77,19 +77,28 @@ export function fitModel(scene, aimZ) {
   /* **どちらが銃口か。** 細いほうが銃身、太いほうが銃床と弾倉。
      ここを間違えると、銃が自分のほうを向いた状態で構えることになる
      （実際、最初の作りは向きを見ていなくて後ろ向きになった）。
-     両端2割ずつの太さを比べる */
-  const thickness = (from, to) => {
-    let lo = Infinity;
-    let hi = -Infinity;
+     両端2割ずつの「長い向きに直交する断面の大きさ」を比べる。
+     高さだけで比べると、銃身が太く見えるモデルで裏返る */
+  const girth = (from, to) => {
+    const lo = [Infinity, Infinity, Infinity];
+    const hi = [-Infinity, -Infinity, -Infinity];
+    let n = 0;
     for (const p of pts) {
       const t = (p[long] - min[long]) / span;
       if (t < from || t >= to) continue;
-      if (p[1] < lo) lo = p[1];
-      if (p[1] > hi) hi = p[1];
+      for (let a = 0; a < 3; a++) {
+        if (p[a] < lo[a]) lo[a] = p[a];
+        if (p[a] > hi[a]) hi[a] = p[a];
+      }
+      n++;
     }
-    return hi > lo ? hi - lo : 0;
+    if (!n) return 0;
+    // 長い向きは除いて、残り2つの断面の大きさを掛ける
+    let area = 1;
+    for (let a = 0; a < 3; a++) if (a !== long) area *= Math.max(1e-6, hi[a] - lo[a]);
+    return area;
   };
-  const headThin = thickness(0, 0.2) < thickness(0.8, 1);
+  const headThin = girth(0, 0.2) < girth(0.8, 1);
 
   /* 細いほうを前（-z）へ向ける。
        横長 … 小さい側が細いなら -90度、大きい側が細いなら +90度
@@ -97,17 +106,40 @@ export function fitModel(scene, aimZ) {
   if (long === 0) scene.rotation.y = headThin ? -Math.PI / 2 : Math.PI / 2;
   else scene.rotation.y = headThin ? 0 : Math.PI;
 
-  // 銃身の長さへ合わせる。実寸のまま置くと、10倍の大きさの銃が目の前に出る
-  const want = Math.abs(aimZ) * 1.35;
-  const k = want / span;
+  /* **元の銃が占めていた箱へ合わせる。**
+     銃口の位置だけを手掛かりにしていた頃は、長さは合っても
+     置き場所が原点のままで、構えた時に手から離れた所に浮いていた。
+     元の銃の箱（手を除いた本体）の長さと中心が、そのまま答えになっている */
+  const target = new THREE.Vector3();
+  box.getSize(target);
+  const k = (target.z || 0.9) / span;
   scene.scale.setScalar(k);
 
-  // 真ん中を原点へ寄せる。寄せないと、モデルの原点次第で銃が視界の外へ飛ぶ
-  const box = new THREE.Box3().setFromObject(scene);
+  const now = new THREE.Box3().setFromObject(scene);
   const c = new THREE.Vector3();
-  box.getCenter(c);
-  scene.position.sub(c);
+  now.getCenter(c);
+  const want = new THREE.Vector3();
+  box.getCenter(want);
+  scene.position.add(want).sub(c);
   return k;
+}
+
+/**
+ * 手を除いた「本体」の箱。読み込んだモデルはここへ収める。
+ * 手まで入れると、箱が手のぶん広がって銃だけが大きくなる
+ */
+export function builtBox(inner) {
+  inner.updateMatrixWorld(true);
+  const box = new THREE.Box3();
+  inner.traverse((o) => {
+    if (!o.isMesh) return;
+    for (let p = o; p; p = p.parent) {
+      if (p.userData?.isHand) return;
+      if (p === inner) break;
+    }
+    box.expandByObject(o);
+  });
+  return box;
 }
 
 /* 頂点を世界の座標で集める。向きと太さを測るのに要る */
@@ -151,10 +183,9 @@ export async function tryModelOverride(weapon, id) {
   } catch { return false; }
   if (!gltf?.scene) return false;
 
-  const aimZ = inner.userData?.muzzle?.position?.z ?? -0.6;
-  fitModel(gltf.scene, aimZ);
-  // 銃口の少し後ろへ据える。銃口そのものへ置くと、モデルの真ん中が銃口へ来る
-  gltf.scene.position.z += aimZ * 0.35;
+  // **隠す前に測る。** 隠してからだと箱が空になって、置き場所が原点になる
+  const box = builtBox(inner);
+  fitModel(gltf.scene, box);
   hideBuiltMeshes(inner);
   inner.add(gltf.scene);
   inner.userData.glb = gltf.scene;

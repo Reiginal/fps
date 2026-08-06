@@ -514,7 +514,15 @@ console.log('\n[モデル差し替え] 買ったモデルを被せられるか')
    閃光も煙もそこへぶら下がっている。丸ごと差し替えると印まで消えて、
    撃った時に何も出なくなる。**印は残して、見えている所だけ差し替える** */
 {
-  const { modelUrl, hideBuiltMeshes, fitModel, MODEL_DIR } = await import('../src/player/glbview.js');
+  const { modelUrl, hideBuiltMeshes, fitModel, builtBox, MODEL_DIR } = await import('../src/player/glbview.js');
+
+  /* 収める先の箱。**元の銃（手を除いた本体）が占めていた所。**
+     ここへ合わせないと、長さは合っても置き場所が原点のままで、
+     構えた時に手から離れた所に銃が浮く（実際そうなった） */
+  const target = new THREE.Box3(
+    new THREE.Vector3(-0.04, -0.24, -0.68),
+    new THREE.Vector3(0.04, 0.14, 0.26),
+  );
 
   ok(MODEL_DIR.startsWith('assets/'), `置き場は外へ配る所（${MODEL_DIR}）`);
   ok(modelUrl('rifle').endsWith('/rifle.glb'), `名前から場所が引ける（${modelUrl('rifle')}）`);
@@ -579,22 +587,44 @@ console.log('\n[モデル差し替え] 買ったモデルを被せられるか')
   for (const axis of ['x', 'z']) {
     for (const thinAt of ['min', 'max']) {
       const g = mkGun(axis, thinAt);
-      fitModel(g, -0.685);
+      fitModel(g, target);
       ok(frontIsThin(g), `${axis}方向に長く、${thinAt === 'min' ? '手前' : '奥'}が銃身のモデル … 銃身が前を向く`);
     }
   }
 
+  // **元の箱の長さと置き場所に合う。** ここが合っていないと、
+  // 手から離れた所に銃が浮く／画面いっぱいの銃が出る
   {
     const big = mkGun('x', 'min');
-    fitModel(big, -0.685);
+    fitModel(big, target);
     const box = new THREE.Box3().setFromObject(big);
     const size = new THREE.Vector3();
     box.getSize(size);
-    const longest = Math.max(size.x, size.y, size.z);
-    ok(longest < 1.2 && longest > 0.4, `銃身の長さへ縮む（${longest.toFixed(2)}m）`);
+    const want = new THREE.Vector3();
+    target.getSize(want);
+    ok(Math.abs(size.z - want.z) < 0.01, `長さが元と同じ（${size.z.toFixed(3)} / ${want.z.toFixed(3)}）`);
     const c = new THREE.Vector3();
     box.getCenter(c);
-    ok(Math.abs(c.x) < 0.02 && Math.abs(c.z) < 0.02, '真ん中が原点へ来る');
+    const wc = new THREE.Vector3();
+    target.getCenter(wc);
+    ok(c.distanceTo(wc) < 0.01, `中心が元と同じ（${c.z.toFixed(3)} / ${wc.z.toFixed(3)}）`);
+  }
+
+  // 手を除いた本体の箱が引ける。手まで入れると銃だけが大きくなる
+  {
+    const inner = new THREE.Group();
+    const hand = new THREE.Group();
+    hand.userData.isHand = true;
+    const far = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial());
+    far.position.set(5, 0, 0);
+    hand.add(far);
+    inner.add(hand);
+    inner.add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.2, 0.9), new THREE.MeshBasicMaterial()));
+    const b = builtBox(inner);
+    const bs = new THREE.Vector3();
+    b.getSize(bs);
+    ok(bs.x < 0.5, `手は箱に入らない（x${bs.x.toFixed(2)}）`);
+    ok(Math.abs(bs.z - 0.9) < 0.01, `本体だけの大きさになる（z${bs.z.toFixed(2)}）`);
   }
 }
 
