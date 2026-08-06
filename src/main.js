@@ -2649,9 +2649,18 @@ class Game {
       // 掴んだままでも、文字を打つ場所に入力先があれば文字は打てる
       const typing = !!this.chat?.typing;
       // Enterで打つ場所を開く。対戦している時だけ
-      if (!typing && this.mode === 'versus' && this.input.pressed('Enter')) {
-        this.chat.open();
+      if (!typing && this.input.pressed('Enter')) {
+        if (this.mode === 'versus') {
+          this.chat.open();
+        } else {
+          // 1人プレイでは発言そのものが無い（対戦専用）。押しても何も
+          // 起きないと、遊ぶ側からは壊れているのかキーが違うのか分からない
+          // （課題.md #3）。一言だけ出して、放っておけば消える
+          this._chatHintT = 2.5;
+        }
       }
+      this._chatHintT = Math.max(0, (this._chatHintT || 0) - dt);
+      this.diag?.setState('chatHint', this._chatHintT > 0 ? '発言は対戦でだけ使えます' : '');
       const input = typing ? this._noInput : this.input;
       // 打っている間も、押した印とマウスの移動量は毎フレーム捨てる。
       // 溜めたままにすると、打ち終わった瞬間に溜まっていた分が一度に効く。
