@@ -13,6 +13,7 @@ import { WeaponSystem } from './player/weapons.js';
 import { Director } from './ai/enemy.js';
 import { HUD } from './ui/hud.js';
 import { NetMenu, NET_MSG } from './ui/netmenu.js';
+import { SettingsMenu } from './ui/settings.js';
 import { Lobby } from './ui/lobby.js';
 import { Chat } from './ui/chat.js';
 import { Diag } from './ui/diag.js';
@@ -725,16 +726,18 @@ class Game {
   _bindMenu() {
     const menu = new NetMenu();
     this.menu = menu;
-    // 全画面で遊ぶかどうかは選択画面のつまみが持っている。
-    // 前回の設定がlocalStorageから戻ってくるので、起動時に一度写しておかないと
-    // 「切ったまま閉じて、開き直したら全画面に戻る」ことになる
-    this.input.wantFullscreen = menu.fullscreen;
-    menu.onFullscreen = (on) => {
-      this.input.wantFullscreen = on;
-      // 遊んでいる最中に切られたら、その場で窓へ戻す。
+
+    /* 設定（感度・音量・上下反転・全画面）。
+       作った時点で覚えている値が全部効くので、ここで1つずつ写す必要はない。
+       写す形にしていた頃は、設定を1つ足すたびにここへ1行足すのを忘れて
+       「つまみは動くのに効かない」が出ていた */
+    this.settings = new SettingsMenu({ input: this.input, audio: this.audio });
+    this.settings.onChange = (key, value) => {
+      // 遊んでいる最中に全画面を切られたら、その場で窓へ戻す。
       // 次に遊び始めるまで効かないと、切ったのに何も起きないように見える
-      if (!on) this.input.exitFullscreen();
+      if (key === 'full' && !value) this.input.exitFullscreen();
     };
+    menu.onSettings = () => this.settings.show();
 
     // 繋がってから試合が始まるまでの画面。押された席をそのままサーバーへ送る。
     // 座れたかどうかを手元で決めないので、ここでは絵を書き換えない
@@ -966,8 +969,10 @@ class Game {
       // 遊び方を選ぶ前に起動画面を押してもロックを取らせない。
       // 取ると選択画面の裏でゲームが始まってしまう。
       // ロビーも同じで、席を選んでいる最中にロックを取られると
-      // マウスが画面へ吸われて席が押せなくなる
-      if (this.menu?.isOpen || this.lobby?.isOpen) return;
+      // マウスが画面へ吸われて席が押せなくなる。
+      // 設定も同じで、一時停止から開いている最中にロックを取られると
+      // つまみを掴んだ瞬間に試合へ戻ってしまう
+      if (this.menu?.isOpen || this.lobby?.isOpen || this.settings?.isOpen) return;
       this.audio.init();
       this.audio.resume();
       if (this.state === 'dead') this._restart();
@@ -1006,7 +1011,10 @@ class Game {
           回線 <b>${Math.round(this.net?.ping || 0)}</b>ms
         </div>
         <div class="cta">クリックで復帰</div>
-        <div><button id="ovHome" class="ovhome" type="button">ホームへ戻る</button></div>
+        <div>
+          <button id="ovSettings" class="ovhome" type="button">設定</button>
+          <button id="ovHome" class="ovhome" type="button">ホームへ戻る</button>
+        </div>
       `);
       return;
     }
@@ -1018,13 +1026,18 @@ class Game {
         到達 <b>${this.director.wave}</b>波 &nbsp; 撃破 <b>${this.kills}</b>
       </div>
       <div class="cta">クリックで再開</div>
-      <div><button id="ovHome" class="ovhome" type="button">ホームへ戻る</button></div>
+      <div>
+        <button id="ovSettings" class="ovhome" type="button">設定</button>
+        <button id="ovHome" class="ovhome" type="button">ホームへ戻る</button>
+      </div>
     `);
   }
 
-  /* 一時停止の画面を出して、「ホームへ戻る」を繋ぐ。
-     #overlayは「どこを押しても復帰」なので、そのまま置くと戻るボタンを押した瞬間に
-     復帰の処理も一緒に走る。stopPropagationで、この1箇所だけ上へ伝わらないようにする */
+  /* 一時停止の画面を出して、「ホームへ戻る」と「設定」を繋ぐ。
+     #overlayは「どこを押しても復帰」なので、そのまま置くとボタンを押した瞬間に
+     復帰の処理も一緒に走る。stopPropagationで、この2箇所だけ上へ伝わらないようにする。
+     設定をここから開けるようにしてあるのは、**感度は遊びながらでないと合わせられない**から。
+     ホームまで戻らないと変えられない作りだと、確かめるたびに試合を抜けることになる */
   _pauseOverlay(html) {
     this.hud.overlay(html);
     const home = document.getElementById('ovHome');
@@ -1032,6 +1045,13 @@ class Game {
       home.onclick = (e) => {
         e.stopPropagation();
         this._goHome();
+      };
+    }
+    const set = document.getElementById('ovSettings');
+    if (set) {
+      set.onclick = (e) => {
+        e.stopPropagation();
+        this.settings?.show();
       };
     }
   }

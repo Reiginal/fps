@@ -2,6 +2,7 @@
 // 銃声は距離で「音量が変わる」のではなく「別の音になる」。近くは乾いたクラック、
 // 中距離は残響が主役、遠くは低音のドスンだけが届く。ここを作り分けないと
 // どれだけ層を重ねても平坦に聞こえる。
+import { VOLUME_DEF } from './settings.js';
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -75,6 +76,11 @@ export class AudioEngine {
     this.ctx = null;
     this.ready = false;
     this.enabled = true;
+    /* 全体の音量。**init前に設定画面から呼ばれる。**
+       音は「クリックしてから」でないと起こせないのに、設定は起動直後に読み込まれるので、
+       ここで値だけ覚えておいて init のときに写す。既定値は settings.js が持つ
+       （2箇所に数字を書くと必ず片方が古くなる） */
+    this.volume = VOLUME_DEF;
     // 空間の開け具合(0=壁が近い 1=開けている)。init前に呼ばれても値だけ覚えておく
     this.openness = 0.65;
     this._lowHp = 0;
@@ -153,7 +159,7 @@ export class AudioEngine {
     this.earFilter.connect(this.postBus);
 
     this.master = ctx.createGain();
-    this.master.gain.value = 0.75;
+    this.master.gain.value = this.volume;
     this.master.connect(this.earFilter);
 
     /* -------------------------------------------------- 残響と初期反射 */
@@ -214,6 +220,25 @@ export class AudioEngine {
 
   resume() {
     if (this.ctx?.state === 'suspended') this.ctx.resume();
+  }
+
+  /**
+   * 全体の音量。設定画面のつまみから来る。
+   *
+   * 掛ける場所を master にしてあるのは、ここが**世界の音の入口**だから。
+   * ここより下流には出口の頭打ちと圧縮しか居ないので、下げても音の質が変わらない。
+   * 逆に一番下流（destination の手前）で下げると、頭打ちを通った後を削ることになり、
+   * 小さくしたのに割れたままになる。
+   *
+   * init前に呼ばれても値だけ覚える。壊れた値は無視して今の値を保つ
+   * （0にはできる必要があるので、falsyを弾く形にはしない）
+   */
+  setVolume(v) {
+    const g = clamp(Number(v), 0, 1);
+    if (!Number.isFinite(g)) return this.volume;
+    this.volume = g;
+    if (this.master) this.master.gain.value = g;
+    return this.volume;
   }
 
   /* ------------------------------------------------------------ 素材 */
