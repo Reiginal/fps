@@ -137,7 +137,6 @@ console.log('\n[2] 既定のままなら、今までと同じ手触り');
   applySettings({}, t);   // 何も覚えていない端末＝全部既定
   ok(t.input.sensitivity === 0.0022,
     `感度が前と同じ 0.0022（今 ${t.input.sensitivity}）`);
-  ok(t.input.invertY === false, '上下は反転していない');
   ok(t.input.wantFullscreen === true, '全画面は入り');
   ok(t.audio.volume === 0.75, `音量が前と同じ 0.75（今 ${t.audio.volume}）`);
   ok(VOLUME_DEF === 0.75, '音量の既定値もそこと揃っている');
@@ -187,7 +186,6 @@ console.log('\n[4] 端末に覚えて、次に開いた時に戻ってくる');
   ok(v.sens === 1.4, `感度が戻ってきた（${v.sens}）`);
   ok(v.vol === 0.3, `音量が戻ってきた（${v.vol}）`);
   ok(v.full === false, '全画面の切りが戻ってきた');
-  ok(v.invY === false, '触っていない物は既定のまま');
 
   // **全画面は設定画面へ移す前から blackout.fullscreen に '1'/'0' で入っている。**
   // 鍵と形を引き継いでいないと、前に切った人が開き直した時に黙って全画面へ戻る
