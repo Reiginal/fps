@@ -11,7 +11,7 @@
 
 import {
   C, Sv, EV, PHASE, encode, decode, unpackPlayer,
-  qPos, qAng, INPUT_BATCH, INTERP_DELAY_MS, TIMEOUT_MS, CHAT_MAX, LOBBY_ROW,
+  qPos, qAng, INPUT_BATCH, INTERP_DELAY_MS, TIMEOUT_MS, CHAT_MAX, LOBBY_ROW, SCORE_ROW, MODE_IDS,
 } from './protocol.js';
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -105,6 +105,8 @@ export class NetClient {
     try { this.token = sessionStorage.getItem(TOKEN_KEY) || null; } catch { /* 読めないだけ */ }
     // 前の続きから始まったか。お迎えで届く
     this.wasBack = false;
+    // 今の遊び方。ロビーの電文で届く（届くまでは既定のデスマッチ）
+    this.mode = MODE_IDS[0];
 
     /* protocol.jsは「取りこぼしに備えて直近の未確認分も一緒に送る」と書いてあるが、
        既定では新しい刻みだけを送る。1パケット3刻みという前提を崩さないため。
@@ -272,6 +274,9 @@ export class NetClient {
           // （対戦中は全員が同じ姿で並ぶ）。並びは protocol.js が持つ
           if (row) row.chr = r[LOBBY_ROW.CHR] | 0;
         }
+        /* 今の遊び方を覚えておく。**ロビーの電文でしか届かない**ので、
+           試合が始まった後に「今チーム戦なのか」を知る手段がここしかない */
+        if (m.md) this.mode = String(m.md);
         this._emit(this.onLobby, { rows, why: m.why || '', mode: m.md || null });
         break;
       }
@@ -348,14 +353,18 @@ export class NetClient {
     if (!Array.isArray(m.rows)) return;
     for (const r of m.rows) {
       if (!Array.isArray(r)) continue;
-      const row = this._touchPlayer([r[0], null]);
+      const row = this._touchPlayer([r[SCORE_ROW.ID], null]);
       if (!row) continue;
-      row.kills = r[1] | 0;
-      row.deaths = r[2] | 0;
-      row.ping = r[3] | 0;
-      row.rounds = r[4] | 0;
+      row.kills = r[SCORE_ROW.KILLS] | 0;
+      row.deaths = r[SCORE_ROW.DEATHS] | 0;
+      row.ping = r[SCORE_ROW.PING] | 0;
+      row.rounds = r[SCORE_ROW.ROUNDS] | 0;
+      /* どのチームか。チーム分けの無い遊び方では -1 が来る。
+         **番号を直に書かない**（ロビーの行で、作る側が項目を落としたのに
+         読む側が古い番号のまま残っていて全員同じ姿になった） */
+      row.team = Number.isInteger(r[SCORE_ROW.TEAM]) ? r[SCORE_ROW.TEAM] : -1;
       // 自分の往復遅延はサーバーが測った値を優先する。他人に見えている数字と揃う
-      if (r[0] === this.id) this.ping = row.ping;
+      if (r[SCORE_ROW.ID] === this.id) this.ping = row.ping;
     }
     this._emit(this.onScore, m.rows);
   }
@@ -388,6 +397,7 @@ export class NetClient {
         id, name: this.nameOf(id),
         kills: r.kills | 0, deaths: r.deaths | 0, ping: r.ping | 0,
         rounds: r.rounds | 0,
+        team: Number.isInteger(r.team) ? r.team : -1,
         me: id === this.id,
       });
     }

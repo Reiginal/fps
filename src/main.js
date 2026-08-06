@@ -24,6 +24,7 @@ import { NetClient } from './net/client.js';
 import { RemotePlayers } from './net/remote.js';
 import {
   K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, outsideZone, CHARACTERS,
+  TEAM_NAMES,
 } from './net/protocol.js';
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -1875,6 +1876,22 @@ class Game {
 
   /* 相手の頭の上に名前を出す。壁の向こうは出さない。
      Octreeへ1本ずつレイを通すので、8人でも毎フレーム7本で済む */
+  /**
+   * その人が味方か。**チーム戦の時だけ。**
+   *
+   * どちらのチームかは席から決まる（protocol.jsのTEAM_OF_SEAT）が、
+   * 試合が始まると席の情報はもう流れてこないので、得点の電文に載せてもらった
+   * 番号をそのまま見る
+   */
+  _isMate(id) {
+    const net = this.net;
+    if (!net || net.mode !== 'team' || id === net.id) return false;
+    const me = net.players.get(net.id);
+    const other = net.players.get(id);
+    if (!me || !other) return false;
+    return me.team >= 0 && me.team === other.team;
+  }
+
   _updatePlates(states) {
     const cam = this.camera;
     const list = this._plates;
@@ -1906,6 +1923,8 @@ class Game {
         dist,
         // 発砲からの残り具合。点と同じ速さで消えていく
         fade: this._blips.get(st.id).t,
+        // 味方かどうか。札の色を変えるのに使う（2対2でだけ立つ）
+        mate: this._isMate(st.id),
       });
     }
     this.hud.nameplates(list);
@@ -2020,11 +2039,25 @@ class Game {
     let mine = 0;
     let theirs = 0;
     let leader = '';
-    for (const [id, r] of net.players) {
-      if (id === net.id) { mine = r.rounds | 0; continue; }
-      const n = r.rounds | 0;
-      // 先頭の名前も持つ。3人以上いる時、王手なのが誰かを名指しで出すのに要る
-      if (n > theirs || !leader) { theirs = Math.max(theirs, n); if (n >= theirs) leader = r.name || ''; }
+    if (net.mode === 'team') {
+      /* 2対2は「自分のチーム － 相手のチーム」。
+         味方には同じ本数が入っているので、自分の数字がそのままチームの数字になる。
+         **人ごとの比べ方をそのまま使うと、味方が先頭の時に「2 － 2」と出る** */
+      const me = net.players.get(net.id);
+      const myTeam = me ? me.team : -1;
+      mine = me ? me.rounds | 0 : 0;
+      for (const [id, r] of net.players) {
+        if (id === net.id || r.team < 0 || r.team === myTeam) continue;
+        theirs = Math.max(theirs, r.rounds | 0);
+        leader = TEAM_NAMES[r.team] || '';
+      }
+    } else {
+      for (const [id, r] of net.players) {
+        if (id === net.id) { mine = r.rounds | 0; continue; }
+        const n = r.rounds | 0;
+        // 先頭の名前も持つ。3人以上いる時、王手なのが誰かを名指しで出すのに要る
+        if (n > theirs || !leader) { theirs = Math.max(theirs, n); if (n >= theirs) leader = r.name || ''; }
+      }
     }
     this.hud.matchInfo(mine, theirs, MATCH.ROUND_WINS, net.phase, net.timeLeft, leader);
     this.hud.roster(net.scoreRows());

@@ -526,6 +526,11 @@ export class HUD {
       e.bar.style.width = `${Math.round(46 * k)}px`;
       e.fill.style.width = `${hp}%`;
       e.root.classList.toggle('hurt', hp < 34);
+      /* 味方の札は色を変える。**2対2で一番困るのは味方を撃つこと。**
+         味方には弾が当たらない作りにしてあるが、撃っている本人は
+         「当たらない」ことに気づけない（外したのと見分けが付かない）ので、
+         狙う前に色で分かる必要がある */
+      e.root.classList.toggle('mate', !!p.mate);
     }
     // 見えなくなった相手・抜けた相手の札を片付ける
     for (const [id, e] of this.plateEls) {

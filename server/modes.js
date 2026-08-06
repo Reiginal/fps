@@ -34,6 +34,9 @@ const deathmatch = {
   // 倒れた人が武器を落とす。拾うと弾と手榴弾が戻る
   drops: true,
 
+  // チーム分けは無い。全員が互いに敵
+  teams: false,
+
   // 倒しても持ち物は変わらない。勝ち負けはラウンド数で決まるので、
   // そちらは _endRound が持っている
   onKill: () => 'none',
@@ -65,6 +68,8 @@ const gungame = {
      倒して進む理由が無くなる */
   drops: false,
 
+  teams: false,
+
   /**
    * 倒した側の段を1つ進める。返すのは3つのどれか:
    *   'win'     … 最後の武器で倒した。試合の勝ち
@@ -83,9 +88,27 @@ const gungame = {
   },
 };
 
+/* ---------------------------------------------------------- 2対2 */
+
+// デスマッチと同じ進行で、**「最後の1人」が「最後の1チーム」に変わるだけ。**
+//
+// Room側は「生きているチームが1つになったらラウンド終わり」という数え方に
+// してあるので、チームを持たない遊び方では1人＝1チームとして同じ道を通る。
+// 分岐が増えないので、デスマッチの進行を壊す余地がそのぶん減る。
+const teamplay = {
+  id: 'team',
+  rounds: true,
+  carryFor: (weapons) => loadoutOf(weapons),
+  stagesOf: () => 1,
+  drops: true,
+  // 席の左2つと右2つで分かれる（protocol.jsのTEAM_OF_SEAT）
+  teams: true,
+  onKill: () => 'none',
+};
+
 /* ------------------------------------------------------------ 表 */
 
-const TABLE = { dm: deathmatch, gun: gungame };
+const TABLE = { dm: deathmatch, gun: gungame, team: teamplay };
 
 /** 知らないidが来たらデスマッチへ寄せる（部屋が止まるより寄せたほうがまし） */
 export const modeOf = (id) => TABLE[id] || TABLE.dm;

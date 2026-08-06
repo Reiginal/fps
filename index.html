@@ -750,6 +750,19 @@
   .plate .pbar { height: 2px; margin: 3px auto 0; background: rgba(0,0,0,.55); }
   .plate .pfill { height: 100%; background: var(--hud); }
   .plate.hurt .pfill { background: var(--warn); }
+  /* 味方の札。2対2でだけ付く。
+     **味方には弾が当たらない作りだが、撃っている本人は気づけない**
+     （外したのと見分けが付かない）ので、狙う前に色で分かる必要がある。
+     名前を出す条件は敵と同じ（撃った直後だけ）にしてある。
+     味方だけ常に出すと、味方の位置が壁越しに分かることになって、
+     2人で挟む・別々に回る、という組み立てがそもそも要らなくなる */
+  .plate.mate .pname { color: var(--ok); }
+  .plate.mate .pfill { background: var(--ok); }
+
+  /* 2対2の時だけ席に付く、どちら側かの印。
+     色は protocol.js の TEAM_COLORS と揃えてある（別々に決めると必ずずれる） */
+  .lbseat.sideA { border-left: 3px solid #63d2ff; }
+  .lbseat.sideB { border-left: 3px solid #ffab5e; }
 
   /* --------------------------------------------------------- 回線表示 */
   #netstat {
@@ -962,7 +975,7 @@
           <div class="lbmdesc" id="lbModeDesc"></div>
         </div>
         <div class="lbteam">
-          <div class="lbhead">席（2〜4人）</div>
+          <div class="lbhead" id="lbSeatHead">席（2〜4人）</div>
           <div class="lbseats" id="lbSeats"></div>
         </div>
         <div class="lbstand" id="lbStand"></div>

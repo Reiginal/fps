@@ -10,6 +10,7 @@ import { Capsule } from 'three/addons/math/Capsule.js';
 import {
   TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS, MATCH, PHASE, ZONE, NADE, outsideZone,
   Sv, EV, packPlayer, SEATS, SEAT_SPAWN, CHARACTERS, MODE_IDS, LOBBY_ROW, LOBBY_ROW_LEN, DROP,
+  TEAM_OF_SEAT, TEAM_NAMES,
 } from '../src/net/protocol.js';
 import { SimPlayer, resolveShot, rewindMs, originVisible, WEAPONS } from './sim.js';
 import { modeOf } from './modes.js';
@@ -234,6 +235,37 @@ export class Room {
     return list;
   }
 
+  /* ---------------------------------------------------------- チーム */
+
+  /**
+   * その人がどのチームか。
+   *
+   * **チーム分けの無い遊び方では「1人＝1チーム」を返す。**
+   * こうしておくと、ラウンドの終わり方を「生きているチームが1つになったら」の
+   * 1本で書ける。デスマッチだけ別の数え方を持つ形にすると、
+   * チーム戦を足すたびにあちらの進行を壊す危険が出る
+   */
+  teamOf(slot) {
+    if (!this.rules.teams) return `p${slot.id}`;
+    const t = TEAM_OF_SEAT(slot.seat);
+    // 席に着いていない人は誰の味方でもない（試合には出ていない）
+    return t === null ? `p${slot.id}` : `t${t}`;
+  }
+
+  /** 2人が味方同士か。撃っても効かない相手かどうかの判定に使う */
+  _sameTeam(a, b) {
+    if (!a || !b || a === b) return false;
+    if (!this.rules.teams) return false;
+    return this.teamOf(a) === this.teamOf(b);
+  }
+
+  /** 画面に出すチームの名前。チーム分けが無い遊び方では本人の名前 */
+  _teamName(slot) {
+    if (!this.rules.teams) return slot.name;
+    const t = TEAM_OF_SEAT(slot.seat);
+    return t === null ? slot.name : TEAM_NAMES[t];
+  }
+
   /* ------------------------------------------------ 地面に落ちている物 */
 
   /**
@@ -393,6 +425,12 @@ export class Room {
     const seated = this._seated();
     if (seated.length === 0) return '席に着いてください';
     if (seated.length < 2) return 'あと1人来れば始められます';
+    /* チーム戦は両側に人が要る。片側だけに全員が座っていると、
+       始まった瞬間に「相手が全員倒れている」状態になって即決着する */
+    if (this.rules.teams) {
+      const sides = new Set(seated.map((s) => TEAM_OF_SEAT(s.seat)));
+      if (sides.size < 2) return `${TEAM_NAMES[sides.has(0) ? 1 : 0]}側の席にも座ってください`;
+    }
     // 席が埋まっただけでは始めない。座り間違えただけで撃ち合いが始まるのを避ける。
     // 押していない人が誰なのかまで出す。「準備待ち」とだけ出すと、
     // 自分が押したかどうかを思い出す所から始まる
@@ -681,8 +719,16 @@ export class Room {
 
     this.push({ e: EV.FIRE, id: slot.id, w: sim.weapon });
 
+    /* 撃たれる側の並び。**味方は最初から入れない。**
+       当たった後で「味方だったので無かったことにする」と、当たり判定の巻き戻しを
+       通った後で捨てることになり、味方越しに後ろの敵へ当たるのか当たらないのかが
+       その場の書き方次第で変わる。ここで外しておけば、味方の体は
+       弾を止めない（味方の後ろの敵にはそのまま当たる） */
     const targets = [];
-    for (const s of this.slots.values()) if (s !== slot) targets.push(s.sim);
+    for (const s of this.slots.values()) {
+      if (s === slot || this._sameTeam(s, slot)) continue;
+      targets.push(s.sim);
+    }
 
     // 撃った人の画面に映っていた時刻まで戻す。
     // seqが古いほど「もっと前の画面を見て撃った」ということなので、その分も足す
@@ -798,15 +844,19 @@ export class Room {
     }
   }
 
-  // 爆発。距離で線形に落ちるダメージを、遮蔽の無い相手にだけ入れる。
-  // 味方はいないので投げた本人も巻き込む（自分の足元に落として道連れが成立する）
+  /* 爆発。距離で線形に落ちるダメージを、遮蔽の無い相手にだけ入れる。
+     **投げた本人は巻き込む。** 自分の足元に落として道連れにするのは、
+     追い詰められた側に残る最後の手なので消さない。
+     チーム戦では味方だけ外す（味方に投げて倒せると、味方が邪魔でしかなくなる） */
   _explode(g) {
     this.push({ e: EV.BOOM, gid: g.id, p: [g.pos.x, g.pos.y, g.pos.z] });
     if (this.phase !== PHASE.LIVE) return;
 
+    const thrower = this.slots.get(g.by) || null;
     for (const s of [...this.slots.values()]) {
       const sim = s.sim;
       if (!sim.alive) continue;
+      if (this._sameTeam(s, thrower)) continue;
       // 胸の高さを狙う。足元だと段差1つで遮られ、頭だと屈んでも当たる
       const p = sim.player.collider.start;
       _nadeTo.set(p.x, p.y + 0.5, p.z);
@@ -932,10 +982,17 @@ export class Room {
     // ラウンドを持たない遊び方（ガンゲーム）では、最後の1人になっても何も起きない。
     // 倒れた人は数秒で生き返って続く（_tickが面倒を見る）
     if (!this.rules.rounds) return;
-    const alive = [];
-    for (const s of this.slots.values()) if (s.seat !== null && s.sim.alive) alive.push(s);
-    if (alive.length > 1) return;
-    this._endRound(alive.length === 1 ? alive[0] : null, why);
+    /* 生きている「チーム」を数える。チーム分けの無い遊び方では
+       1人＝1チームなので、今まで通り「最後の1人」と同じ意味になる */
+    const alive = new Map();
+    for (const s of this.slots.values()) {
+      if (s.seat === null || !s.sim.alive) continue;
+      const key = this.teamOf(s);
+      if (!alive.has(key)) alive.set(key, []);
+      alive.get(key).push(s);
+    }
+    if (alive.size > 1) return;
+    this._endRound(alive.size === 1 ? [...alive.values()][0] : null, why);
   }
 
   // 席ごとの定位置。選ぶ余地を残さない。
@@ -1138,7 +1195,11 @@ export class Room {
   _rows() {
     const rows = [];
     for (const s of this.slots.values()) {
-      rows.push([s.id, s.sim.kills, s.sim.deaths, Math.round(s.conn.rtt || 0), s.rounds]);
+      // 並びは protocol.js の SCORE_ROW。**足す時は読む側も一緒に直す**
+      rows.push([
+        s.id, s.sim.kills, s.sim.deaths, Math.round(s.conn.rtt || 0), s.rounds,
+        this.rules.teams ? (TEAM_OF_SEAT(s.seat) ?? -1) : -1,
+      ]);
     }
     return rows;
   }
@@ -1179,15 +1240,26 @@ export class Room {
 
   // ラウンドの決着。winnerがnullなら時間切れか相討ちで、誰の取得にもならない。
   // 誰が残ったかを数えるのは_checkRoundOver側
-  _endRound(winner, why) {
+  /**
+   * ラウンドの決着。winners は残ったチームの人たち（1人の時もある）。
+   *
+   * **チームの全員に1本ずつ入れる。** 取得数をチーム側に持たせず、
+   * 人ごとの数字をそのまま揃える形にしてあるのは、画面が「自分の取得数」を
+   * 出しているため。片方だけに入れると、倒れていた側の画面には
+   * 勝ったのに0本のまま出る
+   */
+  _endRound(winners, why) {
     if (this.phase !== PHASE.LIVE) return;
-    if (winner) winner.rounds++;
+    const list = winners ? [].concat(winners) : [];
+    for (const w of list) w.rounds++;
     this._sendScore();
     logs.add('round', {
-      round: this.round, winner: winner ? winner.name : '（決着なし）', why,
+      round: this.round,
+      winner: list.length ? this._teamName(list[0]) : '（決着なし）',
+      why,
     });
 
-    if (winner && winner.rounds >= MATCH.ROUND_WINS) {
+    if (list.length && list[0].rounds >= MATCH.ROUND_WINS) {
       this._endMatch(why);
       return;
     }

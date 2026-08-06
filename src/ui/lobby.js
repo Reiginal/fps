@@ -6,7 +6,7 @@
 // 押した瞬間に自分の画面だけ座らせると、埋まっていた席を押した時に
 // 「座れたように見えて座れていない」状態が残る。押したら送るだけにして、
 // 絵が変わるのは必ずサーバーから届いた後にする。
-import { SEATS, CHARACTERS, MODE_LIST, LOBBY_ROW } from '../net/protocol.js';
+import { SEATS, CHARACTERS, MODE_LIST, LOBBY_ROW, TEAM_OF_SEAT, TEAM_NAMES } from '../net/protocol.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -21,6 +21,7 @@ export class Lobby {
       root: $('lobby'),
       why: $('lbWhy'),
       seats: $('lbSeats'),
+      seatHead: $('lbSeatHead'),
       chars: $('lbChars'),
       stand: $('lbStand'),
       modes: $('lbModes'),
@@ -98,7 +99,10 @@ export class Lobby {
       this.charEls.push(b);
     });
 
-    // 席は1列に4つ。チーム分けは無く、座った人全員が互いに敵になる
+    /* 席は1列に4つ。**2対2の時は左2つと右2つでチームになる。**
+       チームを選ぶ画面を別に作らないのは、席を選ぶ画面が既にあるから。
+       そのかわり、どちら側なのかは席の上に出さないと分からない
+       （席の番号だけ見ても、1番と2番が味方だとは読めない） */
     this.seatEls = [];
     const box = this.el.seats;
     box.innerHTML = '';
@@ -151,7 +155,15 @@ export class Lobby {
       b.classList.toggle('ready', !!who && who.ready);
       b.disabled = !!who && who.id !== this.myId;
       b.innerHTML = who ? esc(who.name) : `<span>${seat + 1}番 空席</span>`;
+      // 2対2の時だけ、どちら側かを席に色で出す
+      const team = TEAM_OF_SEAT(seat);
+      b.classList.toggle('sideA', cur.id === 'team' && team === 0);
+      b.classList.toggle('sideB', cur.id === 'team' && team === 1);
     }
+    // 席の上の見出し。2対2の時だけチーム名を出す
+    this.el.seatHead.textContent = cur.id === 'team'
+      ? `席（左が${TEAM_NAMES[0]} / 右が${TEAM_NAMES[1]}）`
+      : '席（2〜4人）';
 
     this.el.why.textContent = why;
     this.el.stand.textContent = standing.length
