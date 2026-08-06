@@ -14,6 +14,7 @@
 // server/dom-stub.js の上なら武器一式が1秒で組めるので、こちらを使う。
 //
 //   node tools/check-weapons.mjs
+import { readdirSync } from 'node:fs';
 import '../server/dom-stub.js';
 import * as THREE from 'three';
 
@@ -514,7 +515,30 @@ console.log('\n[モデル差し替え] 買ったモデルを被せられるか')
    閃光も煙もそこへぶら下がっている。丸ごと差し替えると印まで消えて、
    撃った時に何も出なくなる。**印は残して、見えている所だけ差し替える** */
 {
-  const { modelUrl, hideBuiltMeshes, fitModel, builtBox, MODEL_DIR } = await import('../src/player/glbview.js');
+  const {
+    modelUrl, hideBuiltMeshes, fitModel, builtBox, MODEL_DIR, HAS_MODEL,
+  } = await import('../src/player/glbview.js');
+
+  /* **置いてある物と、読みに行く物が同じか。**
+     前は全部の武器について毎回「あるかどうか」を聞きに行っていた。
+     置いてあるのが1本だけなので、**起動のたびに404が4回**返り、
+     遊ぶ人の画面には毎回4行のエラーが並んでいた。
+     本物のエラーがその中に紛れて読めなくなる（本物のブラウザで開く検査が見つけた）。
+
+     ファイルを置くのと、名前を書き足すのは**両方やる**。片方だけになっていないかを見る */
+  {
+    const dir = new URL(`../${MODEL_DIR}/`, import.meta.url);
+    const onDisk = readdirSync(dir).filter((f) => f.endsWith('.glb')).map((f) => f.replace(/\.glb$/, ''));
+    for (const id of HAS_MODEL) {
+      ok(onDisk.includes(id), `${id} … 名前を書いた物はファイルも置いてある`);
+      ok(WEAPONS.some((w) => w.id === id), `${id} … 武器の表にある名前`);
+    }
+    for (const f of onDisk) {
+      ok(HAS_MODEL.includes(f), `${f}.glb … 置いた物は名前も書いてある（書かないと読みに行かない）`);
+    }
+    ok(HAS_MODEL.length === onDisk.length,
+      `数が合っている（名前${HAS_MODEL.length} / ファイル${onDisk.length}）`);
+  }
 
   /* 収める先の箱。**元の銃（手を除いた本体）が占めていた所。**
      ここへ合わせないと、長さは合っても置き場所が原点のままで、

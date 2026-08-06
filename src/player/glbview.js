@@ -21,6 +21,16 @@ export const MODEL_DIR = 'assets/models';
 /** その武器のモデルの置き場所 */
 export const modelUrl = (id) => `${MODEL_DIR}/${id}.glb`;
 
+/* **モデルを置いてある武器の名前。ここに書いた物しか読みに行かない。**
+   前は全部の武器について「あるかどうか」を毎回聞きに行っていた。
+   置いてあるのが1本だけなので、**起動のたびに404が4回**返り、
+   遊ぶ人の画面には毎回4行のエラーが並んでいた。
+   本物のエラーがその中に紛れて読めなくなるし、無駄な往復が4回増える。
+
+   モデルを足したら、ファイルを置くのと**ここに1行足すのを両方やる。**
+   片方だけになっていないかは tools/check-weapons.mjs が見張る */
+export const HAS_MODEL = ['rifle'];
+
 /**
  * 面を持っている所だけ隠す。手と印は残す。
  *
@@ -168,6 +178,8 @@ function collectPoints(scene) {
 export async function tryModelOverride(weapon, id) {
   const inner = weapon?.inner;
   if (!inner) return false;
+  // 置いていない武器は読みに行かない（聞きに行くだけで往復とエラーが増える）
+  if (!HAS_MODEL.includes(id)) return false;
   let GLTFLoader;
   try {
     ({ GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js'));
@@ -176,9 +188,6 @@ export async function tryModelOverride(weapon, id) {
   const url = modelUrl(id);
   let gltf = null;
   try {
-    // 置いていない時は404が返る。**そこは普通のこと**なので黙って諦める
-    const head = await fetch(url, { method: 'HEAD' });
-    if (!head.ok) return false;
     gltf = await new Promise((res, rej) => new GLTFLoader().load(url, res, undefined, rej));
   } catch { return false; }
   if (!gltf?.scene) return false;
