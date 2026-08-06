@@ -8,7 +8,7 @@
 // 名前と説明は src/net/protocol.js の MODE_LIST にある（ロビーの画面が並べるため）。
 // こちらは中身の決まりだけを持つ。クライアントに決まりを持たせると、
 // そちらを書き換えれば勝てることになる。
-import { GUN_ORDER, loadoutOf } from '../src/net/protocol.js';
+import { GUN_ORDER, loadoutWith } from '../src/net/protocol.js';
 
 /* ------------------------------------------------------------ 共通の道具 */
 
@@ -25,8 +25,8 @@ const deathmatch = {
   // ラウンド制。倒れたらそのラウンドは終わりで、復活はラウンドの頭にまとめて
   rounds: true,
 
-  // 持ち物は既定のまま（protocol.jsのLOADOUT_IDS）
-  carryFor: (weapons) => loadoutOf(weapons),
+  // 持ち物は既定の4本。1本目だけロビーで選んだ物になる
+  carryFor: (weapons, slot) => loadoutWith(weapons, slot?.primary),
 
   // 段は無い。画面に「あと何本」を出さないための目印
   stagesOf: () => 1,
@@ -98,7 +98,7 @@ const gungame = {
 const teamplay = {
   id: 'team',
   rounds: true,
-  carryFor: (weapons) => loadoutOf(weapons),
+  carryFor: (weapons, slot) => loadoutWith(weapons, slot?.primary),
   stagesOf: () => 1,
   drops: true,
   // 席の左2つと右2つで分かれる（protocol.jsのTEAM_OF_SEAT）

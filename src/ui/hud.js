@@ -318,6 +318,22 @@ export class HUD {
   }
 
   /**
+   * 武器の札の文字を書き換える。**主武器を選べるようになったので、
+   * 1番の札が「ライフル」で固定ではなくなった。**
+   *
+   * 書き換えないと、ショットガンを選んだ人の画面に「1 ライフル」と出たまま
+   * ショットガンが出てくる。押した数字と出てくる物が食い違う形になる
+   */
+  slotNames(names) {
+    const list = names || [];
+    this.el.slots.forEach((el, i) => {
+      if (i >= list.length) return;
+      const text = `${i + 1} ${list[i]}`;
+      if (el.textContent !== text) el.textContent = text;
+    });
+  }
+
+  /**
    * 声の状態。**自分が今送っているかどうかを出す。**
    *
    * ここが見えないのが一番痛い。押しているつもりで押せていない／

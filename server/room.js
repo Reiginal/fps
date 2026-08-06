@@ -10,7 +10,7 @@ import { Capsule } from 'three/addons/math/Capsule.js';
 import {
   TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS, MATCH, PHASE, ZONE, NADE, outsideZone,
   Sv, EV, packPlayer, SEATS, SEAT_SPAWN, CHARACTERS, MODE_IDS, LOBBY_ROW, LOBBY_ROW_LEN, DROP,
-  TEAM_OF_SEAT, TEAM_NAMES,
+  TEAM_OF_SEAT, TEAM_NAMES, PRIMARY_IDS, PRIMARY_DEF,
 } from '../src/net/protocol.js';
 import { SimPlayer, resolveShot, rewindMs, originVisible, WEAPONS } from './sim.js';
 import { modeOf } from './modes.js';
@@ -259,6 +259,22 @@ export class Room {
     return this.teamOf(a) === this.teamOf(b);
   }
 
+  /**
+   * 主武器を選ぶ。**ロビーにいる間だけ。**
+   * 試合中に持ち物が変わると、撃ち合いの最中に手の中の物が入れ替わる。
+   *
+   * 選んだ瞬間に配り直すので、ロビーで構えている武器がその場で変わる。
+   * **押した結果がその場で見える**のが大事で、見えないと押せたのか分からない
+   */
+  setPrimary(slot, id) {
+    if (this.phase !== PHASE.WAIT) return false;
+    if (!PRIMARY_IDS.includes(id) || slot.primary === id) return false;
+    slot.primary = id;
+    this._arm(slot);
+    this._sendLobby();
+    return true;
+  }
+
   /* ------------------------------------------------------ 声の輪 */
 
   /**
@@ -435,6 +451,8 @@ export class Room {
       row[LOBBY_ROW.SEAT] = s.seat === null ? -1 : s.seat;
       row[LOBBY_ROW.READY] = s.ready ? 1 : 0;
       row[LOBBY_ROW.CHR] = s.chr | 0;
+      // 主武器。**味方が何を持っていくかが見えると、片方が近距離を持てる**
+      row[LOBBY_ROW.PRIMARY] = s.primary;
       rows.push(row);
     }
     return rows;
@@ -519,6 +537,7 @@ export class Room {
     this.parked.set(slot.token, {
       at: nowMs(),
       chr: slot.chr | 0,
+      primary: slot.primary,
       seat: slot.seat,
       rounds: slot.rounds | 0,
       kills: slot.sim.kills | 0,
@@ -604,6 +623,8 @@ export class Room {
       back: false,
       // 地面から拾って増えた武器。ラウンドの頭で空になる（_respawn）
       extra: [],
+      // 試合前に選んだ主武器（PRIMARY_IDSのどれか）。1本目だけがこれになる
+      primary: PRIMARY_DEF,
     };
     /* 合言葉が合えば、前の続きから。**席は空いている時だけ返す。**
        抜けている間に誰かが座っていたら、その人を立たせてまで返さない
@@ -611,6 +632,7 @@ export class Room {
     const back = this._claimParked(token);
     if (back) {
       slot.chr = back.chr;
+      slot.primary = back.primary || PRIMARY_DEF;
       slot.rounds = back.rounds;
       slot.stage = back.stage;
       slot.sim.kills = back.kills;

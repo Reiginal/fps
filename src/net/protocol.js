@@ -151,6 +151,36 @@ export const loadoutOf = (weapons) => LOADOUT_IDS
   .map((id) => weapons.findIndex((w) => w.id === id))
   .filter((i) => i >= 0);
 
+/* 試合前に選べる主武器。**1本目だけ選べる。**
+   残り（ピストル・ナイフ・手榴弾）は固定で、そこを選ばせても
+   「どれも持っていく」以外の答えが無く、選ぶ意味が出ない。
+   主武器だけなら「近くで戦うか、遠くで戦うか」という本物の選択になる。
+   **ショットガンをここで初めて持って出られるようになる**
+   （表には残してあったので、並びに足すだけで済んだ） */
+/* 画面に出す短い呼び名。**1箇所に置く。**
+   HUDの札・起動画面の操作説明・ロビーの3箇所で同じ言葉を出すので、
+   別々に書くと必ずどこかが古くなる（実際、持ち物を変えた時に
+   起動画面だけ「2 ショットガン」のまま残った） */
+export const WEAPON_NICK = {
+  rifle: 'ライフル',
+  shotgun: 'ショットガン',
+  pistol: 'ピストル',
+  knife: 'ナイフ',
+  nade: '手榴弾',
+};
+
+export const PRIMARY_IDS = ['rifle', 'shotgun'];
+export const PRIMARY_DEF = PRIMARY_IDS[0];
+
+/** 選んだ主武器を1本目に据えた持ち物。知らない名前は既定へ寄せる */
+export const loadoutWith = (weapons, primary) => {
+  const first = PRIMARY_IDS.includes(primary) ? primary : PRIMARY_DEF;
+  return LOADOUT_IDS
+    .map((id) => (id === PRIMARY_DEF ? first : id))
+    .map((id) => weapons.findIndex((w) => w.id === id))
+    .filter((i) => i >= 0);
+};
+
 /* ------------------------------------------------------------ 状態のビット */
 
 // スナップショットに載せる見た目の状態。他人の姿勢を再現するのに使う
@@ -186,6 +216,8 @@ export const C = {
      名刺(SDP)も住所(ICE)も同じ電文で運ぶ。分けても中身を読まない以上
      区別する意味が無く、電文の種類が増えるほど揃える場所が増える */
   VSIG: 'v',      // { t, to:相手のid, d:中身（手元同士だけが読む） }
+  // 主武器を選ぶ。ロビーにいる間だけ効く（試合中に持ち物が変わると読めない）
+  PRIMARY: 'p',   // { t, w:武器のid（PRIMARY_IDSのどれか） }
   // ロビーで席に着く／降りる。st が -1 なら降りる。
   //
   // ここは長く「tm が -1 なら降りる」と書いてあった。チーム制をやめた時に
@@ -256,8 +288,8 @@ export const Sv = {
 export const SCORE_ROW = { ID: 0, KILLS: 1, DEATHS: 2, PING: 3, ROUNDS: 4, TEAM: 5 };
 export const SCORE_ROW_LEN = 6;
 
-export const LOBBY_ROW = { ID: 0, NAME: 1, SEAT: 2, READY: 3, CHR: 4 };
-export const LOBBY_ROW_LEN = 5;
+export const LOBBY_ROW = { ID: 0, NAME: 1, SEAT: 2, READY: 3, CHR: 4, PRIMARY: 5 };
+export const LOBBY_ROW_LEN = 6;
 
 // EVENTの中身。1つのスナップショットの間に起きたことをまとめて送る
 export const EV = {

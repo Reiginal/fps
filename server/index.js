@@ -287,6 +287,7 @@ function onMessage(conn, raw) {
     case C.PONG: return onPong(conn, m);
     case C.CHAT: return onChat(conn, m);
     case C.VSIG: return onVoiceSignal(conn, m);
+    case C.PRIMARY: return onPrimary(conn, m);
     default: return;
   }
 }
@@ -330,6 +331,13 @@ function onVoiceSignal(conn, m) {
   const slot = conn.slot;
   if (!slot || !isNum(m.to)) return;
   conn.room.signal(slot, Math.round(m.to), m.d);
+}
+
+/* 主武器を選ぶ。名前が知らない物なら Room が断る */
+function onPrimary(conn, m) {
+  const slot = conn.slot;
+  if (!slot || typeof m.w !== 'string') return;
+  conn.room.setPrimary(slot, m.w);
 }
 
 function onInput(conn, m) {
