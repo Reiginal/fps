@@ -850,7 +850,11 @@ class Tracers {
     this.index = (this.index + 1) % this.max;
     it.dir.subVectors(to, from);
     it.total = it.dir.length();
-    if (it.total < 0.01) return;
+    // 極端に短い(≈0)弾はここで諦めるが、この枠が使い回しで前の弾から
+    // 引き継いでいる場合、その前の弾のvisible=trueだけが残ってしまう。
+    // update()がtotal(直前で新しい値へ書き換え済み)を見て次のフレームには
+    // 自然に消えるので実害はまず出ないが、順序に頼らず確実に消しておく
+    if (it.total < 0.01) { it.mesh.visible = false; return; }
     it.dir.normalize();
     it.origin.copy(from);
     it.speed = 360 + Math.random() * 90;

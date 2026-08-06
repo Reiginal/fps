@@ -1511,7 +1511,10 @@ class Game {
     this.raycaster.set(this._probe, this._down);
     this.raycaster.far = 1.4;
     const hits = this.raycaster.intersectObjects(this.solidMeshes, false);
-    if (!hits.length) return 'dirt';
+    // 何も拾えなかった時(段差の隙間など)と、材質は拾えたがsurfaceOfに
+    // 載っていない時(コンクリ・舗装など大半の地面)は、どちらも
+    // 「詳しくは分からない地面」という同じ状況。既定は揃えておく
+    if (!hits.length) return 'asphalt';
     return this.surfaceOf.get(hits[0].object.material) ?? 'asphalt';
   }
 
