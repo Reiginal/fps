@@ -2612,6 +2612,32 @@ class Game {
     this.hud.zoneWarn(true, left > 0 ? `${Math.ceil(left)}秒で削られる` : '中央へ戻れ');
   }
 
+  /**
+   * 今の画面をクリップボードへコピーする（課題.md #7）。
+   *
+   * ファイルには保存しない。「クリップボードに入っていればいい、貼るだけで送れる」
+   * という要望なので、それ以上は持たない。
+   *
+   * preserveDrawingBufferは立てない（常時遅くなる）。代わりに、composer.render()の
+   * 直後・ブラウザに制御を返す前にtoBlob()を呼ぶことで、描いた直後の中身を読む。
+   *
+   * clipboard.write()の呼び出し自体はキー入力の流れの中（同じタスク）で行う必要が
+   * あるので、ここは同期的に呼ぶ。実際に読む画素（toBlob）はその後で非同期に確定して
+   * よい ── ClipboardItemはBlobの代わりにPromise<Blob>を受け付けるので、
+   * 「コピー先を確保する」と「中身が揃う」を分けられる
+   */
+  _screenshot() {
+    if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+      this._shotMsg = 'このブラウザはスクショのコピーに対応していません';
+      this._shotMsgT = 3;
+      return;
+    }
+    const blob = new Promise((resolve) => this.renderer.domElement.toBlob(resolve, 'image/png'));
+    navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      .then(() => { this._shotMsg = 'スクショをコピーしました'; this._shotMsgT = 2; })
+      .catch(() => { this._shotMsg = 'コピーできませんでした'; this._shotMsgT = 3; });
+  }
+
   /* ------------------------------------------------------- ループ */
 
   _loop() {
@@ -2661,6 +2687,12 @@ class Game {
       }
       this._chatHintT = Math.max(0, (this._chatHintT || 0) - dt);
       this.diag?.setState('chatHint', this._chatHintT > 0 ? '発言は対戦でだけ使えます' : '');
+      // Pでスクショをクリップボードへ（課題.md #7）。全画面＋マウス固定なので
+      // OSのスクショが撮りにくく、見た目の不具合を言葉だけで詰めることになっていた。
+      // typing中はchat.js側がstopPropagationしているのでPはここまで届かない
+      if (!typing && this.input.pressed('KeyP')) this._screenshot();
+      this._shotMsgT = Math.max(0, (this._shotMsgT || 0) - dt);
+      this.diag?.setState('shot', this._shotMsgT > 0 ? (this._shotMsg || '') : '');
       const input = typing ? this._noInput : this.input;
       // 打っている間も、押した印とマウスの移動量は毎フレーム捨てる。
       // 溜めたままにすると、打ち終わった瞬間に溜まっていた分が一度に効く。
