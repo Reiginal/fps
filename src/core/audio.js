@@ -1865,6 +1865,10 @@ export class AudioEngine {
         o.connect(bp); bp.connect(g); g.connect(this.master);
         this._env(g, t, rnd(0.010, 0.022), 0.35, rnd(0.6, 1.2));
         o.start(t); o.stop(t + 2.0);
+        // 止めたoは自動で片付くが、下流のbp/gはmasterに繋がったまま残る。
+        // ここだけ_reap()を呼び忘れていて、ロビーで待っている間も含めて
+        // 20〜40秒に1回、masterへノードが繋がりっぱなしで積み上がっていた
+        this._reap([bp, g], 2.4);
       }
       setTimeout(creak, rnd(14000, 34000));
     };
