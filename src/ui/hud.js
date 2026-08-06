@@ -34,6 +34,7 @@ export class HUD {
       healWrap: $('healWrap'), healBar: $('healBar'), healFill: $('healFill'),
       healPips: $('healPips'), healState: $('healState'), slotHeal: $('slotHeal'),
       elim: $('elim'), elimName: $('elimName'), elimTag: $('elimTag'),
+      achfeed: $('achfeed'),
     };
     this.markerTimer = 0;
     this.crossHitTimer = 0;
@@ -313,6 +314,40 @@ export class HUD {
       setTimeout(() => el.remove(), 320);
     }, 3400);
     while (this.el.killfeed.children.length > 5) this.el.killfeed.firstChild.remove();
+  }
+
+  /**
+   * 実績の解除を知らせる札。左下に出して数秒で消える。
+   *
+   * キルログと別の場所へ出すのは、**撃った直後に解除されることが多い**から。
+   * 同じ列に混ぜると、倒した知らせに紛れて読まれないまま流れていく。
+   *
+   * 撃ち合いの最中に出るので、画面の真ん中には絶対に置かない。
+   * 「良いことが起きた」を伝えるために視界を塞ぐのは本末転倒になる
+   */
+  achievement(name, desc = '') {
+    if (!this.el.achfeed) return;
+    const card = document.createElement('div');
+    card.className = 'achcard';
+    const head = document.createElement('div');
+    head.className = 'achhead';
+    head.textContent = '実績 解除';
+    const title = document.createElement('div');
+    title.className = 'achname';
+    title.textContent = name;
+    const sub = document.createElement('div');
+    sub.className = 'achdesc';
+    sub.textContent = desc;
+    card.append(head, title, sub);
+    this.el.achfeed.appendChild(card);
+    // 一度に何個も解除されることがある（初撃破と3連続撃破が同時など）ので、
+    // 上限を置いて古い物から消す。積み上がると画面の下半分が埋まる
+    while (this.el.achfeed.children.length > 3) this.el.achfeed.firstChild.remove();
+    setTimeout(() => {
+      card.style.transition = 'opacity .4s';
+      card.style.opacity = 0;
+      setTimeout(() => card.remove(), 420);
+    }, 4200);
   }
 
   /**

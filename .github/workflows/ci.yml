@@ -146,5 +146,8 @@ jobs:
       - name: 検査 設定
         run: node tools/check-settings.mjs
 
+      - name: 検査 戦績と実績
+        run: node tools/check-stats.mjs
+
       - name: 検査 地形のメモリ
         run: node --expose-gc tools/check-world.mjs
