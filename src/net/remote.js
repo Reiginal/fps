@@ -77,6 +77,7 @@ export class RemotePlayers {
     this._pool = [];            // 使い終わった兵士。湧き直しで作り直さない
     this._all = [];             // dispose()で始末する全部
     this._last = 0;
+    this._seen = new Set();     // sync()の中だけで使う。毎フレーム作り直さず使い回す
   }
 
   /* net.stateAt()の結果をそのまま渡す。dtは持たないので自前で測る
@@ -93,7 +94,8 @@ export class RemotePlayers {
     const dt = this._last ? clamp((t - this._last) / 1000, 0, 0.1) : 1 / 60;
     this._last = t;
 
-    const seen = new Set();
+    const seen = this._seen;
+    seen.clear();
     for (const st of states) {
       if (st.id === myId) continue;      // 自分は描かない。一人称の腕が既にある
       seen.add(st.id);
