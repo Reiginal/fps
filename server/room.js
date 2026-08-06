@@ -921,6 +921,11 @@ export class Room {
 
     const thrower = this.slots.get(g.by) || null;
     for (const s of [...this.slots.values()]) {
+      // 巻き添えは1人ずつ順に解決する。最初の1人の死でラウンドが決まると
+      // （_kill→_checkRoundOver で局面がBREAKへ動く）、残りの相手に爆風を
+      // 入れ続けても、もう終わったラウンドのキルフィードが増えるだけになる。
+      // 局面が動いた時点で止める（throwNade/shotがLIVE限定なのと揃える）
+      if (this.phase !== PHASE.LIVE) break;
       const sim = s.sim;
       if (!sim.alive) continue;
       if (this._sameTeam(s, thrower)) continue;
