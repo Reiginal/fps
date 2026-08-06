@@ -27,7 +27,7 @@ export class HUD {
       // 対戦で使う分。1人用では触らないので、無くても既存の表示は動く
       matchBox: $('matchBox'), matchScore: $('matchScore'), matchTime: $('matchTime'),
       plates: $('plates'), netstat: $('netstat'),
-      scoreboard: $('scoreboard'), sbRows: $('sbRows'),
+      scoreboard: $('scoreboard'), sbRows: $('sbRows'), matchStage: $('matchStage'),
       finalboard: $('finalboard'), fbRows: $('fbRows'), fbNote: $('fbNote'),
       minimap: $('minimap'), zonewarn: $('zonewarn'), zoneSub: $('zoneSub'),
       rosterRows: $('rosterRows'),
@@ -277,6 +277,25 @@ export class HUD {
   }
 
   score(v) { this.el.score.textContent = v.toLocaleString('en-US'); }
+
+  /**
+   * ガンゲームで今どの武器か。st は0から数えた段、of は全部の段数。
+   *
+   * of が2より小さい遊び方（デスマッチ）では畳む。
+   * 「1/1」と出しても意味が無く、場所を取るだけになる
+   */
+  stage(st, of) {
+    const el = this.el.matchStage;
+    if (!el) return;
+    const show = of >= 2;
+    el.classList.toggle('hidden', !show);
+    if (!show) { el.textContent = ''; return; }
+    const now = Math.min(st + 1, of);
+    const left = of - now;
+    el.textContent = left > 0
+      ? `武器 ${now} / ${of}　あと${left}本`
+      : `最後の武器　倒したら勝ち`;
+  }
 
   kill(text, headshot) {
     const d = document.createElement('div');

@@ -204,6 +204,10 @@
   /* どちらが自分の数字かを色で分ける。左が自分 */
   #matchScore.lead { color: var(--accent); }
   #matchScore.behind { color: var(--warn); }
+  #matchStage {
+    margin-top: 3px; font-size: 12px; letter-spacing: .06em;
+    color: var(--accent);
+  }
   #matchTime { font-size: 11px; letter-spacing: .18em; color: var(--dim); margin-top: 5px; }
   #matchTime.urgent { color: var(--warn); }
 
@@ -587,6 +591,15 @@
      出すには別の場面とカメラをもう1組動かすことになり、ロビーにいる間ずっと
      描き続ける形になる。選べることを先に作って、見せ方は後から足せる */
   .lbchars { margin-bottom: 0; }
+  .lbmodes { display: flex; gap: 6px; margin-bottom: 6px; }
+  .lbmode {
+    flex: 1; padding: 8px 6px; border-radius: 7px; cursor: pointer;
+    border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.03);
+    color: var(--dim); font: inherit; font-size: 13px; letter-spacing: .04em;
+  }
+  .lbmode:hover { border-color: rgba(255,255,255,.28); }
+  .lbmode.on { border-color: var(--accent); color: var(--accent); background: rgba(99,210,255,.10); }
+  .lbmdesc { font-size: 11px; color: var(--dim); line-height: 1.5; min-height: 2.6em; }
   .lbchead { font-size: 10px; letter-spacing: .22em; color: var(--dim); margin-bottom: 7px; text-align: left; }
   /* 選んだ兵士の姿。ロビーにいる間だけ描く。
      色の四角と名前だけでは、どんな兵士なのかが分からない。
@@ -732,6 +745,11 @@
   <div id="matchBox">
     <div id="matchScore">0 － 0</div>
     <div id="matchTime">相手を待っています</div>
+    <!-- ガンゲームで「今どの武器か／あと何本か」を出す。
+         これが無いと、武器が勝手に替わる理由も、
+         何を目指して撃っているのかも読めない。
+         デスマッチでは空にして畳む -->
+    <div id="matchStage" class="hidden"></div>
   </div>
 
   <div id="roster">
@@ -853,6 +871,13 @@
          高さ900pxの窓では下のボタンが画面の外に出る（実際に出ていた） -->
     <div class="lbgrid">
       <div>
+        <!-- 遊び方。誰が押しても変わる（身内で遊ぶのに部屋主を作らない）。
+             試合が始まってからは押しても効かない -->
+        <div class="lbteam">
+          <div class="lbhead">遊び方</div>
+          <div class="lbmodes" id="lbModes"></div>
+          <div class="lbmdesc" id="lbModeDesc"></div>
+        </div>
         <div class="lbteam">
           <div class="lbhead">席（2〜4人）</div>
           <div class="lbseats" id="lbSeats"></div>

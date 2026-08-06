@@ -744,6 +744,7 @@ class Game {
     // ここでもう一度頼める。試合が始まってからでは断られる
     lobby.onPress = () => this.input.goFullscreen();
     lobby.onSeat = (seat) => this.net?.sendSeat(seat);
+    lobby.onMode = (id) => this.net?.sendMode(id);
     lobby.onReady = (on) => this.net?.sendReady(on);
     // 選んでいる兵士を3Dで見せる。ロビーにいる間だけ描く
     this.charView = new CharView(document.getElementById('lbView'));
@@ -1590,6 +1591,24 @@ class Game {
         this.weapons.resetAll();
         this.damageFlash = 0;
         this.net.resetPrediction?.();
+        break;
+      }
+
+      // 持ち物が替わった。ガンゲームで段が進んだ時に届く。
+      // **持ち物を決めるのはサーバー。** 手元で進めると、
+      // このファイルを書き換えるだけで最後の武器から始められる
+      case EV.ARM: {
+        if (ev.id !== me || !Array.isArray(ev.c) || ev.c.length === 0) break;
+        const before = this.weapons.index;
+        this.weapons.carry = ev.c.map((n) => n | 0);
+        // 今持っている物が持ち物から外れたら、先頭へ持ち替える。
+        // switchTo は持ち物を見るので、carry を入れ替えた後に呼ぶ
+        if (!this.weapons.carry.includes(before)) {
+          this.weapons.switchTo(this.weapons.carry[0]);
+        }
+        // 何段目かを画面へ出す。ガンゲームは「あと何本で勝ち」が
+        // 分からないと、何を目指して撃っているのか読めない
+        this.hud.stage?.(ev.st | 0, ev.of | 0);
         break;
       }
 
