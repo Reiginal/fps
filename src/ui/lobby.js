@@ -6,16 +6,7 @@
 // 押した瞬間に自分の画面だけ座らせると、埋まっていた席を押した時に
 // 「座れたように見えて座れていない」状態が残る。押したら送るだけにして、
 // 絵が変わるのは必ずサーバーから届いた後にする。
-import {
-  SEATS, CHARACTERS, MODE_LIST, LOBBY_ROW, TEAM_OF_SEAT, TEAM_NAMES, PRIMARY_IDS, PRIMARY_DEF,
-} from '../net/protocol.js';
-
-/* 主武器の説明。**数字ではなく「どういう戦い方になるか」を書く。**
-   連射速度や減衰の数字を並べても、遊ぶ前の人には比べようが無い */
-const PRIMARY_INFO = {
-  rifle: { name: 'ライフル', desc: '中距離まで素直に当たる。迷ったらこちら' },
-  shotgun: { name: 'ショットガン', desc: '近ければ一撃。離れると当たらない' },
-};
+import { SEATS, CHARACTERS, MODE_LIST, LOBBY_ROW, TEAM_OF_SEAT, TEAM_NAMES } from '../net/protocol.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -30,8 +21,6 @@ export class Lobby {
       root: $('lobby'),
       why: $('lbWhy'),
       seats: $('lbSeats'),
-      primary: $('lbPrimary'),
-      primaryDesc: $('lbPrimaryDesc'),
       seatHead: $('lbSeatHead'),
       chars: $('lbChars'),
       stand: $('lbStand'),
@@ -48,10 +37,6 @@ export class Lobby {
     this.onReady = () => {};
     this.onChar = () => {};
     this.onMode = () => {};
-    // 主武器を選んだ時。決めるのはサーバーで、ここは押された事を伝えるだけ
-    this.onPrimary = () => {};
-    // 今選んでいる主武器。サーバーから届いた物を写すだけ
-    this.myPrimary = PRIMARY_DEF;
     // 今の遊び方。サーバーから届いた物を写すだけで、こちらでは決めない
     this.mode = MODE_LIST[0].id;
     // 自分が今どれを選んでいるか。印を付けるために持つ
@@ -91,19 +76,6 @@ export class Lobby {
       b.onclick = () => { this.onPress(); this.onMode(m.id); };
       this.el.modes.appendChild(b);
       this.modeEls.push(b);
-    });
-
-    // 主武器の候補。押すたびに作り直すと、押そうとした瞬間にボタンが消える
-    this.primaryEls = [];
-    this.el.primary.innerHTML = '';
-    PRIMARY_IDS.forEach((id) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'lbmode';
-      b.textContent = PRIMARY_INFO[id]?.name || id;
-      b.onclick = () => { this.onPress(); this.onPrimary(id); };
-      this.el.primary.appendChild(b);
-      this.primaryEls.push(b);
     });
 
     // 見た目の候補。ここも最初に1度だけ作る
@@ -201,18 +173,6 @@ export class Lobby {
     // 自分の行から、座っているか・準備を立てているか・どの見た目かを読む
     const me = rows.find((r) => r[LOBBY_ROW.ID] === this.myId);
     if (me && typeof me[LOBBY_ROW.CHR] === 'number') this.myChar = me[LOBBY_ROW.CHR] | 0;
-    if (me && typeof me[LOBBY_ROW.PRIMARY] === 'string') this.myPrimary = me[LOBBY_ROW.PRIMARY];
-
-    /* 主武器。**ガンゲームでは選んでも効かない**ので、押せなくして理由を出す。
-       押せるのに何も起きないのが一番分かりにくい */
-    const usable = cur.id !== 'gun';
-    this.primaryEls.forEach((b, i) => {
-      b.classList.toggle('on', usable && PRIMARY_IDS[i] === this.myPrimary);
-      b.disabled = !usable;
-    });
-    this.el.primaryDesc.textContent = usable
-      ? (PRIMARY_INFO[this.myPrimary]?.desc || '')
-      : 'ガンゲームでは武器が順番に配られます';
 
     // 席に着いている他の人が使っている見た目は押せなくする。
     // サーバーも断るので押しても害は無いが、**押して無反応だと壊れているように見える**。
