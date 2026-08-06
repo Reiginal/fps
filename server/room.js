@@ -446,8 +446,7 @@ export class Room {
    * 誰の発言か分からない行が画面に残る
    */
   chat(slot, text) {
-    const msg = {
-      md: this.mode, t: Sv.CHAT, name: slot.name, m: text };
+    const msg = { t: Sv.CHAT, name: slot.name, m: text };
     for (const s of this.slots.values()) s.conn.send(msg);
   }
 
@@ -466,6 +465,11 @@ export class Room {
       t: Sv.LOBBY,
       rows: this._lobbyRows(),
       why: why === undefined ? this._whyNotStart() : why,
+      /* 今の遊び方。**これが無いと、押しても画面が変わらない。**
+         サーバー側は切り替わっているのに、押した側の画面は前の物に印が付いたままになり、
+         「押せないボタン」に見える（実際そう見えていた）。
+         試合が始まった後に「今チーム戦か」を知る手段もこれしかない */
+      md: this.mode,
     };
     for (const s of this.slots.values()) s.conn.send(msg);
   }
