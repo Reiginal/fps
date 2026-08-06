@@ -113,6 +113,11 @@ export const MODE_LIST = [
     name: 'ガンゲーム',
     desc: '倒すたびに武器が替わる。全部の武器で1回ずつ倒したら勝ち',
   },
+  {
+    id: 'team',
+    name: '2対2',
+    desc: '左の2席と右の2席でチーム。味方は撃てない。先に3ラウンド取ったら勝ち',
+  },
 ];
 export const MODE_IDS = MODE_LIST.map((m) => m.id);
 export const modeName = (id) => (MODE_LIST.find((m) => m.id === id) || MODE_LIST[0]).name;
@@ -237,6 +242,12 @@ export const Sv = {
 // ロビーの1行の並び。**作る側(room.js)・読む側(client.js)・描く側(lobby.js)の
 // 3箇所が同じ物を見る**ようにここで持つ。
 // 番号を直に書いていた時に、1つずれたまま誰も気づかない期間があった
+/* 得点の1行の並び。**ロビーの行と同じ理由でここに置く。**
+   作る側(room.js)と読む側(client.js)が別々に番号を書いていると、
+   片方に項目を足した時にもう片方が黙ってずれる（実際にロビーの行でやった） */
+export const SCORE_ROW = { ID: 0, KILLS: 1, DEATHS: 2, PING: 3, ROUNDS: 4, TEAM: 5 };
+export const SCORE_ROW_LEN = 6;
+
 export const LOBBY_ROW = { ID: 0, NAME: 1, SEAT: 2, READY: 3, CHR: 4 };
 export const LOBBY_ROW_LEN = 5;
 
@@ -454,6 +465,16 @@ export const SEATS = 4;
 // 4箇所を場内の対角へ散らす。デスマッチは全員が互いに敵なので、
 // 誰か2人が近くに湧くと、その2人だけが真っ先に潰し合う形になる
 export const SEAT_SPAWN = [0, 1, 2, 3];
+
+/* 席からチームを決める。**左2つと右2つ。**
+   チーム選びの画面を別に作らないのは、席を選ぶ画面が既にあるから。
+   席が「どこから湧くか」と「どちら側か」を兼ねると、
+   2対2で味方と離れた所に湧く形（SEAT_SPAWNは対角に散らしてある）になるが、
+   そこは湧く位置の並びを変えれば済む話で、席の意味を増やすほうが画面が減る。
+   チーム戦でない遊び方では使わない（全員が互いに敵） */
+export const TEAM_OF_SEAT = (seat) => (Number.isInteger(seat) ? (seat < 2 ? 0 : 1) : null);
+export const TEAM_NAMES = ['アルファ', 'ブラボー'];
+export const TEAM_COLORS = ['#63d2ff', '#ffab5e'];
 
 /* ------------------------------------------------------ キャラクター */
 
