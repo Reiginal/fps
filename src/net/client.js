@@ -278,7 +278,10 @@ export class NetClient {
           // 作る側が team を落とした時に、読む側だけ6項目のまま残っていて、
           // 見た目の番号が必ず undefined ＝ 0番になっていた
           // （対戦中は全員が同じ姿で並ぶ）。並びは protocol.js が持つ
-          if (row) row.chr = r[LOBBY_ROW.CHR] | 0;
+          if (row) {
+            row.chr = r[LOBBY_ROW.CHR] | 0;
+            row.primary = typeof r[LOBBY_ROW.PRIMARY] === 'string' ? r[LOBBY_ROW.PRIMARY] : null;
+          }
         }
         /* 今の遊び方を覚えておく。**ロビーの電文でしか届かない**ので、
            試合が始まった後に「今チーム戦なのか」を知る手段がここしかない */
@@ -662,6 +665,12 @@ export class NetClient {
     const s = String(text ?? '').trim();
     if (!s) return;
     this._send({ t: C.CHAT, m: s.slice(0, CHAT_MAX) });
+  }
+
+  /** ロビーで主武器を選ぶ。名前が知らない物ならサーバーが断る */
+  sendPrimary(id) {
+    if (!this.connected) return;
+    this._send({ t: C.PRIMARY, w: String(id) });
   }
 
   /**

@@ -25,7 +25,7 @@ import { NetClient } from './net/client.js';
 import { RemotePlayers } from './net/remote.js';
 import {
   K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, outsideZone, CHARACTERS,
-  TEAM_NAMES,
+  TEAM_NAMES, WEAPON_NICK,
 } from './net/protocol.js';
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -802,6 +802,7 @@ class Game {
     lobby.onPress = () => this.input.goFullscreen();
     lobby.onSeat = (seat) => this.net?.sendSeat(seat);
     lobby.onMode = (id) => this.net?.sendMode(id);
+    lobby.onPrimary = (id) => this.net?.sendPrimary(id);
     lobby.onReady = (on) => this.net?.sendReady(on);
     // 選んでいる兵士を3Dで見せる。ロビーにいる間だけ描く
     this.charView = new CharView(document.getElementById('lbView'));
@@ -1908,6 +1909,12 @@ class Game {
         // 何段目かを画面へ出す。ガンゲームは「あと何本で勝ち」が
         // 分からないと、何を目指して撃っているのか読めない
         this.hud.stage?.(ev.st | 0, ev.of | 0);
+        /* 札の文字も配られた物へ合わせる。**主武器を選べるので、
+           1番が「ライフル」で固定ではなくなった。**
+           合わせないと、ショットガンを選んだ人の画面に「1 ライフル」と出たまま
+           ショットガンが出てくる */
+        this.hud.slotNames(this.weapons.carry
+          .map((i) => WEAPON_NICK[this.weapons.weapons[i]?.def?.id] || ''));
         break;
       }
 
