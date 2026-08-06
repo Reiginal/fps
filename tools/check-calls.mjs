@@ -123,5 +123,46 @@ for (const file of ['src/ui/hud.js', 'src/ui/netmenu.js']) {
 console.log(`  ${missing === 0 ? `index.htmlの${ids.size}個のidと突き合わせて欠けは無し` : `${missing}件 欠けている`}`);
 
 bad += missing;
+
+/* ------------------------------------ JSが付け外しするCSSクラスが実在するか */
+
+// [2]と全く同じ形の見落としが、idではなくクラス名でも起きる。
+// classList.toggle('taken', ...) は、そのクラスがCSSに1行も無くても
+// 例外を投げない。**静かに何も起きないだけ。**
+//
+// このrepoは実際にこの形で転んでいる（CLAUDE.local.mdの「検査は落ちること」）:
+// つまみの開閉ボタンが、何も畳めていなかった。
+// 押しても何も起きないのを「そういう物」だと思って使い続けることになる。
+//
+// 見るのは<style>の中だけにする。HTMLの本文にある class="..." は
+// 「その要素が最初から持っている」だけで、見た目を決めているとは限らない
+const styleBlocks = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join('\n');
+const cssClasses = new Set([...styleBlocks.matchAll(/\.([a-zA-Z][\w-]*)/g)].map((m) => m[1]));
+
+console.log('\n[3] JSが付け外しするCSSクラス');
+let noStyle = 0;
+let classCount = 0;
+for (const file of files) {
+  const src = readFileSync(file, 'utf8');
+  src.split('\n').forEach((line, i) => {
+    const found = [];
+    // classList.add / remove / toggle
+    for (const m of line.matchAll(/classList\.(?:add|remove|toggle)\(\s*'([\w-]+)'/g)) found.push(m[1]);
+    // className = 'lbchar' のような直接の代入（空白区切りで複数入ることがある）
+    for (const m of line.matchAll(/className\s*=\s*'([\w -]+)'/g)) found.push(...m[1].split(/\s+/).filter(Boolean));
+    for (const cls of found) {
+      classCount++;
+      if (cssClasses.has(cls)) continue;
+      console.log(`  × 失敗: ${file}:${i + 1} … .${cls} が index.html のCSSに無い（付けても何も起きない）`);
+      noStyle++;
+    }
+  });
+}
+console.log(`  ${noStyle === 0
+  ? `${classCount}箇所の付け外しを見て、CSSの${cssClasses.size}クラスと突き合わせて欠けは無し`
+  : `${noStyle}件 欠けている`}`);
+
+bad += noStyle;
+
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);
 process.exit(bad === 0 ? 0 : 1);
