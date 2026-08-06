@@ -280,6 +280,7 @@ function onMessage(conn, raw) {
     case C.SHOT: return onShot(conn, m);
     case C.THROW: return onThrow(conn, m);
     case C.WEAPON: return onWeapon(conn, m);
+    case C.MODE: return onMode(conn, m);
     case C.SEAT: return onSeat(conn, m);
     case C.READY: return onReady(conn, m);
     case C.CHAR: return onChar(conn, m);
@@ -365,6 +366,13 @@ function onThrow(conn, m) {
   if (len < 1e-6) return;
   _d.divideScalar(len);
   conn.room.throwNade(slot, _o, _d);
+}
+
+// 遊び方を選ぶ。誰が押しても変わるので、席に着いているかも見ない
+function onMode(conn, m) {
+  if (!conn.slot) return;
+  if (typeof m.md !== 'string') return;
+  conn.room.setMode(m.md);
 }
 
 function onWeapon(conn, m) {

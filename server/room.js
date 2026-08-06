@@ -9,9 +9,10 @@ import * as THREE from 'three';
 import { Capsule } from 'three/addons/math/Capsule.js';
 import {
   TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS, MATCH, PHASE, ZONE, NADE, outsideZone,
-  Sv, EV, packPlayer, SEATS, SEAT_SPAWN, CHARACTERS,
+  Sv, EV, packPlayer, SEATS, SEAT_SPAWN, CHARACTERS, MODE_IDS, LOBBY_ROW, LOBBY_ROW_LEN,
 } from '../src/net/protocol.js';
-import { SimPlayer, resolveShot, rewindMs, originVisible } from './sim.js';
+import { SimPlayer, resolveShot, rewindMs, originVisible, WEAPONS } from './sim.js';
+import { modeOf } from './modes.js';
 import { logs } from './logs.js';
 
 const TICK_MS = 1000 / TICK_HZ;
@@ -61,7 +62,13 @@ export class Room {
     this._timer = null;
     this._nextTickAt = nowMs();
     this._scoreTimer = 0;
+    // 遊び方。ロビーで誰でも変えられる（身内で遊ぶのに部屋主を作らない）。
+    // 決まりの中身は server/modes.js が持つ
+    this.mode = MODE_IDS[0];
   }
+
+  /** 今の遊び方の決まり */
+  get rules() { return modeOf(this.mode); }
 
   /* ------------------------------------------------------ 出入り */
 
@@ -175,6 +182,38 @@ export class Room {
   }
 
   /** 席に着いている人。チーム分けは無いので1本の並び */
+  /**
+   * 遊び方を選ぶ。**誰が押しても変わる。**
+   * 身内で遊ぶのに部屋主を作ると、その人が居ない日に何も選べなくなる。
+   * 試合が始まってからは効かない（途中で決まりが変わると何が起きたか読めない）
+   */
+  setMode(id) {
+    if (this.phase !== PHASE.WAIT) return false;
+    if (!MODE_IDS.includes(id) || id === this.mode) return false;
+    this.mode = id;
+    // 選んだ瞬間に持ち物を配り直す。ロビーで構えている武器が
+    // その遊び方の物に変わるので、押した結果がその場で見える
+    for (const s2 of this.slots.values()) { s2.stage = 0; this._arm(s2); }
+    this._sendLobby();
+    return true;
+  }
+
+  /**
+   * 今の遊び方に合わせて持ち物を配る。
+   * デスマッチなら既定の4本、ガンゲームなら今の段の1本だけ。
+   *
+   * **持ち物を決めるのはサーバー。** クライアントが自分で進めると、
+   * そちらを書き換えるだけで最後の武器から始められる
+   */
+  _arm(slot) {
+    const carry = this.rules.carryFor(WEAPONS, slot);
+    slot.sim.setCarry(carry);
+    this.push({
+      e: EV.ARM, id: slot.id, c: carry,
+      st: slot.stage | 0, of: this.rules.stagesOf(WEAPONS),
+    });
+  }
+
   _seated() {
     const list = [];
     for (const s of this.slots.values()) if (s.seat !== null) list.push(s);
@@ -203,6 +242,7 @@ export class Room {
       s.rounds = 0;
       s.sim.kills = 0;
       s.sim.deaths = 0;
+      s.stage = 0;
       // 準備は倒す。倒さないと、結果を見ている間に相手が押した瞬間、
       // こちらは何もしていないのに次が始まる
       s.ready = false;
@@ -212,15 +252,19 @@ export class Room {
     this._sendLobby();
   }
 
+  // 並びは protocol.js の LOBBY_ROW が決める。**番号を直に書かない。**
+  // チーム制をやめた時、ここから team を落としたのに読む側は6項目のまま読んでいて、
+  // 見た目の番号が1つずれて全員0番の姿になっていた
   _lobbyRows() {
     const rows = [];
     for (const s of this.slots.values()) {
-      rows.push([
-        s.id, s.name,
-        s.seat === null ? -1 : s.seat,
-        s.ready ? 1 : 0,
-        s.chr | 0,
-      ]);
+      const row = new Array(LOBBY_ROW_LEN).fill(0);
+      row[LOBBY_ROW.ID] = s.id;
+      row[LOBBY_ROW.NAME] = s.name;
+      row[LOBBY_ROW.SEAT] = s.seat === null ? -1 : s.seat;
+      row[LOBBY_ROW.READY] = s.ready ? 1 : 0;
+      row[LOBBY_ROW.CHR] = s.chr | 0;
+      rows.push(row);
     }
     return rows;
   }
@@ -231,7 +275,8 @@ export class Room {
    * 誰の発言か分からない行が画面に残る
    */
   chat(slot, text) {
-    const msg = { t: Sv.CHAT, name: slot.name, m: text };
+    const msg = {
+      md: this.mode, t: Sv.CHAT, name: slot.name, m: text };
     for (const s of this.slots.values()) s.conn.send(msg);
   }
 
@@ -302,6 +347,16 @@ export class Room {
       rounds: 0,
       // 残りの手榴弾。ラウンドの頭で戻す
       nades: NADE.PER_ROUND,
+      // ガンゲームで今どの武器まで進んだか。デスマッチでは使わない。
+      // 0から始まって、倒すたびに1つ増える
+      stage: 0,
+      // この死をもう数えたか。**ラウンドが無い遊び方ではこれが要る。**
+      // デスマッチは倒れた瞬間に局面がBREAKへ移るので二重に数えなかったが、
+      // ガンゲームは局面が動かないまま倒れたままなので、
+      // 目印が無いと毎刻み「落下で死んだ」が積み上がる（毎秒60回）
+      downed: false,
+      // 生き返るまでの残り秒。ラウンドが無い遊び方でだけ減る
+      respawnIn: 0,
     };
     this.slots.set(id, slot);
     this._respawn(slot);
@@ -630,6 +685,8 @@ export class Room {
       w: slot.sim.weapon, head: false, z: 1,
     });
     if (this.phase !== PHASE.LIVE) return;
+    slot.downed = true;
+    slot.respawnIn = MATCH.RESPAWN_S;
     slot.sim.deaths++;
     this._checkRoundOver('zone');
   }
@@ -644,8 +701,21 @@ export class Room {
     // ラウンドが動いていない間の撃ち合いは点に入れない。
     // 入れると画面に出ている点数が決着後にも動き続ける
     if (this.phase !== PHASE.LIVE) return;
+    victim.downed = true;
+    victim.respawnIn = MATCH.RESPAWN_S;
     victim.sim.deaths++;
     killer.sim.kills++;
+
+    // 段が進むか、そこで勝ちが決まるかは遊び方が決める。
+    // Roomは「誰が誰を倒したか」だけを渡して、結果を受け取る
+    const what = this.rules.onKill(killer, victim, WEAPONS);
+    if (what === 'win') {
+      logs.add('match', { winner: `${killer.name}(${this.mode})`, why: 'stage' });
+      this._endMatch('score');
+      return;
+    }
+    if (what === 'advance') this._arm(killer);
+
     this._checkRoundOver('kill');
   }
 
@@ -655,7 +725,11 @@ export class Room {
       e: EV.KILL, id: slot.id, by: slot.id,
       w: slot.sim.weapon, head: false, f: 1,
     });
+    slot.downed = true;
+    slot.respawnIn = MATCH.RESPAWN_S;
     slot.sim.deaths++;
+    // ガンゲームでは自滅で段は進まない。進めると崖から飛び降りるのが
+    // 一番速い勝ち方になる（modes.jsのonKillが自分自身を弾いている）
     this._checkRoundOver('fall');
   }
 
@@ -672,6 +746,9 @@ export class Room {
    */
   _checkRoundOver(why) {
     if (this.phase !== PHASE.LIVE) return;
+    // ラウンドを持たない遊び方（ガンゲーム）では、最後の1人になっても何も起きない。
+    // 倒れた人は数秒で生き返って続く（_tickが面倒を見る）
+    if (!this.rules.rounds) return;
     const alive = [];
     for (const s of this.slots.values()) if (s.seat !== null && s.sim.alive) alive.push(s);
     if (alive.length > 1) return;
@@ -704,6 +781,8 @@ export class Room {
     slot.sim.protectIn = MATCH.SPAWN_PROTECT_S;
     slot.starve = 0;
     slot.outsideFor = 0;
+    slot.downed = false;
+    slot.respawnIn = 0;
     slot.nades = NADE.PER_ROUND;
     // 包帯もラウンドの頭で戻す。持ち越すと、前のラウンドで使い切った側だけ
     // 立て直す手段が無いまま次のラウンドを戦うことになる
@@ -711,6 +790,9 @@ export class Room {
     slot.lastYaw = yaw;
     slot.lastPitch = 0;
     this.push({ e: EV.SPAWN, id: slot.id, p: [pos.x, pos.y, pos.z], yaw });
+    // 湧いた時点で持ち物を配り直す。ガンゲームは段が進んでいるかもしれないし、
+    // 遊び方そのものが変わっているかもしれない
+    this._arm(slot);
   }
 
   /* ---------------------------------------------------------- 進行 */
@@ -756,11 +838,21 @@ export class Room {
       // 削るのはラウンドが動いている間だけ。人待ちの間や決着後の数秒に
       // 範囲外で削られると、操作していないのに死ぬ
       if (this.phase === PHASE.LIVE) this._zone(slot);
-      // 撃たれる以外の死に方（落下）でもラウンドは決まる。
+      // 撃たれる以外の死に方（落下）も拾う。
       // shot()を通った死は_killが拾うが、Playerの中で体力が0になる経路は
       // ここで拾わないと、倒れたまま誰も勝たずに時間切れまで続く。
-      // _killも_killByZoneも局面をBREAKへ移すので、二重には走らない
-      if (this.phase === PHASE.LIVE && !sim.alive) this._killByFall(slot);
+      //
+      // downedで一度だけにする。デスマッチは倒れた瞬間に局面がBREAKへ移るので
+      // 二重に走らなかったが、**ガンゲームは局面が動かない**ので、
+      // 目印が無いと毎刻み「落下で死んだ」が積み上がる
+      if (this.phase === PHASE.LIVE && !sim.alive && !slot.downed) this._killByFall(slot);
+
+      // ラウンドが無い遊び方では、倒れた人が時間で生き返る。
+      // ラウンド制はラウンドの頭でまとめて生き返るので、こちらは動かない
+      if (this.phase === PHASE.LIVE && !this.rules.rounds && !sim.alive) {
+        slot.respawnIn -= TICK_DT;
+        if (slot.respawnIn <= 0) this._respawn(slot);
+      }
       sim.record(t);
     }
 
@@ -877,6 +969,8 @@ export class Room {
       s.rounds = 0;
       s.sim.kills = 0;
       s.sim.deaths = 0;
+      // ガンゲームの段。試合ごとに最初の武器へ戻す
+      s.stage = 0;
     }
     this._sendScore();
     logs.add('start', {

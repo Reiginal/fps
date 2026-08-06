@@ -11,7 +11,7 @@
 
 import {
   C, Sv, EV, PHASE, encode, decode, unpackPlayer,
-  qPos, qAng, INPUT_BATCH, INTERP_DELAY_MS, TIMEOUT_MS, CHAT_MAX,
+  qPos, qAng, INPUT_BATCH, INTERP_DELAY_MS, TIMEOUT_MS, CHAT_MAX, LOBBY_ROW,
 } from './protocol.js';
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -249,10 +249,14 @@ export class NetClient {
         // 試合が始まると、相手の姿を組むのに要るのはこの番号で、
         // ロビーの電文はもう飛んでこない
         for (const r of rows) {
-          const row = this._touchPlayer({ id: r[0], name: r[1] });
-          if (row) row.chr = r[5] | 0;
+          const row = this._touchPlayer({ id: r[LOBBY_ROW.ID], name: r[LOBBY_ROW.NAME] });
+          // **ここは長い間 r[5] を読んでいた。** チーム制をやめて
+          // 作る側が team を落とした時に、読む側だけ6項目のまま残っていて、
+          // 見た目の番号が必ず undefined ＝ 0番になっていた
+          // （対戦中は全員が同じ姿で並ぶ）。並びは protocol.js が持つ
+          if (row) row.chr = r[LOBBY_ROW.CHR] | 0;
         }
-        this._emit(this.onLobby, { rows, why: m.why || '' });
+        this._emit(this.onLobby, { rows, why: m.why || '', mode: m.md || null });
         break;
       }
       // 往復を測るのはサーバー。こちらは即返すことだけが仕事
@@ -602,6 +606,12 @@ export class NetClient {
   sendChar(index) {
     if (!this.connected) return;
     this._send({ t: C.CHAR, i: index | 0 });
+  }
+
+  /** 遊び方を選ぶ。誰が押しても変わるので、席に着いているかは見ない */
+  sendMode(id) {
+    if (!this.connected) return;
+    this._send({ t: C.MODE, md: String(id) });
   }
 
   /** 発言する。長さも連投もサーバーが見るので、ここでは送るだけ */
