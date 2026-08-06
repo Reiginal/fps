@@ -368,7 +368,7 @@
      こいつだけは押した時に復帰させない（main.js側でstopPropagationしている）。
      復帰より小さく地味に置く。戻るほうが目立つと、休憩のたびに押し間違える */
   .ovhome { font-size: 11px; letter-spacing: .2em; color: var(--dim); background: none;
-    border: 1px solid rgba(255,255,255,.16); padding: 9px 20px; margin-top: 20px;
+    border: 1px solid rgba(255,255,255,.16); padding: 9px 20px; margin: 20px 5px 0;
     font-family: inherit; cursor: pointer; }
   .ovhome:hover { color: var(--hud); border-color: rgba(255,255,255,.36); }
   /* --------------------------------------------------- 戦死の画面 */
@@ -444,16 +444,6 @@
   .field input:focus { outline: none; border-color: var(--accent); background: rgba(99,210,255,.07); }
   .hint { font-size: 10px; line-height: 1.7; color: var(--dim); margin-top: 5px; }
 
-  /* 入り切りのつまみ。文字の側を押しても切り替わるようlabelで包んである
-     （13pxの四角だけが当たり判定だと、狙って押させることになる） */
-  .check {
-    display: flex; align-items: center; gap: 8px; margin-top: 12px;
-    font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
-    color: var(--hud); cursor: pointer; user-select: none;
-  }
-  .check input { width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; }
-  #netmenu.busy .check { opacity: .45; pointer-events: none; }
-
   /* つまみ。作った側が音を聴けないので、聴ける側が直接回せる場所を用意する。
      ここが無いと「作る→聴いてもらう→駄目→また作る」を延々やることになる */
   .linkbtn {
@@ -480,6 +470,38 @@
   .netbtn.main:hover { background: rgba(99,210,255,.16); }
   /* 接続中に連打されると同じ部屋へ何本も繋ぎにいく */
   #netmenu.busy .netbtn { opacity: .35; cursor: default; pointer-events: none; }
+
+  /* --------------------------------------------------------- 設定 */
+  /* 接続画面と同じ見た目にする。開ける場所が2つ（ホームと一時停止）あるので、
+     どちらから開いても同じ物が出るよう、画面は1つだけ置いて出し入れする。
+     z-indexが#netmenu(20)より上なのは、ホームから開いた時に上へ乗せるため */
+  #settings {
+    position: fixed; inset: 0; z-index: 40;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px 0; overflow-y: auto;
+    background: rgba(3, 5, 8, .9);
+  }
+  #settings.hidden { display: none; }
+  .stpanel { width: min(420px, 86vw); text-align: center; }
+  .stpanel .title { font-size: 26px; }
+  .stpanel .subtitle { margin-bottom: 22px; }
+
+  .strow { text-align: left; margin-bottom: 18px; }
+  /* 名前と今の値を左右に離して置く。値が名前のすぐ隣にあると、
+     つまみを動かしながら目で追う先が定まらない */
+  .sthead {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-family: var(--mono); font-size: 11px; letter-spacing: .1em; color: var(--hud);
+    margin-bottom: 6px;
+  }
+  .stval { color: var(--accent); font-size: 13px; }
+
+  /* つまみ。既定の見た目はブラウザごとに違うが、
+     accent-colorだけは3社とも効くので、そこだけ合わせる */
+  .strange { width: 100%; accent-color: var(--accent); cursor: pointer; }
+  .stcheck { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+
+  .stbtns { display: flex; gap: 10px; margin-top: 22px; }
 
   /* ------------------------------------------------------- 手掛かり */
   /* 右上に小さく出す。普段は出ない。
@@ -838,7 +860,9 @@
       <b>左クリック</b><span>射撃</span>
       <b>右クリック</b><span>覗き込み（ADS）</span>
       <b>R</b><span>リロード</span>
-      <b>1 / 2 / 3 / 4</b><span>ライフル / ショットガン / ナイフ / 手榴弾</span>
+      <!-- 並びは protocol.js の LOADOUT_IDS と揃える。
+           HUDの札(#slots)と2箇所あるので、tools/check-loadout.mjs が両方を見張る -->
+      <b>1 / 2 / 3 / 4</b><span>ライフル / ピストル / ナイフ / 手榴弾</span>
       <b>F</b><span>包帯を巻く</span>
       <b>ESC</b><span>一時停止</span>
     </div>
@@ -908,20 +932,26 @@
       <input id="nmName" type="text" maxlength="12" autocomplete="off" spellcheck="false">
     </div>
 
-    <label class="check" for="nmFull">
-      <input id="nmFull" type="checkbox" checked>
-      <span>全画面で遊ぶ</span>
-    </label>
-    <div class="hint">
-      切ると窓のまま遊べます（別のタブを見に行きたい時に）。<br>
-      そのかわりWindowsでは、しゃがみながらWを押すとタブが閉じることがあります。
-    </div>
-
     <div id="nmStatus"></div>
 
     <div class="netbtns">
+      <button id="nmSettings" class="netbtn" type="button">設定</button>
       <button id="nmSolo" class="netbtn" type="button">1人で遊ぶ</button>
       <button id="nmJoin" class="netbtn main" type="button">対戦に参加</button>
+    </div>
+  </div>
+</div>
+
+<!-- 設定。中身は src/core/settings.js の表からJSが並べるので、ここは器だけ。
+     ホームからも一時停止からも同じ物を開く（2つ作ると片方だけ直して見た目がずれる） -->
+<div id="settings" class="hidden">
+  <div class="stpanel">
+    <div class="title">設定</div>
+    <div class="subtitle">この端末に覚えます</div>
+    <div id="stRows"></div>
+    <div class="stbtns">
+      <button id="stReset" class="netbtn" type="button">既定に戻す</button>
+      <button id="stClose" class="netbtn main" type="button">閉じる</button>
     </div>
   </div>
 </div>

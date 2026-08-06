@@ -143,5 +143,8 @@ jobs:
       - name: 検査 倒れている間のカメラ
         run: node tools/check-deathcam.mjs
 
+      - name: 検査 設定
+        run: node tools/check-settings.mjs
+
       - name: 検査 地形のメモリ
         run: node --expose-gc tools/check-world.mjs
