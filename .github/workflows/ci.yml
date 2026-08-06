@@ -161,5 +161,8 @@ jobs:
       - name: 検査 終了
         run: node tools/check-quit.mjs
 
+      - name: 検査 声で話す
+        run: node tools/check-voice.mjs
+
       - name: 検査 地形のメモリ
         run: node --expose-gc tools/check-world.mjs

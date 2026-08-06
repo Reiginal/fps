@@ -35,6 +35,7 @@ export class HUD {
       healPips: $('healPips'), healState: $('healState'), slotHeal: $('slotHeal'),
       elim: $('elim'), elimName: $('elimName'), elimTag: $('elimTag'),
       achfeed: $('achfeed'),
+      voice: $('voice'), voiceText: $('voiceText'),
     };
     this.markerTimer = 0;
     this.crossHitTimer = 0;
@@ -314,6 +315,22 @@ export class HUD {
       setTimeout(() => el.remove(), 320);
     }, 3400);
     while (this.el.killfeed.children.length > 5) this.el.killfeed.firstChild.remove();
+  }
+
+  /**
+   * 声の状態。**自分が今送っているかどうかを出す。**
+   *
+   * ここが見えないのが一番痛い。押しているつもりで押せていない／
+   * 離したつもりで押しっぱなし、がどちらも起きて、どちらも本人には分からない。
+   *
+   * @param state 'off'=何も出さない / 'talk'=送信中 / 'nomic'=マイクが使えない
+   */
+  voice(state, text = '') {
+    const el = this.el.voice;
+    if (!el) return;
+    el.classList.toggle('hidden', state === 'off');
+    el.classList.toggle('off', state === 'nomic');
+    if (this.el.voiceText && text) this.el.voiceText.textContent = text;
   }
 
   /**

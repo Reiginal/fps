@@ -67,6 +67,26 @@ export const SETTINGS = [
     apply: (v, t) => { t.audio?.setVolume?.(v); },
   },
   {
+    key: 'voice',
+    store: 'blackout.voice',
+    name: 'ボイスチャット',
+    kind: 'check',
+    def: true,
+    hint: `対戦中、${'V'}キーを押している間だけ味方に声が届きます。`
+      + 'マイクの許可は最初に1度だけ聞かれます。断っても遊べます（聞く側になります）',
+    apply: (v, t) => { t.voice?.setEnabled?.(v); },
+  },
+  {
+    key: 'voiceVol',
+    store: 'blackout.voicevol',
+    name: '声の音量',
+    kind: 'range',
+    min: 0, max: 1, step: 0.05, def: 1,
+    fmt: (v) => `${Math.round(v * 100)}%`,
+    hint: '相手の声だけの音量です。ゲームの音とは別に調整できます',
+    apply: (v, t) => { t.voice?.setVolume?.(v); },
+  },
+  {
     key: 'full',
     // 全画面は前から選択画面のつまみにあった。**鍵をそのまま引き継ぐ**ので、
     // 前に切った人は切ったまま、ここへ移っても戻らない

@@ -553,6 +553,25 @@
   .sxbar i { display: block; height: 100%; background: var(--dim); transition: width .3s; }
   .sxach.got .sxbar i { background: var(--ok); }
 
+  /* --------------------------------------------------------- 声 */
+  /* 十字の少し下。**視線の先に近い所に置く。**
+     画面の隅だと、撃ち合いの最中に見に行けない（見に行った時点で撃たれる） */
+  #voice {
+    position: absolute; left: 50%; top: calc(50% + 46px); transform: translateX(-50%);
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10px; letter-spacing: .2em; color: var(--ok);
+    text-shadow: 0 0 5px rgba(0,0,0,.9);
+  }
+  #voice.hidden { display: none; }
+  #voice i {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--ok);
+    animation: vPulse .9s ease-in-out infinite;
+  }
+  @keyframes vPulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+  /* マイクが使えない時。**赤で出す**（緑のまま出すと送れていると思う） */
+  #voice.off { color: var(--warn); }
+  #voice.off i { background: var(--warn); animation: none; }
+
   /* --------------------------------------------------- 実績の解除 */
   /* 左下。撃ち合いの最中に出るので、画面の真ん中には置かない */
   #achfeed {
@@ -865,6 +884,11 @@
   <!-- 実績の解除。キルログと別の列にする（撃った直後に出るので混ぜると読まれない） -->
   <div id="achfeed"></div>
 
+  <!-- 声の状態。**自分が今送っているかどうかが見えないのが一番痛い。**
+       押しているつもりで押せていない／離したつもりで押しっぱなし、が
+       どちらも起きる。押している間だけ光らせる -->
+  <div id="voice" class="hidden"><i></i><span id="voiceText">送信中</span></div>
+
   <div id="scoreboard" class="hidden">
     <div class="sbtitle">戦績</div>
     <div class="sbrow sbh">
@@ -946,6 +970,7 @@
            HUDの札(#slots)と2箇所あるので、tools/check-loadout.mjs が両方を見張る -->
       <b>1 / 2 / 3 / 4</b><span>ライフル / ピストル / ナイフ / 手榴弾</span>
       <b>F</b><span>包帯を巻く</span>
+      <b>V</b><span>押している間だけ味方に話す</span>
       <b>ESC</b><span>一時停止</span>
     </div>
     <div class="cta" id="cta">クリックで出撃</div>
