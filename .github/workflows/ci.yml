@@ -65,6 +65,10 @@ jobs:
           done
           exit $fail
 
+      # 一番先に走らせる。検査を書いたのに繋ぎ忘れている、を真っ先に知りたい
+      - name: 検査 検査そのものの繋がり
+        run: node tools/check-meta.mjs
+
       - name: 検査 呼び先とHUDの部品
         run: node tools/check-calls.mjs
 
