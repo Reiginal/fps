@@ -627,6 +627,11 @@ console.log('\n[モデル差し替え] 買ったモデルを被せられるか')
     const want = new THREE.Vector3();
     target.getSize(want);
     ok(Math.abs(size.z - want.z) < 0.01, `長さが元と同じ（${size.z.toFixed(3)} / ${want.z.toFixed(3)}）`);
+    /* **長さは据え置いたまま、断面だけ太らせる。**
+       長さを合わせるだけだと断面が元の3分の1しか無くて刃物に見えた。
+       かといって全体を大きくすると長さが1.7倍になって腕から突き出た（どちらも実際にそう見えた） */
+    ok(size.x > want.x * 0.5, `細くなりすぎない（幅 ${size.x.toFixed(3)} / 元 ${want.x.toFixed(3)}）`);
+    ok(size.z < want.z * 1.05, `長くなりすぎない（${size.z.toFixed(3)} / 元 ${want.z.toFixed(3)}）`);
     const c = new THREE.Vector3();
     box.getCenter(c);
     const wc = new THREE.Vector3();

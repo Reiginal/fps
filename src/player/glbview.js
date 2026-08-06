@@ -18,6 +18,15 @@ import * as THREE from 'three';
    /assets/ は既に外へ配る決まりに入っているので、置くだけで本番にも出る */
 export const MODEL_DIR = 'assets/models';
 
+/* 太さの倍率。**長さはそのままで、断面だけ太らせる。**
+   長さを元の銃に合わせると、断面が元の3分の1しか無くて刃物に見えた。
+   かといって全体を大きくすると、今度は長さが1.7倍になって腕から突き出た
+   （どちらも実際にそう見えた）。長い向きだけ据え置いて、残り2つを持ち上げる。
+
+   1.6は、元の銃の幅(0.080)とだいたい揃う所。
+   ここを上げすぎると、断面が四角い棒に近づいて銃らしさが消える */
+const FIT_FAT = 1.6;
+
 /** その武器のモデルの置き場所 */
 export const modelUrl = (id) => `${MODEL_DIR}/${id}.glb`;
 
@@ -127,8 +136,17 @@ export function fitModel(scene, box) {
      元の銃の箱（手を除いた本体）の長さと中心が、そのまま答えになっている */
   const target = new THREE.Vector3();
   box.getSize(target);
+  /* 長さを合わせるだけだと**細くなりすぎる。**
+     元の銃の箱は、スコープと弾倉まで含めて高さ0.38あるのに、
+     長さだけ合わせたモデルの高さは0.13にしかならず、刃物に見えた。
+     かといって全体を太らせると長さまで伸びる。**長い向きだけ据え置く。**
+
+     どの向きが長いかは回す前の話なので、回した後の見え方ではなく
+     モデルの中の向き（long）で決める */
   const k = (target.z || 0.9) / span;
-  scene.scale.setScalar(k);
+  const fat = [k * FIT_FAT, k * FIT_FAT, k * FIT_FAT];
+  fat[long] = k;
+  scene.scale.set(fat[0], fat[1], fat[2]);
 
   const now = new THREE.Box3().setFromObject(scene);
   const c = new THREE.Vector3();
