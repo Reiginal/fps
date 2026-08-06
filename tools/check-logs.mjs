@@ -149,6 +149,14 @@ console.log('\n[10] 拾っているのは「たまにしか起きない物」だ
   ok(busted.length === 0, `毎秒何十回も起きる物を拾っていない (${[...kinds].join(', ')})`);
   ok(kinds.has('error'), 'エラーは拾っている');
   ok(kinds.has('boot'), '起動の印を残している（ログが消えた境目が読める）');
+
+  // 種類を足したのに日本語の名前を足し忘れると、/logsでその行だけ
+  // 英語の識別子（例: "perf"）のまま出る。renderPageのソースを直接見て、
+  // 拾っている種類の分だけKIND_LABELにキーがあるかを確かめる
+  const logsSrc = String(src(new URL('../server/logs.js', import.meta.url)));
+  const missing = [...kinds].filter((k) => !new RegExp(`\\b${k}:`).test(logsSrc));
+  ok(missing.length === 0,
+    `拾っている種類は全部KIND_LABELに名前がある（${missing.join(', ') || 'なし'}）`);
 }
 
 console.log('\n[11] 1人プレイも残る');

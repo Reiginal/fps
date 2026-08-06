@@ -139,6 +139,7 @@ const KIND_LABEL = {
   error: '画面のエラー',
   net: '通信で例外',
   solo: '1人で遊んだ',
+  perf: '描画の重さ',
 };
 
 const two = (n) => String(n).padStart(2, '0');
