@@ -22,6 +22,7 @@ const { getRoom } = await import('../server/room.js');
 const { buildWorld } = await import('../server/world.js');
 const { WEAPONS } = await import('../src/player/weapons.js');
 const { modeOf } = await import('../server/modes.js');
+const { logs } = await import('../server/logs.js');
 
 const world = buildWorld();
 let bad = 0;
@@ -146,10 +147,21 @@ console.log('\n[5] 最後の武器で倒したら試合が終わる');
   ok(idOf(a.slot.sim.weapon) === GUN_ORDER[last],
     `最後の武器を持っている (${GUN_ORDER[last]})`);
 
+  // このあとの/logsの検査が前の節の記録と混ざらないよう、ここで一度空にする
+  logs.clear();
   room._kill(b.slot, a.slot, 1);
   ok(room.phase === PHASE.END, '試合が終わった');
   const end = a.conn.sent.filter((m) => m.t === 'M').pop();
   ok(!!end, '試合終了の知らせが届いている');
+
+  /* ガンゲームはs.roundsを誰も増やさない（rules.rounds===falseでラウンドが
+     無いため）。_endMatchが従来通り無条件でs.roundsから「一番多い人」を
+     探して/logsへ書くと、常に0対0を並び順で見て、勝った本人ではない側
+     （最悪、負けた側）が優勝として記録される。段勝ちの1件だけが残るはず */
+  const matches = logs.recent(50, 'match');
+  ok(matches.length === 1, `/logsの試合終了が1件だけ（${matches.length}件）`);
+  ok(matches[0]?.winner?.startsWith(a.slot.name),
+    `勝った本人(${a.slot.name})が記録されている（${matches[0]?.winner}）`);
 }
 
 console.log('\n[6] ガンゲームでは自滅で進まない');
