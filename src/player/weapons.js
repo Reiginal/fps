@@ -3610,6 +3610,31 @@ export class WeaponSystem {
     return clamp(dv * 2.2, -0.06, 0.06);
   }
 
+  /**
+   * 持って出ている銃の予備弾を満タンへ戻す。地面の物を拾った時に呼ぶ。
+   *
+   * **弾の数はサーバーが持っていない。** 撃った回数を数えているのは手元だけなので、
+   * 「拾った」という知らせを受けて手元が戻す形になる。
+   * 拾えるかどうかを決めるのはサーバー（近づいたかどうか）なので、
+   * ここを書き換えても好きな時に補給はできない。
+   *
+   * マガジンの中身は戻さない。戻すと、撃ち切る直前に拾えば装填を飛ばせることになり、
+   * 「弾切れで一度下がる」という間が消える。
+   *
+   * @returns 1本でも増えたか（何も増えなかった時に「補給した」と出さないため）
+   */
+  refillReserve() {
+    let got = false;
+    for (const i of this.carry) {
+      const w = this.weapons[i];
+      if (!w || !w.def.reserve) continue;   // ナイフと手榴弾は予備弾を持たない
+      if (w.reserve >= w.def.reserve) continue;
+      w.reserve = w.def.reserve;
+      got = true;
+    }
+    return got;
+  }
+
   resetAll() {
     for (const w of this.weapons) {
       w.ammo = w.def.mag;

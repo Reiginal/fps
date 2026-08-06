@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { Capsule } from 'three/addons/math/Capsule.js';
 import {
   TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS, MATCH, PHASE, ZONE, NADE, outsideZone,
-  Sv, EV, packPlayer, SEATS, SEAT_SPAWN, CHARACTERS, MODE_IDS, LOBBY_ROW, LOBBY_ROW_LEN,
+  Sv, EV, packPlayer, SEATS, SEAT_SPAWN, CHARACTERS, MODE_IDS, LOBBY_ROW, LOBBY_ROW_LEN, DROP,
 } from '../src/net/protocol.js';
 import { SimPlayer, resolveShot, rewindMs, originVisible, WEAPONS } from './sim.js';
 import { modeOf } from './modes.js';
@@ -51,6 +51,11 @@ export class Room {
        その席が60秒間ずっと空かず、残った人が始められなくなる。
        戻ってきた時に空いていれば返す、くらいの弱い持ち方にしてある */
     this.parked = new Map();
+    /* 地面に落ちている物。did -> { w, n, x, y, z, at }。
+       **動かないので、位置は置いた時に一度配るだけ。**
+       手榴弾は飛んでいる間ずっと20Hzで配っているが、こちらは要らない */
+    this.drops = new Map();
+    this.nextDrop = 1;
     this.nextId = 1;
     this.tick = 0;
     this.events = [];
@@ -209,7 +214,13 @@ export class Room {
    * そちらを書き換えるだけで最後の武器から始められる
    */
   _arm(slot) {
-    const carry = this.rules.carryFor(WEAPONS, slot);
+    const base = this.rules.carryFor(WEAPONS, slot);
+    /* 拾って増えた武器を足す。**遊び方が配る物と別に持つ**ので、
+       ラウンドが替わって配り直された時に自然に消える（extraを空にするだけ）。
+       混ぜて1つの並びにすると、拾った物と元から持っていた物の区別が付かず、
+       ラウンドをまたいで残ってしまう */
+    const carry = base.slice();
+    for (const i of slot.extra || []) if (!carry.includes(i)) carry.push(i);
     slot.sim.setCarry(carry);
     this.push({
       e: EV.ARM, id: slot.id, c: carry,
@@ -221,6 +232,82 @@ export class Room {
     const list = [];
     for (const s of this.slots.values()) if (s.seat !== null) list.push(s);
     return list;
+  }
+
+  /* ------------------------------------------------ 地面に落ちている物 */
+
+  /**
+   * 倒れた人が持っていた物を地面へ置く。
+   *
+   * 落とすかどうかは遊び方が決める（modes.jsのdrops）。
+   * ガンゲームで拾えると、今の段の1本だけを持つという芯がそのまま消える。
+   *
+   * 拾う価値が無い物は置かない。ナイフしか持っていなくて手榴弾も無い人が
+   * 倒れるたびに置いていると、**拾っても何も起きない物**が戦場に散らばる。
+   * 近づいて何も起きない経験を1回させると、次からは誰も拾いに行かなくなる
+   */
+  _dropFrom(slot) {
+    if (!this.rules.drops) return;
+    const def = WEAPONS[slot.sim.weapon];
+    const gun = !!def && !def.melee && !def.thrown;
+    const nades = slot.nades | 0;
+    if (!gun && nades <= 0) return;
+
+    // 溜まりすぎたら古い物から消す。撃ち合いが続くと置きっぱなしが増え続ける
+    while (this.drops.size >= DROP.MAX) {
+      const oldest = this.drops.keys().next().value;
+      this._takeDrop(oldest, null);
+    }
+
+    const p = slot.sim.player.collider.start;
+    const did = this.nextDrop++;
+    // 足元へ置く。目の高さのまま置くと、宙に浮いた武器が並ぶ
+    const y = p.y - slot.sim.player.height * 0.5;
+    this.drops.set(did, { w: gun ? slot.sim.weapon : -1, n: nades, x: p.x, y, z: p.z, at: nowMs() });
+    this.push({ e: EV.DROP, did, w: gun ? slot.sim.weapon : -1, n: nades, p: [p.x, y, p.z] });
+  }
+
+  /** 地面から消す。byが居れば拾われた、居なければ時間切れ */
+  _takeDrop(did, slot) {
+    if (!this.drops.delete(did)) return;
+    this.push(slot ? { e: EV.TAKE, did, by: slot.id } : { e: EV.TAKE, did });
+  }
+
+  /**
+   * 近くに居る人が拾う。**踏んだら拾う**（押す操作を足さない）。
+   *
+   * 拾う操作を別のキーにすると、撃ち合いの最中には押せない。
+   * 落ちている物を取りに行くこと自体が危険を冒す行為なので、
+   * 辿り着いた時点で報われる形にする
+   */
+  _stepDrops() {
+    if (!this.drops.size) return;
+    const now = nowMs();
+    for (const [did, d] of this.drops) {
+      // 時間切れ
+      if (now - d.at > DROP.LIFE_S * 1000) { this._takeDrop(did, null); continue; }
+      for (const slot of this.slots.values()) {
+        if (slot.seat === null || !slot.sim.alive) continue;
+        const p = slot.sim.player.collider.start;
+        const dx = p.x - d.x, dz = p.z - d.z;
+        const dy = (p.y - slot.sim.player.height * 0.5) - d.y;
+        if (dx * dx + dy * dy + dz * dz > DROP.RADIUS * DROP.RADIUS) continue;
+        this._pickUp(slot, d);
+        this._takeDrop(did, slot);
+        break;
+      }
+    }
+  }
+
+  /* 拾った時に起きること。**弾そのものはサーバーが持っていない**ので、
+     ここでやるのは「その武器を持てるようにする」と「手榴弾を戻す」の2つ。
+     弾を戻すのは、拾った本人の画面がEV.TAKEを見てやる（弾数は元々手元の持ち物） */
+  _pickUp(slot, d) {
+    if (d.n > 0) slot.nades = Math.min(NADE.PER_ROUND, slot.nades + d.n);
+    if (d.w >= 0 && !slot.sim.carry.includes(d.w)) {
+      if (!slot.extra.includes(d.w)) slot.extra.push(d.w);
+      this._arm(slot);
+    }
   }
 
   /** 揃っていれば始める */
@@ -423,6 +510,8 @@ export class Room {
       respawnIn: 0,
       // 回線が切れて戻ってきた人か。お迎えに載せて、画面に一言出すためだけの印
       back: false,
+      // 地面から拾って増えた武器。ラウンドの頭で空になる（_respawn）
+      extra: [],
     };
     /* 合言葉が合えば、前の続きから。**席は空いている時だけ返す。**
        抜けている間に誰かが座っていたら、その人を立たせてまで返さない
@@ -523,6 +612,10 @@ export class Room {
       tk: slot.token,
       // 前の続きから始まったか。画面に一言出すためだけの印
       back: !!slot.back,
+      /* 今このとき地面に落ちている物。**置いた時の1回しか配らない**ので、
+         途中から入ってきた人にはここで渡さないと、拾える物が見えないまま
+         「近づいたら何か起きた」になる */
+      drops: [...this.drops].map(([did, d]) => [did, d.w, d.n, d.x, d.y, d.z]),
       players,
     };
   }
@@ -793,6 +886,8 @@ export class Room {
     victim.respawnIn = MATCH.RESPAWN_S;
     victim.sim.deaths++;
     killer.sim.kills++;
+    // 倒れた人が持っていた物を地面へ。落とすかどうかは遊び方が決める
+    this._dropFrom(victim);
 
     // 段が進むか、そこで勝ちが決まるかは遊び方が決める。
     // Roomは「誰が誰を倒したか」だけを渡して、結果を受け取る
@@ -872,6 +967,8 @@ export class Room {
     slot.downed = false;
     slot.respawnIn = 0;
     slot.nades = NADE.PER_ROUND;
+    // 拾った武器はラウンドをまたがない。持ち越すと、1回拾えば以後ずっと持てる
+    slot.extra = [];
     // 包帯もラウンドの頭で戻す。持ち越すと、前のラウンドで使い切った側だけ
     // 立て直す手段が無いまま次のラウンドを戦うことになる
     slot.sim.player.refill();
@@ -947,6 +1044,9 @@ export class Room {
     // 玉はラウンドが動いている間だけ進める。幕間に爆発すると、
     // 次のラウンドが始まった直後の相手に前のラウンドの爆風が入る
     if (this.phase === PHASE.LIVE) this._stepNades();
+    // 落ちている物の時間切れと拾い上げ。ラウンドが動いている間だけ。
+    // 幕間に拾えると、次のラウンドの頭に前のラウンドの拾い物を持ち越すことになる
+    if (this.phase === PHASE.LIVE) this._stepDrops();
 
     if (this.phase !== PHASE.WAIT) {
       this.timeLeft -= TICK_DT;
