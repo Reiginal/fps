@@ -297,6 +297,11 @@ console.log('\n[11] 手元の繋ぎ込み');
 
   ok(html.includes('id="voice"'), '送信中を出す場所がある');
   ok(/id="voice"[^>]*class="[^"]*hidden/.test(html), '普段は出ていない');
+  /* **#hudの外に置く。** 中に入れていた時は、HUDが隠れている間（＝ロビーにいる間）は
+     一緒に消えていた。**ロビーが一番「効いているか確かめたい」場所**なのに、
+     そこで押しても何も出なかった（実際「効いているか分からない」と言われた） */
+  const hudBlock = html.slice(html.indexOf('<div id="hud">'), html.indexOf('<div id="overlay">'));
+  ok(!hudBlock.includes('id="voice"'), '声の表示はHUDの外にある（ロビーでも出る）');
 }
 
 clear();
