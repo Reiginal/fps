@@ -250,6 +250,9 @@ function ridgedA(x, y, fx, fy, octaves, seed) {
 // ボロノイ。砂利・石畳・鉄板の粒に使う。
 // F1距離に加えてF2も返す。F2-F1がセル境界なので、補修跡の継ぎ目や
 // 剥離した錆の鱗の輪郭がこれ1つで作れる。
+// 戻り値は使い回しの1個だけ（呼ぶたびに毎回newしない）。呼んだら
+// すぐ中身を取り出して使うこと。2回分を同時に(例えば別の周波数の結果を
+// 比べる目的で)持とうとすると、後の呼び出しが前の結果を上書きして壊れる
 const _cell = { d: 0, d2: 0, id: 0 };
 function voronoi(x, y, freq, seed) {
   const px = x * freq, py = y * freq;
@@ -663,6 +666,8 @@ function materialFrom(baked, opts = {}) {
 // そのまま使い回すので、brick本体と分けてある。
 // 1タイル=16段×5本。レンガの縦横比が実物(約3.3:1)に近くなる並びにしている。
 const BRICK_ROWS = 16, BRICK_COLS = 5;
+// voronoiの_cellと同じ注意点。使い回しの1個だけなので、2回分を
+// 同時に持とうとすると後の呼び出しが前の結果を上書きする
 const _bk = { mortar: 0, round: 0, id: 0, bu: 0, bv: 0 };
 function brickField(u, v, seed) {
   const rv = v * BRICK_ROWS;
