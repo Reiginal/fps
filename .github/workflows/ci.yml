@@ -81,6 +81,9 @@ jobs:
       - name: 検査 武器
         run: node tools/check-weapons.mjs
 
+      - name: 検査 持ち物
+        run: node tools/check-loadout.mjs
+
       - name: 検査 音が例外にならないか
         run: node tools/check-audio.mjs
 
