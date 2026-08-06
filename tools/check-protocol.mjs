@@ -31,8 +31,11 @@ const sends = new Map();   // 'SEAT' -> Set{'st'}
 for (const m of client.matchAll(/_send\(\{\s*t:\s*C\.([A-Z]+)\s*,?([^}]*)\}/g)) {
   const name = m[1];
   const fields = new Set();
-  // 「項目名:」の形だけを拾う。値の中の識別子は拾わない
-  for (const f of m[2].matchAll(/(?:^|,)\s*([a-zA-Z_$][\w$]*)\s*:/g)) fields.add(f[1]);
+  /* 「項目名:」と、省略形（{ to, d } のように名前だけ書く形）の両方を拾う。
+     **省略形を拾えていなかった。** 名前だけで書かれた項目は1つも見えず、
+     「必須の項目を送っていない」と出る（実際にVSIGでそうなった）。
+     値の中の識別子を拾わないよう、後ろが , : } のどれかの時だけ数える */
+  for (const f of m[2].matchAll(/(?:^|,)\s*([a-zA-Z_$][\w$]*)\s*[,:}]/g)) fields.add(f[1]);
   if (!sends.has(name)) sends.set(name, new Set());
   for (const f of fields) sends.get(name).add(f);
 }

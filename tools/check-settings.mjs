@@ -95,8 +95,17 @@ const ok = (c, msg) => { console.log(`  ${c ? '○' : '× 失敗:'} ${msg}`); if
 const mkTargets = () => ({
   input: {},
   audio: { volume: null, setVolume(v) { this.volume = v; } },
+  // 声の層。**効かせ先をここへ足し忘れると、[6]が落ちる。**
+  // 落ちるのが正しい（表に足したのに何も動かない設定、という意味なので）
+  voice: {
+    enabled: null, volume: null,
+    setEnabled(v) { this.enabled = v; },
+    setVolume(v) { this.volume = v; },
+  },
 });
-const snap = (t) => JSON.stringify({ input: t.input, vol: t.audio.volume });
+const snap = (t) => JSON.stringify({
+  input: t.input, vol: t.audio.volume, voice: t.voice.enabled, vvol: t.voice.volume,
+});
 
 console.log('\n[1] 表の作り');
 {
