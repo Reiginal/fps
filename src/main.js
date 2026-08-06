@@ -718,6 +718,8 @@ class Game {
     this._blipList = [];
     // 飛んでいる手榴弾の見た目。gidで引く
     this._nadeMeshes = new Map();
+    // 地面に落ちている物。did -> 目印のGroup
+    this._dropMeshes = new Map();
     // ソロで飛んでいる手榴弾。サーバーがいないので手元で持つ
     this._soloNades = [];
     this._soloNadeId = 1;
@@ -856,8 +858,9 @@ class Game {
     // 覚えないと、繋ぎ先を作るのが選択画面の中にあるので手が届かない
     this._lastJoin = { url };
     const net = new NetClient();
+    let hello;
     try {
-      await net.connect(url, { name });
+      hello = await net.connect(url, { name });
     } catch (err) {
       // 繋がらなかった回も、まだ試す回数が残っていれば自分で戻りにいく。
       // ここで諦めると、サーバーの入れ替え中の1回目で必ず終わる
@@ -881,6 +884,13 @@ class Game {
     this.net = net;
     this.mode = 'versus';
     this.remotes = new RemotePlayers(this.scene, this.level);
+    /* 今このとき地面に落ちている物。**置いた時の1回しか配られない**ので、
+       途中から入った時はお迎えの電文で受け取らないと、拾える物が見えないまま
+       「近づいたら何か起きた」になる */
+    this._clearDrops();
+    for (const d of hello?.drops || []) {
+      if (Array.isArray(d) && d.length >= 6) this._addDrop(d[0], d[1] | 0, d[2] | 0, [d[3], d[4], d[5]]);
+    }
 
     // 対戦にAIは出さない。1人用で遊んだ後に繋いだ時、敵が残っていると混ざる
     this.director.reset();
@@ -1011,6 +1021,8 @@ class Game {
     this._flushStats();
     this.mode = 'solo';
     this.net = null;
+    // 落ちている物も片付ける。残すと、1人用に戻った後の街に光る箱が浮いたままになる
+    this._clearDrops();
     this.remotes?.dispose();
     this.remotes = null;
     this._lastStates = null;
@@ -1749,6 +1761,29 @@ class Game {
         if (Array.isArray(ev.p)) this._syncNade(ev.gid, ev.p);
         break;
 
+      case EV.DROP:
+        if (Array.isArray(ev.p)) this._addDrop(ev.did, ev.w | 0, ev.n | 0, ev.p);
+        break;
+
+      case EV.TAKE: {
+        const g = this._dropMeshes.get(ev.did);
+        // 拾ったのが自分なら、その場で弾を戻す。
+        // **弾の数はサーバーが持っていない**（撃った回数は手元が数えている）ので、
+        // 「拾った」という知らせを受けて手元が戻す形になる。
+        // 増やせる上限は武器の表が持っているので、ここで数は決めない
+        if (ev.by === me) {
+          const got = this.weapons.refillReserve();
+          const nades = g?.userData.nades | 0;
+          this.audio.click(1500, 0.4, 0.05);
+          // 何が増えたのかを言う。「補給」とだけ出すと、
+          // 弾が満タンの時に拾っても同じ文字が出て、何も起きていないのに起きた気になる
+          const what = [got ? '弾' : '', nades > 0 ? `手榴弾${nades}個` : ''].filter(Boolean);
+          this.hud.kill(what.length ? `補給 — ${what.join('と')}` : '拾った（増える物は無かった）', false);
+        }
+        this._removeDrop(ev.did);
+        break;
+      }
+
       case EV.BOOM: {
         this._dropNade(ev.gid);
         if (!this._vecOf(this._evPos, ev.p)) break;
@@ -1974,6 +2009,7 @@ class Game {
     this._updatePlates(states);
 
     this.effects.update(dt, this.camera);
+    this._spinDrops(dt);
     this._commonHud(dt);
     /* 画面の上に出す点数。「自分 － 先頭」で出す。
        1対1の頃は「自分以外の1人」がそのまま相手だったが、
@@ -2244,6 +2280,70 @@ class Game {
     m.geometry.dispose();
     m.material.dispose();
     this._nadeMeshes.delete(gid);
+  }
+
+  /* ------------------------------------------ 地面に落ちている物 */
+
+  /**
+   * 落ちている物を地面へ置く。**位置は届いた1回きり**なので、
+   * 置いた後は動かさない（サーバーも動かさない）。
+   *
+   * 見た目を武器そのものにしていない理由: 武器の模型は手元で構えるために
+   * 作ってある（手が付いていて、目のすぐ前に置く前提の大きさ）ので、
+   * 地面に転がすと手だけが巨大に見える。ここは「拾える物がある」と
+   * 分かればいいので、光る箱と、そこから立つ細い光にした。
+   * **遠くからでも見える必要がある**（近づかないと見えないなら、
+   * 落ちていること自体に気づけない）
+   */
+  _addDrop(did, w, n, p) {
+    if (this._dropMeshes.has(did)) return;
+    const g = new THREE.Group();
+    const gun = w >= 0;
+    // 銃なら青、手榴弾だけなら緑。何が落ちているかを色で分ける
+    const color = gun ? 0x63d2ff : 0x7ddb8a;
+    const box = new THREE.Mesh(
+      new THREE.BoxGeometry(0.42, 0.14, 0.22),
+      new THREE.MeshStandardMaterial({ color: 0x1a1e24, roughness: 0.6, metalness: 0.4 }),
+    );
+    box.position.y = 0.09;
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.045, 0.045, 1.4, 6, 1, true),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.28, side: THREE.DoubleSide }),
+    );
+    beam.position.y = 0.75;
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.28, 0.36, 20),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, side: THREE.DoubleSide }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.02;
+    g.add(box, beam, ring);
+    g.position.set(p[0], p[1], p[2]);
+    g.userData.spin = box;
+    g.userData.nades = n | 0;
+    this.scene.add(g);
+    this._dropMeshes.set(did, g);
+  }
+
+  /** 拾われた・時間切れで消えた */
+  _removeDrop(did) {
+    const g = this._dropMeshes.get(did);
+    if (!g) return;
+    this.scene.remove(g);
+    g.traverse((o) => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
+    this._dropMeshes.delete(did);
+  }
+
+  /** 全部片付ける。試合から抜ける時に呼ばないと、次の試合まで残る */
+  _clearDrops() {
+    for (const did of [...this._dropMeshes.keys()]) this._removeDrop(did);
+  }
+
+  /* 目印の箱をゆっくり回す。動いていないと、地面の模様と見分けが付かない */
+  _spinDrops(dt) {
+    for (const g of this._dropMeshes.values()) {
+      if (g.userData.spin) g.userData.spin.rotation.y += dt * 1.2;
+    }
   }
 
   /** 撃った人をミニマップに出す。同じ人の点は上書きして増やさない */
