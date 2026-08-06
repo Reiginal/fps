@@ -1,6 +1,6 @@
 // 全部を繋ぐ本体。読み込み → 生成 → ゲームループ。
 import * as THREE from 'three';
-import { buildMaterials, createSky, skyFogColor } from './world/textures.js';
+import { buildMaterials, createSky, skyFogColor, installAerialPerspective } from './world/textures.js';
 import { currentTimeOfDay } from './world/sun.js';
 import { buildLevel } from './world/level.js';
 import { Effects } from './world/effects.js';
@@ -81,6 +81,11 @@ const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
 // 途中で変えるとそこを作り直す話になる
 const TOD = currentTimeOfDay();
 const SUN_DIR = new THREE.Vector3(...TOD.dir).normalize();
+// フォグの向き依存もここで決めた太陽の向きに合わせる。材質のコンパイルより
+// 前ならいつでもよいので、SUN_DIRが決まった直後のここでやる
+// （以前はtextures.js側が別に持つ固定値のままで、朝・昼に遊んでも
+// 霧の暖色側が夕方の方角を向いたままだった）
+installAerialPerspective(SUN_DIR);
 
 // ビューモデルのキーライトが必ず確保する向き（カメラ空間・右上手前）。
 // 太陽追従だけにすると背を向けた時に銃が真っ黒になるので、これへ寄せて下限を作る

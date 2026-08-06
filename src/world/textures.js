@@ -9,12 +9,6 @@ import * as THREE from 'three';
 
 /* -------------------------------------------------- 空気遠近(aerial perspective) */
 
-// 太陽の向き。main.jsのSUN_DIRと同じ値を正規化したもの。
-// フォグの色を「視線と太陽の内積」で振るのに要るが、フォグの差し込み先は
-// threeのShaderChunkという静的な文字列なので、uniformでは渡せない。
-// main.js側のSUN_DIRを変える時はここも一緒に変える。
-const AP_SUN = new THREE.Vector3(-0.78, 0.46, -0.34).normalize();
-
 /**
  * 距離だけの単色乗算だったフォグを、方向と高度を持つ大気に差し替える。
  *
@@ -31,14 +25,25 @@ const AP_SUN = new THREE.Vector3(-0.78, 0.46, -0.34).normalize();
  * level.js・enemy.js・effects.jsにも散っていて、一部だけ差し替えると
  * 地面と建物でフォグの色が食い違うため。scene.fogは「フォグを有効にする
  * スイッチ」と「密度(fogDensity)の入れ物」としてだけ使い、色は無視する。
+ *
+ * 太陽の向き(sunDir)は呼ぶ側から渡してもらう。GLSLの定数へ焼くので
+ * uniformでは渡せず、main.jsのSUN_DIRと同じ値が要る。
+ * 前は太陽の向きをこのファイルの中に別で持っていて、main.js側が時刻で
+ * 動くようになった後も夕方の値のまま置き去りになっていた
+ * （朝・昼に遊んでも霧の暖色側が夕方の方角を向いたままだった）。
+ * main.jsがSUN_DIRを決めた直後にここを呼ぶ形にして、置き去りが起きない
+ * ようにする（呼ぶ場所はmain.js側、ShaderChunkの差し替え自体は
+ * 材質のコンパイルより前ならどこでもよい）
+ *
+ * @param sunDir main.jsのSUN_DIRと同じTHREE.Vector3
  */
-function installAerialPerspective() {
+export function installAerialPerspective(sunDir) {
   const C = THREE.ShaderChunk;
   // 空の色をGLSLの定数へ焼く。ShaderChunkは静的な文字列なのでuniformを持てない。
   // createSky()と同じ値でないと、遠景が溶け込む先が背後の空とズレて、
   // どれだけ霞ませても輪郭が消えずに残る
   const hz = new THREE.Color(SKY_HORIZON), zn = new THREE.Color(SKY_ZENITH);
-  const az = new THREE.Vector2(AP_SUN.x, AP_SUN.z).normalize();
+  const az = new THREE.Vector2(sunDir.x, sunDir.z).normalize();
   const v3 = (c) => `vec3( ${c.r.toFixed(5)}, ${c.g.toFixed(5)}, ${c.b.toFixed(5)} )`;
 
   // 頂点側: ワールド座標を1本渡す。begin_vertexのtransformedを使うと
@@ -76,7 +81,7 @@ function installAerialPerspective() {
     uniform float fogNear;
     uniform float fogFar;
   #endif
-  const vec3 AP_SUNDIR = vec3( ${AP_SUN.x.toFixed(5)}, ${AP_SUN.y.toFixed(5)}, ${AP_SUN.z.toFixed(5)} );
+  const vec3 AP_SUNDIR = vec3( ${sunDir.x.toFixed(5)}, ${sunDir.y.toFixed(5)}, ${sunDir.z.toFixed(5)} );
   const vec2 AP_SUNAZ = vec2( ${az.x.toFixed(5)}, ${az.y.toFixed(5)} );   // 太陽の水平方位
   const vec3 AP_HORIZON = ${v3(hz)};
   const vec3 AP_ZENITH = ${v3(zn)};
@@ -1650,8 +1655,11 @@ const SKY_GROUND = 0x413a31;
 // 空 > 日向 > 日陰 の並びも保てる
 const SKY_GAIN = 1.5;
 
-// 空気遠近の差し込みはここまで待つ。上の空の色をGLSLへ焼き込むため
-installAerialPerspective();
+// installAerialPerspective()はここでは呼ばない。太陽の向き(sunDir)を
+// main.jsのSUN_DIRからもらう必要があり、main.jsはこのファイルを先に
+// importするのでモジュール評価の時点ではまだSUN_DIRが無い。
+// main.js側でSUN_DIRを決めた直後に呼んでもらう
+// （呼ぶタイミングの制約は関数のJSDocを参照。材質のコンパイルより前ならよい）
 
 // 遠景の色は installAerialPerspective() が視線方向と高度から作るので、
 // 描画上この値はもう使われない（scene.fogは「フォグを有効にするスイッチ」と
