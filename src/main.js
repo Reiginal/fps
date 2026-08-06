@@ -14,6 +14,8 @@ import { Director } from './ai/enemy.js';
 import { HUD } from './ui/hud.js';
 import { NetMenu, NET_MSG } from './ui/netmenu.js';
 import { SettingsMenu } from './ui/settings.js';
+import { StatsMenu } from './ui/statsmenu.js';
+import { emptyTally, mergeTally, loadStats, saveStats, newlyUnlocked } from './core/stats.js';
 import { Lobby } from './ui/lobby.js';
 import { Chat } from './ui/chat.js';
 import { Diag } from './ui/diag.js';
@@ -42,16 +44,10 @@ function saveChar(i) {
   try { localStorage.setItem(CHAR_KEY, String(i | 0)); } catch { /* 覚えられないだけ */ }
 }
 
-const BEST_KEY = 'blackout.best';
-function loadBest() {
-  try {
-    const v = JSON.parse(localStorage.getItem(BEST_KEY) || '{}');
-    return { score: v.score | 0, wave: v.wave | 0 };
-  } catch { return { score: 0, wave: 0 }; }
-}
-function saveBest(v) {
-  try { localStorage.setItem(BEST_KEY, JSON.stringify(v)); } catch { /* 覚えられないだけ */ }
-}
+/* 自己ベストは src/core/stats.js の bestScore / bestWave が持つようになった。
+   ここに blackout.best を別で持っていた頃は、同じ「一番良かった回」が2箇所にあり、
+   死亡画面と戦績の画面で違う数字が出うる形だった。
+   前に遊んだ人の記録は stats.js の読み込みが引き取る */
 const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
 
 // 太陽の向き。ここが画の出来をほぼ決める。
@@ -408,6 +404,23 @@ class Game {
     this.shotsFired = 0;
     this.shotsHit = 0;
     this.damageFlash = 0;
+
+    /* ------------------------------------------------------ 通算の戦績 */
+    // 端末に覚えている通算と、まだ書いていない今回ぶんを分けて持つ。
+    //
+    // **1発撃つたびに localStorage へ書かない。** 撃ち合いの最中は毎秒40発を超えるので、
+    // そのたびに文字列へ直して書き出すと、遊んでいる最中に引っかかる。
+    // 手元で数えておいて、区切り（倒れた時・試合が終わった時・ホームへ戻る時）で流し込む。
+    //
+    // 実績の判定は書き込みと切り離してある。判定はただの足し算なので、
+    // 倒した瞬間にその場でやってよい（そうしないと「初撃破」が
+    // 死ぬまで出てこない）
+    this.stats = loadStats();
+    this.session = emptyTally();
+    this.streak = 0;
+    // 最後に実績を数えた時の記録。ここが無いと、起動のたびに
+    // 解除済みの実績が全部もう一度知らせに来る
+    this._seen = this.stats;
     this._lastTime = 0;
     this._invQ = new THREE.Quaternion();
     // 倒れている間の見回し。生きている間はnullで、倒れた瞬間に
@@ -739,6 +752,20 @@ class Game {
     };
     menu.onSettings = () => this.settings.show();
 
+    /* 戦績と実績。開くたびに端末から読み直すのではなく、まだ書いていない今回ぶんも
+       足した物を渡す。**渡さないと、遊んだ直後に開いた時だけ数字が古い。**
+       「今30人倒したのに通算が増えていない」は、壊れているようにしか見えない */
+    this.statsMenu = new StatsMenu();
+    menu.onStats = () => this.statsMenu.show(this.totalStats);
+
+    // タブを閉じる・別のタブへ移る時に、今回ぶんを書き出す。
+    // これが無いと、対戦の途中でブラウザを閉じた回は丸ごと消える。
+    // beforeunloadではなくvisibilitychangeを使うのは、携帯とSafariが
+    // beforeunloadを呼ばないまま終わることがあるため
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') this._flushStats();
+    });
+
     // 繋がってから試合が始まるまでの画面。押された席をそのままサーバーへ送る。
     // 座れたかどうかを手元で決めないので、ここでは絵を書き換えない
     const lobby = new Lobby();
@@ -925,6 +952,9 @@ class Game {
      回線が切れた時と、自分でホームへ戻った時で踏む手順は同じなので1つにしてある。
      違うのは「理由を赤字で出すかどうか」だけなので、そこは呼ぶ側が足す */
   _leaveMatch() {
+    // 試合の途中で抜けた回も、そこまでの撃破は残す。
+    // 残さないと「勝てないから抜ける」と記録が消えるのが同じ操作になる
+    this._flushStats();
     this.mode = 'solo';
     this.net = null;
     this.remotes?.dispose();
@@ -952,6 +982,15 @@ class Game {
   }
 
   _onMatchEnd({ rows }) {
+    // 通算へ流し込む区切り。順位はラウンド取得数→撃破数の順で並ぶので、
+    // 先頭が自分なら勝ち。**hud側の並べ方と同じ順にする**
+    // （別々に並べると、画面では1位なのに勝ちが増えない、が起きる）
+    const rank = (rows || []).slice()
+      .sort((a, b) => ((b.rounds | 0) - (a.rounds | 0)) || ((b.kills | 0) - (a.kills | 0)));
+    this._tally('matches');
+    if (rank[0]?.me) this._tally('wins');
+    this._checkAchievements();
+    this._flushStats();
     this.hud.matchEnd(rows, true, `${MATCH.ROUND_WINS}本先取で決着`);
     // 次の試合が始まったら畳む。サーバーはINTERMISSION後に0点を配って再開する。
     // 前のタイマーが残っていると、続けて2試合終わった時に早い方が新しい順位を消す
@@ -972,7 +1011,8 @@ class Game {
       // マウスが画面へ吸われて席が押せなくなる。
       // 設定も同じで、一時停止から開いている最中にロックを取られると
       // つまみを掴んだ瞬間に試合へ戻ってしまう
-      if (this.menu?.isOpen || this.lobby?.isOpen || this.settings?.isOpen) return;
+      if (this.menu?.isOpen || this.lobby?.isOpen
+        || this.settings?.isOpen || this.statsMenu?.isOpen) return;
       this.audio.init();
       this.audio.resume();
       if (this.state === 'dead') this._restart();
@@ -1074,6 +1114,7 @@ class Game {
       this._quitMatch();
       return;
     }
+    this._flushStats();
     this.hud.show(false);
     this.hud.hideOverlay();
     this.state = 'menu';
@@ -1081,11 +1122,68 @@ class Game {
     this.menu.show();
   }
 
+  /* ---------------------------------------------------- 通算の戦績 */
+
+  /** 今回ぶんを1つ数える。**ここでは書き出さない**（区切りでまとめて流す） */
+  _tally(key, n = 1) {
+    this.session[key] = (this.session[key] | 0) + n;
+  }
+
+  /** 一番良かった回だけ残す物（連続撃破・到達ウェーブ・スコア） */
+  _tallyBest(key, v) {
+    if (v > (this.session[key] | 0)) this.session[key] = v;
+  }
+
+  /** 端末に覚えている通算 ＋ まだ書いていない今回ぶん。実績の判定はこれを見る */
+  get totalStats() { return mergeTally(this.stats, this.session); }
+
+  /**
+   * 解除されたばかりの実績を知らせる。**書き出しは伴わない。**
+   *
+   * 倒した直後に呼びたいので、書き出しと切り離してある。
+   * 一緒にすると「初撃破」が死ぬまで出てこないか、1発撃つたびに書き出すかの
+   * どちらかになる
+   */
+  _checkAchievements() {
+    const now = this.totalStats;
+    for (const a of newlyUnlocked(this._seen || this.stats, now)) {
+      this.hud.achievement(a.name, a.desc);
+    }
+    this._seen = now;
+  }
+
+  /**
+   * 今回ぶんを端末へ流し込む。区切り（倒れた時・試合が終わった時・
+   * ホームへ戻る時・タブを離れた時）でだけ呼ぶ。
+   *
+   * 何も起きていない時は書きに行かない。ホームと選択画面を行き来するだけで
+   * 毎回書き出すと、遊んでいないのに書き込みが走る
+   */
+  _flushStats() {
+    if (!Object.values(this.session).some((v) => v > 0)) return;
+    this.stats = saveStats(mergeTally(this.stats, this.session));
+    this.session = emptyTally();
+    this._seen = this.stats;
+  }
+
   /* 自分が倒れた。撃たれた・爆風・落下の3経路から同じ形で入る。
      以前はこの3箇所が同じ4行を各自持っていて、演出を足すなら3箇所を直す形だった */
   _onPlayerDown() {
     if (this.state === 'dead') return;
     this.state = 'dead';
+    // 1人用の出撃が終わった。ここが通算へ流し込む区切りになる。
+    // 到達ウェーブとスコアは、この回の最後の値が一番良い値なのでここで取る
+    this._tally('deaths');
+    this.streak = 0;
+    if (this.mode === 'solo') {
+      // 更新したかどうかを死亡画面で出すので、混ぜる前の値を控えておく
+      const was = this.totalStats;
+      this._prevBest = { score: was.bestScore | 0, wave: was.bestWave | 0 };
+      this._tallyBest('bestWave', this.director.wave);
+      this._tallyBest('bestScore', this.score);
+    }
+    this._checkAchievements();
+    this._flushStats();
     this.deathT = 0;
     document.exitPointerLock?.();
     this.audio.playerDown();
@@ -1131,10 +1229,11 @@ class Game {
     const acc = this.shotsFired ? Math.round((this.shotsHit / this.shotsFired) * 100) : 0;
     const wave = this.director.wave;
     // 自己ベスト。点数だけ出しても、それが良い回だったのか分からない。
-    // 前回までの一番と並べて初めて、もう一度やる理由になる
-    const best = loadBest();
+    // 前回までの一番と並べて初めて、もう一度やる理由になる。
+    // **倒れた時点で今回ぶんは既に通算へ入っている**ので、そのまま読むと
+    // 常に「今回＝自己ベスト」になる。倒れる直前に控えておいた物を使う
+    const best = this._prevBest || { score: 0, wave: 0 };
     const isBest = this.score > best.score;
-    if (isBest) saveBest({ score: this.score, wave });
 
     // 数字を1行ずつ遅らせて出す。まとめて出すと表にしか見えない
     const row = (label, value, i, cls = '') => `<div class="drow ${cls}" style="animation-delay:${0.12 + i * 0.09}s">`
@@ -1257,7 +1356,7 @@ class Game {
   _resolveShot(shot) {
     if (this.mode === 'versus') return this._resolveShotVersus(shot);
     const { origin, dir, muzzle, def, pellet } = shot;
-    if (pellet === 0) this.shotsFired++;
+    if (pellet === 0) { this.shotsFired++; this._tally('shots'); }
 
     this.raycaster.set(origin, dir);
     this.raycaster.far = def.range;
@@ -1284,7 +1383,7 @@ class Game {
       else if (enemyHit.part === 'legs') dmg *= 0.82;
 
       const killed = enemyHit.enemy.hit(dmg, enemyHit.part);
-      if (pellet === 0) this.shotsHit++;
+      if (pellet === 0) { this.shotsHit++; this._tally('hits'); }
 
       this.effects.impact(enemyHit.point, dir.clone().negate(), 'flesh');
       // 近接は刃が入る音を足す。弾が当たった時と同じ音だと、
@@ -1327,7 +1426,7 @@ class Game {
      サーバーから返る自分ぶんのIMPACTは捨てる（二重に火花が出る） */
   _resolveShotVersus(shot) {
     const { origin, dir, muzzle, def, pellet } = shot;
-    if (pellet === 0) this.shotsFired++;
+    if (pellet === 0) { this.shotsFired++; this._tally('shots'); }
 
     this.net.sendShot(origin, dir);
 
@@ -1475,6 +1574,11 @@ class Game {
 
   _onKill(enemy) {
     this.kills++;
+    this._tally('kills');
+    this.streak++;
+    this._tallyBest('bestStreak', this.streak);
+    if (enemy._killHeadshot) this._tally('headshots');
+    this._checkAchievements();
     // 倒れた場所に血だまりを残す。死体が消えた後も戦闘の痕跡が残る
     this.effects.bloodPool(enemy.collider.start);
     const head = !!enemy._killHeadshot;
@@ -1529,7 +1633,7 @@ class Game {
 
       case EV.HIT: {
         if (ev.by === me) {
-          this.shotsHit++;
+          this.shotsHit++; this._tally('hits');
           const head = ev.part === PART.HEAD;
           this.hud.hitmarker(head);
           this.audio.hitmarker(head);
@@ -1553,6 +1657,8 @@ class Game {
         // 1対1のラウンド制なので、誰かが倒れた時点でそのラウンドは決まる。
         // 「戦死」だけ出すと、それで1本落としたのかどうかが画面から読めない
         if (ev.z || ev.f) {
+          // 戦域の外・落下で力尽きた回も戦死は戦死。連続撃破もここで切れる
+          if (ev.id === me) { this._tally('deaths'); this.streak = 0; }
           const why = ev.z ? '戦域の外' : '落下';
           this.hud.kill(`${net.nameOf(ev.id)}が${why}で力尽きた`, false);
           this.hud.banner(
@@ -1565,7 +1671,12 @@ class Game {
         this.hud.killVersus(net.nameOf(ev.by), net.nameOf(ev.id), head, ev.by === me, ev.id === me);
         if (ev.by === me && ev.id !== me) {
           this.kills++;
+          this._tally('kills');
+          this.streak++;
+          this._tallyBest('bestStreak', this.streak);
           if (head) this.headshots++;
+          if (head) this._tally('headshots');
+          this._checkAchievements();
           this.audio.death(this.remotes?.get(ev.id)?.headPos ?? this.camera.position, this.camera);
           // 倒れる音（相手の場所で鳴る環境音）とは別に、倒した知らせを耳元で鳴らす
           this.audio.kill(head);
@@ -1573,6 +1684,8 @@ class Game {
           this.hud.banner('ラウンド取得', '', 1.8);
         }
         if (ev.id === me) {
+          this._tally('deaths');
+          this.streak = 0;
           this.hud.banner('ラウンドを落とした', `${net.nameOf(ev.by)}に倒された`, 1.8);
         }
         break;

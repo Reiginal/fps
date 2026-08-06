@@ -33,7 +33,7 @@ export class NetMenu {
       root: $('netmenu'),
       name: $('nmName'),
       status: $('nmStatus'), solo: $('nmSolo'), join: $('nmJoin'),
-      settings: $('nmSettings'),
+      settings: $('nmSettings'), stats: $('nmStats'),
     };
 
     // 統合側が差し替える。初期値を空関数にしておくと、繋ぎ忘れても画面が落ちない
@@ -41,10 +41,13 @@ export class NetMenu {
     this.onJoin = () => {};
     // 設定を開く口。画面そのものは src/ui/settings.js が持っている
     this.onSettings = () => {};
+    // 戦績を開く口。同じく src/ui/statsmenu.js が持っている
+    this.onStats = () => {};
     this.busy = false;
 
     this.el.name.value = load(SAVE.name, '');
     this.el.settings.onclick = () => this.onSettings();
+    this.el.stats.onclick = () => this.onStats();
 
     // addEventListenerではなく代入で持つ。DOMはindex.html側に1組しかないので、
     // 2回作られた時に古い方の処理まで動いて二重に始まるのを防ぐ
