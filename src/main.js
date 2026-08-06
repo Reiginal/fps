@@ -6,6 +6,7 @@ import { Effects } from './world/effects.js';
 import { Input } from './core/input.js';
 import { AudioEngine } from './core/audio.js';
 import { createComposer } from './core/postfx.js';
+import { DEATH_FALL_S, startLook, turnLook, applyDeath } from './core/deathcam.js';
 import { Capsule } from 'three/addons/math/Capsule.js';
 import { Player } from './player/player.js';
 import { WeaponSystem } from './player/weapons.js';
@@ -25,9 +26,9 @@ import {
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
 // 倒れてから結果が出るまで。ここが短いと、撃たれた次の瞬間に文字が出て
-// 何が起きたのかを見る時間が無い。長いと待たされる。1.3秒は
+// 倒れ切るまでの秒数（1.3秒）は src/core/deathcam.js が持つ。
+// 何が起きたのかを見る時間が無いと短すぎ、長いと待たされる。1.3秒は
 // 「崩れ落ちて地面に転がるのを見終わる」あたり
-const DEATH_FALL_S = 1.3;
 
 // 自己ベスト。localStorageは設定次第で読み書きどちらも例外を投げるので、
 // 覚えられないだけで遊べなくなることのないよう握り潰す（netmenu.jsと同じ作法）
@@ -408,6 +409,9 @@ class Game {
     this.damageFlash = 0;
     this._lastTime = 0;
     this._invQ = new THREE.Quaternion();
+    // 倒れている間の見回し。生きている間はnullで、倒れた瞬間に
+    // その時の向きを入れて、生き返ったらnullへ戻す（_deathFall参照）
+    this.deathLook = null;
 
     /* ------------------------------------------------------------ 対戦 */
     this.net = null;
@@ -1086,17 +1090,19 @@ class Game {
     // 対戦側を state で見ると、倒れている間ずっと state が 'dead' のままになり、
     // 生き返った後もカメラが地面に転がったままになる
     const down = this.mode === 'versus' ? !this.player.alive : this.state === 'dead';
-    if (!down) { this.deathT = null; return; }
+    // 生き返ったら見回しも畳む。ここで落とさないと、湧いた後もカメラが
+    // 倒れていた時の向きで上書きされ続けて、動いているのに景色が回らない
+    if (!down) { this.deathT = null; this.deathLook = null; return; }
     this.deathT = Math.min(DEATH_FALL_S, (this.deathT ?? 0) + dt);
-    const k = this.deathT / DEATH_FALL_S;
-    const drop = 1 - (1 - k) ** 3;
-    const roll = 1 - (1 - k) ** 2;
-    const cam = this.camera;
-    // 目の高さから、地面に転がった高さまで落とす
-    cam.position.y -= drop * (this.player.height - 0.42);
-    cam.rotation.z += roll * 1.15;
-    // 顔が上を向く。倒れた先に空が見えると「自分が倒れた」が伝わる
-    cam.rotation.x -= roll * 0.22;
+    // 倒れ込みと見回しの計算は src/core/deathcam.js が持つ。
+    // ここに直書きしてあった頃は、main.jsを読み込むとゲームが丸ごと立ち上がるので
+    // ブラウザ無しでは一度も確かめられなかった（tools/check-deathcam.mjs 参照）
+    applyDeath(this.camera, {
+      t: this.deathT,
+      height: this.player.height,
+      // 見回しは対戦だけ。1人用は倒れたら結果画面へ移るので持たない
+      look: this.deathLook,
+    });
   }
 
   _showDeath() {
@@ -1680,6 +1686,16 @@ class Game {
       const scale = 1 - player.adsFactor * 0.45;
       player.yaw += look.yaw * scale;
       player.pitch = clamp(player.pitch + look.pitch * scale, -1.5, 1.5);
+    } else if (this.deathLook) {
+      // 倒れている間も見回せる。撃たれた瞬間に視点が固まって、
+      // 生き返るまで同じ方向を向いたままなのが「あっさり」の正体だった。
+      // 誰にやられたのか・味方がどこにいるのかを見る時間がここにしかない。
+      //
+      // **送るのは倒れた瞬間の向きのままにする。** ここでplayer.yawを動かすと
+      // サーバーへ流れて、他の人の画面では倒れているはずの体が首だけ回り続ける。
+      // 見回すのは自分のカメラの中だけの話なので、別に持つ
+      // 上下はdeathcam側で狭める。地面に転がっているので、真下を向いても床しか無い
+      turnLook(this.deathLook, look.yaw, look.pitch);
     }
 
     let bits = 0;
@@ -1720,6 +1736,10 @@ class Game {
         // 使うのは倒れる動きだけ。撃たれた瞬間に視点が固まって、
         // 生き返るまでその場に立ったままだったのが「あっさり」の正体
         this.deathT = dead ? 0 : null;
+        // 見回す用の向き。倒れた瞬間の向きから始める（そこから首を回す形にする）。
+        // 生き返る時にnullへ戻すのを忘れると、湧いた後もカメラがここの値で
+        // 上書きされ続けて、動いているのに景色が回らない状態になる
+        this.deathLook = dead ? startLook(player.yaw, player.pitch) : null;
         if (dead) this.audio.playerDown();
       }
     }
