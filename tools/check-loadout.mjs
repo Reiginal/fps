@@ -49,6 +49,10 @@ for (const id of benched) {
   ok(i >= 0 && !!WEAPONS[i].build, `${id} … 表にあって組み立ても持っている`);
 }
 
+// 短い呼び名と武器の対応。画面の札にも操作説明にも、この言葉で出す。
+// 完全一致を求めないのは、札が「1 ライフル」のように数字を含むため
+const NICK = { rifle: 'ライフル', pistol: 'ピストル', knife: 'ナイフ', nade: '手榴弾', shotgun: 'ショットガン' };
+
 console.log('\n[3] 画面の札と並びが一致している');
 // ここがずれると、押した数字と出てくる武器が違う。
 // 遊ぶ側からは「3を押したのにナイフが出ない」としか見えない
@@ -70,12 +74,35 @@ console.log('\n[3] 画面の札と並びが一致している');
   labels.forEach((l, k) => {
     ok(l.n === k + 1, `${k + 1}番目の札の数字が ${l.n}`);
     const def = WEAPONS[carry[k]];
-    // 札は短い呼び名なので完全一致は求めない。
-    // 「ライフル」「ピストル」のように、正式名と結び付く言葉が入っていればよい
-    const nick = { rifle: 'ライフル', pistol: 'ピストル', knife: 'ナイフ', nade: '手榴弾', shotgun: 'ショットガン' };
-    ok(def && l.name === nick[def.id],
+    ok(def && l.name === NICK[def.id],
       `${k + 1}番の札「${l.name}」が持ち物の${k + 1}本目(${def?.id})と合っている`);
   });
+}
+
+console.log('\n[3.5] 起動画面の操作説明も同じ並びになっている');
+// **札(#slots)と操作説明の2箇所に、同じ並びが書いてある。**
+// 実際に片方だけ直して食い違っていた: 持ち物からショットガンを外した時、
+// HUDの札は直したのに、起動画面には「2 ショットガン」が残っていた。
+// 遊ぶ前に読む所なので、初めて遊ぶ人はそちらを信じて2を押す
+{
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  // <b>1 / 2 / 3 / 4</b><span>ライフル / ピストル / …</span> の対を拾う
+  const m = html.match(/<b>((?:\d\s*\/\s*)+\d)<\/b>\s*<span>([^<]+)<\/span>/);
+  ok(!!m, '操作説明に武器の行がある');
+  if (m) {
+    const nums = m[1].split('/').map((s) => Number(s.trim()));
+    const names = m[2].split('/').map((s) => s.trim());
+    ok(nums.length === LOADOUT_IDS.length,
+      `数字の数が持ち物と同じ (${nums.join('/')})`);
+    ok(names.length === LOADOUT_IDS.length,
+      `名前の数が持ち物と同じ (${names.join(' / ')})`);
+    carry.forEach((w, k) => {
+      const def = WEAPONS[w];
+      ok(nums[k] === k + 1, `${k + 1}番目の数字が ${nums[k]}`);
+      ok(names[k] === NICK[def.id],
+        `${k + 1}番の説明「${names[k]}」が持ち物の${k + 1}本目(${def.id})と合っている`);
+    });
+  }
 }
 
 console.log('\n[4] 手元では持って出た物にしか持ち替えられない');
