@@ -152,5 +152,8 @@ jobs:
       - name: 検査 回線が切れた後の復帰
         run: node tools/check-rejoin.mjs
 
+      - name: 検査 地面に落ちている物
+        run: node tools/check-drops.mjs
+
       - name: 検査 地形のメモリ
         run: node --expose-gc tools/check-world.mjs
