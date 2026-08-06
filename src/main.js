@@ -15,6 +15,7 @@ import { HUD } from './ui/hud.js';
 import { NetMenu, NET_MSG } from './ui/netmenu.js';
 import { SettingsMenu } from './ui/settings.js';
 import { StatsMenu } from './ui/statsmenu.js';
+import { VoiceChat, PTT_CODE } from './net/voice.js';
 import { emptyTally, mergeTally, loadStats, saveStats, newlyUnlocked } from './core/stats.js';
 import { Lobby } from './ui/lobby.js';
 import { Chat } from './ui/chat.js';
@@ -763,7 +764,13 @@ class Game {
        作った時点で覚えている値が全部効くので、ここで1つずつ写す必要はない。
        写す形にしていた頃は、設定を1つ足すたびにここへ1行足すのを忘れて
        「つまみは動くのに効かない」が出ていた */
-    this.settings = new SettingsMenu({ input: this.input, audio: this.audio });
+    /* 声で話す層。**試合ごとに作り直さない。**
+       設定（入り切り・音量）がここを掴むので、作り直すと設定の繋ぎが外れる。
+       合図の送り先は今繋がっているサーバー。繋がっていなければ何も起きない */
+    this.voice = new VoiceChat((to, d) => this.net?.sendVoice(to, d));
+    this.voice.onChange = () => this._updateVoiceHud();
+
+    this.settings = new SettingsMenu({ input: this.input, audio: this.audio, voice: this.voice });
     this.settings.onChange = (key, value) => {
       // 遊んでいる最中に全画面を切られたら、その場で窓へ戻す。
       // 次に遊び始めるまで効かないと、切ったのに何も起きないように見える
@@ -962,6 +969,9 @@ class Game {
     net.onDisconnect = (why) => this._onNetLost(why);
     net.onLobby = (m) => { this._lobbyChime(m.rows); this.lobby.render(m); };
     net.onChat = ({ name, text }) => this.chat.push(name, text, name === this._myName);
+    /* 声の合図。**中身は読まずに声の層へ渡す。**
+       誰と繋いでよいかはサーバーが決めているので、ここで確かめ直さない */
+    net.onVoiceSignal = ({ from, d }) => this.voice?.receive(from, d);
     net.onPhase = (ph) => this._onPhase(ph);
 
     this.hud.setMode('versus');
@@ -979,6 +989,10 @@ class Game {
     // 前の顔ぶれを忘れてから入る。持ち越すと、2回目に入った時に
     // 「前にいた人」が新顔として数えられて、入った瞬間に鳴る
     this._lobbyIds = null;
+    // 自分の番号を声の層へ渡す。**どちらから声をかけるかを決めるのに要る**
+    // （番号の小さい方からだけ声をかける。両側から出すとぶつかる）
+    this.voice.myId = net.id;
+    this._updateVoiceHud();
     // 前の続きから始まったなら、そう言う。**言わないと、席と点数が戻っているのに
     // 本人には「入り直した」としか見えない**（戻ったのか0からなのか分からない）
     if (net.wasBack) this.chat.push('', '回線が戻りました。前の続きから始めます', false);
@@ -1077,6 +1091,10 @@ class Game {
     this.net = null;
     // 落ちている物も片付ける。残すと、1人用に戻った後の街に光る箱が浮いたままになる
     this._clearDrops();
+    // 声も畳む。畳まないと、抜けた後もマイクが開いたままになる
+    this.voice?.dispose();
+    if (this.voice) this.voice.myId = -1;
+    this._updateVoiceHud();
     this.remotes?.dispose();
     this.remotes = null;
     this._lastStates = null;
@@ -1815,6 +1833,11 @@ class Game {
         if (Array.isArray(ev.p)) this._syncNade(ev.gid, ev.p);
         break;
 
+      // 声で繋ぐ相手が変わった。**誰と繋いでよいかを決めるのはサーバー**
+      case EV.VOICE:
+        this.voice?.setPeers(ev.p);
+        break;
+
       case EV.DROP:
         if (Array.isArray(ev.p)) this._addDrop(ev.did, ev.w | 0, ev.n | 0, ev.p);
         break;
@@ -2368,6 +2391,22 @@ class Game {
     this._nadeMeshes.delete(gid);
   }
 
+  /**
+   * 声の状態を画面へ出す。
+   *
+   * 出すのは**自分が送っているかどうか**と、**マイクが使えない事**の2つだけ。
+   * 誰が喋っているかは次の回（相手の声の大きさを測る仕掛けが要る）。
+   *
+   * マイクを断った事を出しておかないと、押しても何も起きない理由が分からない
+   */
+  _updateVoiceHud() {
+    const v = this.voice;
+    if (!v || this.mode !== 'versus' || !v.enabled) { this.hud.voice('off'); return; }
+    if (v.micDenied) { this.hud.voice('nomic', 'マイクが使えません（聞く側）'); return; }
+    if (v.talking) { this.hud.voice('talk', `送信中（${v.liveCount}人）`); return; }
+    this.hud.voice('off');
+  }
+
   /* ------------------------------------------ 地面に落ちている物 */
 
   /**
@@ -2487,6 +2526,13 @@ class Game {
     if (dt < 0) dt = 0;
 
     const playing = this.state === 'playing';
+
+    /* 押して話す。**遊んでいる最中もロビーにいる間も同じキーで効く。**
+       席を決める相談が一番喋りたい場面なので、試合中だけにはしない。
+       発言を打っている最中は送らない（Vの字がそのまま送信になる） */
+    if (this.mode === 'versus' && this.voice) {
+      this.voice.setTalking(!this.chat?.typing && this.input.down(PTT_CODE));
+    }
 
     if (playing) {
       // 発言を打っている間は、キーを1つもゲームへ通さない。

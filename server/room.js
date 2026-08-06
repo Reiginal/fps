@@ -259,6 +259,55 @@ export class Room {
     return this.teamOf(a) === this.teamOf(b);
   }
 
+  /* ------------------------------------------------------ 声の輪 */
+
+  /**
+   * 声が届く相手。**誰と繋いでよいかを決めるのはサーバー。**
+   *
+   * 手元が自分で決める形にすると、書き換えるだけで敵チームへ繋いで
+   * 作戦を聞ける。合図を渡す所（signal）もこの並びを見て弾く。
+   *
+   * 決まり:
+   *   ・チーム戦 … 味方だけ
+   *   ・それ以外 … 部屋にいる人みんな（チームが無いので分けようが無い）
+   *   ・席に着いていない人も入れる。**ロビーで話せないと、
+   *     席を決める相談ができない**（そこが一番喋りたい場面）
+   */
+  voicePeers(slot) {
+    const out = [];
+    for (const s of this.slots.values()) {
+      if (s === slot) continue;
+      // チーム戦でも、どちらかが席に着いていない間は同じ輪に入れる。
+      // 座る前から相談できないと、チーム分けそのものが決められない
+      if (this.rules.teams && slot.seat !== null && s.seat !== null
+        && this.teamOf(s) !== this.teamOf(slot)) continue;
+      out.push(s.id);
+    }
+    return out;
+  }
+
+  /** 声の輪が変わった事を全員へ配る。**人ごとに中身が違う**ので1人ずつ送る */
+  sendVoice() {
+    for (const s of this.slots.values()) {
+      s.conn.send({ t: Sv.EVENT, e: [{ e: EV.VOICE, p: this.voicePeers(s) }] });
+    }
+  }
+
+  /**
+   * 声の合図を相手へ渡す。**中身(d)は読まない。**
+   *
+   * 読むと、そこが壊れた電文を食わせる入口になる。
+   * やるのは「同じ声の輪にいる相手か」を見て、そのまま渡すことだけ。
+   */
+  signal(from, toId, d) {
+    if (d === undefined || d === null) return false;
+    const to = this.slots.get(toId);
+    if (!to || to === from) return false;
+    if (!this.voicePeers(from).includes(toId)) return false;
+    to.conn.send({ t: Sv.VSIG, from: from.id, d });
+    return true;
+  }
+
   /** 画面に出すチームの名前。チーム分けが無い遊び方では本人の名前 */
   _teamName(slot) {
     if (!this.rules.teams) return slot.name;
@@ -405,7 +454,12 @@ export class Room {
   /** ロビーの絵を全員へ配る。席が動いた時と、人が出入りした時だけ呼ぶ */
   sendLobby(why) { this._sendLobby(why); }
 
+  /* ロビーの中身を配る。**声の輪もここで配り直す。**
+     輪が変わるのは「誰が入った・抜けた・席を移った・遊び方が変わった」の時で、
+     それはロビーを配り直す時と完全に同じ。別々に呼ぶ形にすると、
+     必ずどこかで片方を書き忘れて「声だけ繋がらない」が残る */
   _sendLobby(why) {
+    this.sendVoice();
     // whyを渡されなかった時は、その場で数え直す。
     // 呼ぶ側に毎回計算させると、片方だけ古い理由を配る事故が起きる
     const msg = {
@@ -592,6 +646,9 @@ export class Room {
     // ここからは分からないが、**いつ何人になったか**が分かるだけで
     // 「3人目が入った直後に落ちる」のような形に辿り着ける
     logs.add('leave', { name: slot.name, count: this.slots.size });
+    /* 声の輪を配り直すのは、この関数の最後の _sendLobby() が兼ねている。
+       ここで別に呼んでいた時期があるが、二重に配るだけだったので外した
+       （検査で「戻しても落ちない」＝要らない処理だと分かった） */
     if (this.slots.size === 0) {
       // 誰もいなくなったら60Hzのタイマーを止める。部屋そのものは残す
       this._stop();

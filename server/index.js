@@ -286,6 +286,7 @@ function onMessage(conn, raw) {
     case C.CHAR: return onChar(conn, m);
     case C.PONG: return onPong(conn, m);
     case C.CHAT: return onChat(conn, m);
+    case C.VSIG: return onVoiceSignal(conn, m);
     default: return;
   }
 }
@@ -320,6 +321,15 @@ function onJoin(conn, m) {
   // 遊んでいる本人に聞いても「なんか切れた」しか返ってこないので、ここでしか分からない
   console.log(`[net] ${name} が${slot.back ? '戻ってきた' : '入った'} (${room.slots.size}人)`);
   logs.add('join', { name, count: room.slots.size, back: slot.back || undefined });
+}
+
+/* 声の合図を相手へ渡すだけ。**中身(m.d)は読まない。**
+   読むと、そこが壊れた電文を食わせる入口になる。
+   誰へ渡してよいかはRoomが決める（同じ声の輪にいる相手だけ） */
+function onVoiceSignal(conn, m) {
+  const slot = conn.slot;
+  if (!slot || !isNum(m.to)) return;
+  conn.room.signal(slot, Math.round(m.to), m.d);
 }
 
 function onInput(conn, m) {

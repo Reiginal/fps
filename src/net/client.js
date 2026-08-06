@@ -71,6 +71,8 @@ export class NetClient {
     this.onPhase = null;
     // 誰かが発言した
     this.onChat = null;
+    // 声の合図が届いた。中身は読まずに声の層へ渡す
+    this.onVoiceSignal = null;
 
     /* 未確認の入力。ackが返るまで捨てない。
        中身は [seq, キー, yaw, pitch] に加えて、その入力を送った時点の自分の
@@ -249,6 +251,10 @@ export class NetClient {
       case Sv.SNAPSHOT: this._snapshot(m); break;
       case Sv.EVENT:
         if (Array.isArray(m.e)) for (const ev of m.e) { this._emit(this.onEvent, ev); this._roster(ev); }
+        break;
+      // 声の合図が相手から届いた。中身はそのまま声の層へ渡す
+      case Sv.VSIG:
+        if (Number.isInteger(m.from)) this._emit(this.onVoiceSignal, { from: m.from, d: m.d });
         break;
       case Sv.SCORE: this._score(m); break;
       case Sv.MATCHEND: this._matchEnd(m); break;
@@ -656,6 +662,16 @@ export class NetClient {
     const s = String(text ?? '').trim();
     if (!s) return;
     this._send({ t: C.CHAT, m: s.slice(0, CHAT_MAX) });
+  }
+
+  /**
+   * 声を繋ぐための合図を相手へ送る。**中身(d)はサーバーが読まない。**
+   * 手元同士だけが読む物なので、ここでも形を検査しない
+   */
+  sendVoice(to, d) {
+    if (!this.connected) return;
+    if (!Number.isInteger(to) || d === undefined || d === null) return;
+    this._send({ t: C.VSIG, to, d });
   }
 
   /* -------------------------------------------------------- 他人の補間 */
