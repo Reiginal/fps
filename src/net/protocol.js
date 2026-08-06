@@ -111,7 +111,7 @@ export const KEY_CODES = [
 // （実際ピストルを差し込んだ時に、番号を直書きしていた検査が嘘をつき始めた）。
 //
 // 並びがそのまま画面の1〜4のキーになる。
-export const LOADOUT_IDS = ['rifle', 'shotgun', 'pistol', 'knife', 'nade'];
+export const LOADOUT_IDS = ['rifle', 'pistol', 'knife', 'nade'];
 
 /** 武器の表から、持って出る物の番号だけを取り出す */
 export const loadoutOf = (weapons) => LOADOUT_IDS
