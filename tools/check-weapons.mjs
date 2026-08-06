@@ -17,7 +17,7 @@
 import '../server/dom-stub.js';
 import * as THREE from 'three';
 
-const { WeaponSystem } = await import('../src/player/weapons.js');
+const { WeaponSystem, WEAPONS } = await import('../src/player/weapons.js');
 
 // 銃身の向きと弾の向きの許容ズレ(度)。
 // 弾は必ずクロスヘアへ真っ直ぐ飛ぶので、銃がそこから離れて見えるほど
@@ -81,7 +81,19 @@ for (const w of ws.weapons) {
 console.log('\n[3.5] 構えが画面に収まっているか');
 // ビューモデルはviewCameraで写る。腰だめの姿勢に置いた時の
 // 各頂点を投影して、正規化座標(-1..1)の外へ出ていないかを見る。
-// 出ていると画面の縁で切れて「見切れている」状態になる
+// 出ていると画面の縁で切れて「見切れている」状態になる。
+//
+// **測るのは「武器そのもの」で、手と腕は外す。**
+// 腕は画面の下隅から入るので枠外に出て当たり前で、そこを混ぜると
+// 「枠外の割合」が武器の見え方ではなく**手の頂点数**で決まってしまう。
+// ナイフは刃が152頂点に対して手と腕が2639頂点あり、
+// 腕をどう振っても割合が53.5%から動かなかった（＝何も測れていなかった）。
+//
+// あわせて「一番手前の頂点が目から何cm離れているか」も見る。
+// カメラの手前へ回った面は画面上で無限に広がるので、
+// **形が良くても位置がおかしいと画面が破裂する。**
+// 包帯の手が「でかいしグロい」と言われたのがまさにこれで、
+// ナイフも実測すると刃と腕が目の7cm後ろまで突き抜けていた
 vcam.updateProjectionMatrix();
 vcam.updateMatrixWorld(true);
 const _v = new THREE.Vector3();
@@ -89,28 +101,101 @@ for (const w of ws.weapons) {
   w.model.position.copy(w.hipPos);
   w.model.rotation.copy(w.hipRot);
   w.model.scale.setScalar(w.def.view.scale);
+
+  // **持っていない武器は model.visible が false になっている。**
+  // 見えている物だけ数える作りなので、そのまま測ると持っている1本以外は
+  // 頂点0個になり、下の pct が 0% と出て**そのまま通っていた**。
+  // 「画面外0.0%」と書いてあるのに何も測っていない、という一番たちの悪い形で、
+  // 実際ショットガン・ナイフ・手榴弾の3本は長い間ここを素通りしていた
+  // （コメントに残っている「ショットガン24.7%」は測れていた頃の値）。
+  // 測る間だけ持ち上げて、終わったら戻す
+  const wasVisible = w.model.visible;
+  w.model.visible = true;
   w.model.updateMatrixWorld(true);
-  let out = 0, total = 0;
+
+  let out = 0, total = 0, nearest = 9, handSeen = 0;
   w.model.traverse((m) => {
     if (!m.isMesh || !m.geometry?.attributes?.position) return;
-    // 見えていない物は数えない。近接や投擲は使わない左手を画面外へ
+    // 部品ごとの非表示は残す。近接や投擲は使わない左手を画面外へ
     // 逃がしてあるので、そのまま数えると常に「見切れている」と出る
     let vis = m.visible;
     for (let o = m.parent; o && vis; o = o.parent) vis = o.visible;
     if (!vis) return;
+    // 手と腕か（buildHandが付ける印を先祖まで辿る）
+    let isHand = false;
+    for (let o = m; o && !isHand; o = o.parent) if (o.userData?.isHand) isHand = true;
+
     const pos = m.geometry.attributes.position;
     // 全頂点は多いので間引く。形の端は拾える
     for (let i = 0; i < pos.count; i += 7) {
-      _v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld).project(vcam);
+      _v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+      // 近さは手も含めて見る。腕が目を突き抜けるのも同じくらい困る
+      nearest = Math.min(nearest, -_v.z);
+      if (isHand) { handSeen++; continue; }
+      _v.project(vcam);
       total++;
       if (Math.abs(_v.x) > 1 || Math.abs(_v.y) > 1) out++;
     }
   });
-  const pct = total ? (out / total) * 100 : 0;
-  // 銃は手前や下が少し切れるのが普通で、実測すると
-  // ライフル14.5%・ショットガン24.7%。これは遊んでいて気にならない範囲。
-  // 4割を超えると「刃先が枠の外にある」レベルになるのでそこを線にする
-  ok(pct < 40, `${w.def.name} … 画面外へ出ている頂点 ${pct.toFixed(1)}%`);
+
+  w.model.visible = wasVisible;
+  w.model.updateMatrixWorld(true);
+
+  // **何も測れていない時は落とす。** これが無いと、上の visible の件のように
+  // 「measure した気になっているだけ」の状態が緑のまま通り続ける
+  ok(total > 0 && handSeen > 0,
+    `${w.def.name} … 本体${total}頂点・手${handSeen}頂点を測った`);
+
+  // 目の手前へ回った頂点があると、その面は画面上で無限に広がる。
+  // ライフル10.3cm・ショットガン12.1cmが「普通に構えている」時の値なので、
+  // その半分を割ったら構えの位置がおかしいとみなす。
+  // **包帯の手が「でかいしグロい」と言われたのがこれで、ナイフも実測すると
+  // 刃と腕が目の7cm後ろまで突き抜けていた**（枠外98.9%）
+  ok(nearest > 0.05,
+    `${w.def.name} … 一番手前の頂点が目から ${(nearest * 100).toFixed(1)}cm`
+    + (nearest > 0.05 ? '' : '  ← 近すぎる（画面で破裂する）'));
+
+  const pct = total ? (out / total) * 100 : 100;
+  // 銃は手前や下が少し切れるのが普通で、手を除いて実測すると
+  // ライフル5.5%・ショットガン9.3%。これは遊んでいて気にならない範囲。
+  // 2割を超えると「銃口や刃先が枠の外にある」レベルになるのでそこを線にする
+  ok(pct < 20, `${w.def.name} … 武器本体で画面外へ出ている頂点 ${pct.toFixed(1)}%`);
+}
+
+/* -------------------------------------- 構えが武器ごとに違うか */
+
+console.log('\n[3.55] 構えが武器ごとに違う');
+// 遊んで「ナイフも手榴弾もライフルの構えになっている」と言われた所。
+//
+// 原因は def.view の値ではなく**組み立て側**だった。
+// buildKnife/buildGrenade が右手を作る時、腕の入る向きを
+// ライフルと同じ [0.38, -0.62, 0.92] で直書きしていて、
+// 武器ごとに変える手段がそもそも無かった（def.view を渡していなかった）。
+// Zが大きいぶん前腕が「手から目へ向かって」伸びるので、
+// 短い武器では腕が目を突き抜けて画面が破裂する。
+//
+// ここで見るのは「4つが同じ値に戻っていないか」。
+// 値を1箇所からコピーして増やすのが一番ありがちな戻り方なので、そこを塞ぐ
+{
+  const byId = Object.fromEntries(WEAPONS.map((d) => [d.id, d]));
+  const rifleArm = [0.38, -0.62, 0.92];   // 既定（銃の腕）
+
+  for (const id of ['knife', 'nade']) {
+    const d = byId[id];
+    const arm = d.view.grip?.armDir;
+    ok(!!arm, `${d.name} … 自分の腕の向きを持っている（grip.armDir）`);
+    if (!arm) continue;
+    // 銃の腕と同じなら、それは「ライフルの構え」に戻っている
+    const same = arm.every((v, i) => Math.abs(v - rifleArm[i]) < 1e-6);
+    ok(!same, `${d.name} … 腕の向きが銃と違う [${arm.join(', ')}]`);
+    // Zが大きいと前腕が目のほうへ戻ってくる。銃(0.92)の半分を上限にする
+    ok(arm[2] < 0.46, `${d.name} … 前腕が目のほうへ戻っていない (z=${arm[2]})`);
+  }
+
+  // 4つの構えの向きが全部同じ、という状態も塞ぐ
+  const rots = WEAPONS.map((d) => d.view.hipRot.join(','));
+  ok(new Set(rots).size === WEAPONS.length,
+    `4本とも構えの向きが違う（${new Set(rots).size}種類）`);
 }
 
 /* ---------------------------------------- 包帯が画面に収まっているか */
@@ -389,7 +474,6 @@ console.log('\n[6] server/sim.js の退避武器表');
 // 手榴弾を1本足しただけで、ナイフを撃ったつもりが手榴弾の数字で判定される
 {
   const { FALLBACK_WEAPONS, weaponsSource } = await import('../server/sim.js');
-  const { WEAPONS } = await import('../src/player/weapons.js');
 
   // まず、そもそも今どちらを使っているか。
   // 読み込みに失敗していると黙って退避へ落ちるので、静かな異常として一番先に見る
