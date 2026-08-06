@@ -157,37 +157,64 @@ export function fitModel(scene, box) {
   return k;
 }
 
-/**
- * 手を除いた「本体」の箱。読み込んだモデルはここへ収める。
- * 手まで入れると、箱が手のぶん広がって銃だけが大きくなる
- */
-export function builtBox(inner) {
-  inner.updateMatrixWorld(true);
-  const box = new THREE.Box3();
-  inner.traverse((o) => {
-    if (!o.isMesh) return;
-    for (let p = o; p; p = p.parent) {
-      if (p.userData?.isHand) return;
-      if (p === inner) break;
-    }
-    box.expandByObject(o);
-  });
-  return box;
-}
-
-/* 頂点を世界の座標で集める。向きと太さを測るのに要る */
+/* 頂点を、そのモデルの中の座標で集める。向きと太さを測るのに要る */
 function collectPoints(scene) {
+  scene.updateMatrixWorld(true);
+  const toLocal = new THREE.Matrix4().copy(scene.matrixWorld).invert();
+  const rel = new THREE.Matrix4();
   const out = [];
   const v = new THREE.Vector3();
   scene.traverse((o) => {
     if (!o.isMesh || !o.geometry?.attributes?.position) return;
+    rel.multiplyMatrices(toLocal, o.matrixWorld);
     const p = o.geometry.attributes.position;
     for (let i = 0; i < p.count; i++) {
-      v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld);
+      v.fromBufferAttribute(p, i).applyMatrix4(rel);
       out.push([v.x, v.y, v.z]);
     }
   });
   return out;
+}
+
+/**
+ * 手を除いた「本体」の箱。読み込んだモデルはここへ収める。
+ *
+ * **必ず inner の中の座標で測る。** ここを世界の座標で測っていた時、
+ * 実際の場面では inner に0.86倍の縮尺が掛かっていて、構えの姿勢も乗っているので、
+ * **返ってくる箱が本物の1.16倍**になっていた。
+ * その箱に合わせて置いたモデルは、そのぶん大きく出る（画面の右半分を覆う黒い板になった）。
+ *
+ * 手元で銃だけを組んで測る分には親も縮尺も無いので、**測っている限りは正しく見える。**
+ * 実際に構えた画面を撮って初めて分かった。
+ *
+ * 手まで入れないのは、箱が手のぶん広がって銃だけが大きくなるため
+ */
+export function builtBox(inner) {
+  inner.updateMatrixWorld(true);
+  // innerの中の座標へ引き戻すための行列
+  const toLocal = new THREE.Matrix4().copy(inner.matrixWorld).invert();
+  const rel = new THREE.Matrix4();
+  const box = new THREE.Box3();
+  const one = new THREE.Box3();
+  inner.traverse((o) => {
+    if (!o.isMesh || !o.geometry) return;
+    /* 出ていない物は数えない。**閃光と煙は平らな板で、銃より広い。**
+       これを入れると箱が幅0.48（銃そのものは0.08）になり、
+       その箱へ合わせたモデルが画面の右半分を覆う黒い板になる。
+       普段は見えていない物なので、visibleで落とせる */
+    for (let p = o; p; p = p.parent) {
+      if (!p.visible) return;
+      if (p.userData?.isHand) return;
+      if (p === inner) break;
+    }
+    if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+    if (!o.geometry.boundingBox) return;
+    one.copy(o.geometry.boundingBox);
+    rel.multiplyMatrices(toLocal, o.matrixWorld);
+    one.applyMatrix4(rel);
+    box.union(one);
+  });
+  return box;
 }
 
 /**
