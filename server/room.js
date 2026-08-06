@@ -754,6 +754,12 @@ export class Room {
   shot(slot, seq, origin, dir) {
     const sim = slot.sim;
     if (!sim.alive) return;
+    // LIVE以外は当たり判定を通さない。ロビー(WAIT)でも全員が生存・湧き済みなので、
+    // ここが無いとロビーで撃って相手を「殺せて」しまう。WAITには落下死のような
+    // 復活処理が無い（_killByFallはLIVE限定）ので、撃たれた側は試合開始まで
+    // 倒れたまま動けず、幽霊キルフィードだけが全員に配られる。
+    // throwNade・_explodeが持っているのと同じガードをここにも置く
+    if (this.phase !== PHASE.LIVE) return;
     // 持ち替えの最中は撃てない。切り替えを撃つ度に挟む撃ち方を成立させない
     if (sim.swapIn > 0) return;
     // rpmを超える連射は捨てる。弾数はクライアントが持つが、
