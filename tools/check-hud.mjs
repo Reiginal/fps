@@ -10,6 +10,8 @@
 //
 //   node tools/check-hud.mjs
 
+import { readFileSync } from 'node:fs';
+
 /* ------------------------------------------------ 最小限の偽DOM */
 
 const mkEl = (id) => {
@@ -147,6 +149,63 @@ ok(pips.children.length === 4, `玉が4つになる (${pips.children.length}個)
 ok(pips.children.filter((p) => p._classes.has('on')).length === 3, '点いているのは3つ');
 hud.bandage(1, 0, 2.4, false, 2);
 ok(pips.children.length === 2, `玉が2つに戻る (${pips.children.length}個)`);
+
+console.log('\n[軽さ] 毎フレームの無駄をしていない');
+/* **遊ぶ人のPCが熱くなったら、その時点で他が全部どうでもよくなる。**
+   HUDは毎フレーム呼ばれるので、ここでの「同じ値をもう一度書く」がそのまま
+   熱に変わる。同じ値で呼んでも2度目からは触らないこと */
+{
+  const el = (id) => document.getElementById(id);
+  const writes = (o, key) => {
+    let n = 0;
+    let v = o[key];
+    Object.defineProperty(o, key, {
+      configurable: true,
+      get() { return v; },
+      set(x) { n++; v = x; },
+    });
+    return () => n;
+  };
+
+  // 弾数の欄。同じ弾数で何度呼んでも、書くのは1回だけ
+  {
+    const h2 = new HUD();
+    const count = writes(el('reserve'), 'textContent');
+    for (let i = 0; i < 10; i++) h2.ammo(30, 240, 'ライフル', 0, 0, false);
+    ok(count() <= 1, `予備弾は変わった時だけ書く（10回呼んで${count()}回）`);
+    h2.ammo(30, 200, 'ライフル', 0, 0, false);
+    ok(count() === 2, `変わった時はちゃんと書く（${count()}回）`);
+  }
+
+  // 走っている印
+  {
+    const h2 = new HUD();
+    const count = writes(el('speedlines').style, 'opacity');
+    for (let i = 0; i < 10; i++) h2.sprinting(true);
+    ok(count() <= 1, `走りの印も変わった時だけ（10回呼んで${count()}回）`);
+  }
+
+  // 順位表。Tabを押している間、中身を毎フレーム作り直さない
+  {
+    const h2 = new HUD();
+    const count = writes(el('sbRows'), 'innerHTML');
+    const rows = [{ id: 1, name: 'あき', rounds: 1, kills: 2, deaths: 0, ping: 20, me: true }];
+    for (let i = 0; i < 10; i++) h2.scoreboard(rows, true);
+    ok(count() <= 1, `押しっぱなしでも作り直さない（10回呼んで${count()}回）`);
+    h2.scoreboard([{ ...rows[0], kills: 3 }], true);
+    ok(count() === 2, '点が動いたら作り直す');
+  }
+
+  // 地図。**毎フレーム塗り直さない**（塗るたびに絵を画面へ送り直すことになる）
+  {
+    const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+    ok(/const MAP_HZ = \d+;/.test(main), '地図を塗る回数が決めてある');
+    const hz = Number(main.match(/const MAP_HZ = (\d+);/)?.[1]);
+    ok(hz > 0 && hz <= 30, `毎秒${hz}回（60回だと毎フレームと同じ）`);
+    ok(/_mapAcc[\s\S]{0,120}?1 \/ MAP_HZ/.test(main), 'その回数で間引いている');
+    ok(/_mapAcc[\s\S]{0,200}?hud\.minimap/.test(main), '間引いた後で塗っている');
+  }
+}
 
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);
 process.exit(bad === 0 ? 0 : 1);

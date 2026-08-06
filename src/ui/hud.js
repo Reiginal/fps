@@ -217,16 +217,22 @@ export class HUD {
       this.el.ammo.textContent = shown;
       this.el.ammoWrap.classList.toggle('empty', !melee && cur === 0);
     }
-    this.el.reserve.textContent = melee ? '' : `/ ${reserve}`;
+    // 予備弾も毎フレーム書いていた。文字を作って書き込むぶんの仕事が毎回乗る
+    const rest = melee ? '' : `/ ${reserve}`;
+    if (rest !== this._lastReserve) {
+      this._lastReserve = rest;
+      this.el.reserve.textContent = rest;
+    }
     if (this.el.weapon.textContent !== name) {
       this.el.weapon.textContent = name;
       this.el.slots.forEach((s, i) => s.classList.toggle('on', i === slotIndex));
     }
-    if (reloadT > 0) {
-      this.el.reloading.textContent = 'リロード中';
-      this.el.reloading.style.opacity = 1;
-    } else {
-      this.el.reloading.style.opacity = 0;
+    // 装填中かどうかも、変わった時だけ触る
+    const loading = reloadT > 0;
+    if (loading !== this._lastLoading) {
+      this._lastLoading = loading;
+      if (loading) this.el.reloading.textContent = 'リロード中';
+      this.el.reloading.style.opacity = loading ? 1 : 0;
     }
   }
 
@@ -422,6 +428,9 @@ export class HUD {
   }
 
   sprinting(on) {
+    // 毎フレーム呼ばれる。同じ値でも書けば書いた分の仕事が乗るので、変わった時だけ
+    if (this._lastSprint === on) return;
+    this._lastSprint = on;
     this.el.speedlines.style.opacity = on ? 0.85 : 0;
   }
 
@@ -470,8 +479,20 @@ export class HUD {
 
   /** Tabを押している間だけ出す想定。キーの取得は呼ぶ側 */
   scoreboard(rows, show) {
-    if (show) this.el.sbRows.innerHTML = this._rankRows(rows, false);
-    this.el.scoreboard.classList.toggle('hidden', !show);
+    /* Tabを押している間、中身を毎フレーム作り直していた。
+       人数ぶんのHTMLを組み立てて丸ごと入れ替える処理なので、
+       押しっぱなしにしている間ずっとその仕事が乗る。変わった時だけにする */
+    if (show) {
+      const key = (rows || []).map((r) => `${r.id}:${r.rounds | 0}:${r.kills | 0}:${r.deaths | 0}:${Math.round(r.ping || 0)}`).join('|');
+      if (key !== this._lastBoard) {
+        this._lastBoard = key;
+        this.el.sbRows.innerHTML = this._rankRows(rows, false);
+      }
+    }
+    if (this._lastBoardShow !== show) {
+      this._lastBoardShow = show;
+      this.el.scoreboard.classList.toggle('hidden', !show);
+    }
   }
 
   /** 試合終了の最終順位。showをfalseで畳む */
