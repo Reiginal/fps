@@ -166,3 +166,49 @@ jobs:
 
       - name: 検査 地形のメモリ
         run: node --expose-gc tools/check-world.mjs
+
+  # ------------------------------------------------------------------
+  # 本物のブラウザで開く検査。**上の1372項目が一切届いていない層。**
+  #
+  # あちらはNodeの中でクラスを動かしているだけなので、
+  # index.htmlとimportmapが噛み合っているか・全部のモジュールが本当に
+  # 読み込めるか・開いた結果ホーム画面まで来るかを1つも見ていない。
+  # **importを1行書き間違えただけで、1372項目は全部通ったまま、
+  # 開いたら真っ黒**という形が作れる（実際に壊して確かめた）。
+  #
+  # 別の仕事にしてあるのは、これがブラウザの検査だから。
+  # Node 20と22で2回やっても、同じブラウザで同じ事を2回やるだけになる
+  e2e:
+    runs-on: ubuntu-latest
+    name: ブラウザで開く
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 依存を入れる
+        run: npm ci
+
+      # ブラウザ本体を落とす。--with-deps は動かすのに要るライブラリも入れる
+      - name: ブラウザを入れる
+        run: npx playwright install --with-deps chromium
+
+      # サーバーの起動と停止は playwright.config.mjs がやる
+      - name: 開いて確かめる
+        run: npm run e2e
+
+      # 落ちた時だけ、その瞬間の画像と記録を残す。
+      # **ブラウザの中で起きた事は、これが無いと後から何も分からない**
+      - name: 落ちた時の記録を残す
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7

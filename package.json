@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "check": "node tools/check-meta.mjs && node tools/check-calls.mjs && node tools/check-protocol.mjs && node tools/check-parity.mjs && node tools/check-serve.mjs && node tools/check-hud.mjs && node tools/check-weapons.mjs && node tools/check-loadout.mjs && node tools/check-audio.mjs && node tools/check-audio-leak.mjs && node tools/check-sound.mjs && node tools/check-heal.mjs && node tools/check-reload.mjs && node tools/check-lobby.mjs && node tools/check-modes.mjs && node tools/check-swarm.mjs && node tools/check-aim.mjs && node tools/check-chat.mjs && node tools/check-character.mjs && node tools/check-hitbox.mjs && node tools/check-report.mjs && node tools/check-logs.mjs && node tools/check-input.mjs && node tools/check-postfx.mjs && node tools/check-deathcam.mjs && node tools/check-settings.mjs && node tools/check-stats.mjs && node tools/check-rejoin.mjs && node tools/check-drops.mjs && node tools/check-teams.mjs && node tools/check-quit.mjs && node tools/check-voice.mjs && node --expose-gc tools/check-world.mjs",
     "sounds": "node tools/sound-lab.mjs",
-    "ogp": "node tools/make-ogp.mjs"
+    "ogp": "node tools/make-ogp.mjs",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "three": "^0.185.1",
@@ -17,6 +18,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.1",
     "eslint": "^10.8.0",
     "globals": "^17.9.0"
   },

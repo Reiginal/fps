@@ -34,3 +34,7 @@ CLAUDE.local.md
 
 # Logs
 *.log
+
+# 本物のブラウザで動かす検査の出力。落ちた時の画像と記録が入る
+test-results/
+playwright-report/
