@@ -503,6 +503,16 @@
 
   .stbtns { display: flex; gap: 10px; margin-top: 22px; }
 
+  /* --------------------------------------------------------- 終了 */
+  #quit {
+    position: fixed; inset: 0; z-index: 50;
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at center, rgba(7,10,15,1), rgba(3,5,8,1));
+    text-align: center;
+  }
+  #quit.hidden { display: none; }
+  #quit .hint { margin: 18px 0 6px; }
+
   /* --------------------------------------------------------- 戦績 */
   /* 設定と同じ器。違うのは中身が縦に長いことで、
      実績が増えると画面からはみ出すので、panel側でスクロールさせる */
@@ -1007,6 +1017,7 @@
     <div id="nmStatus"></div>
 
     <div class="netbtns">
+      <button id="nmQuit" class="netbtn" type="button">終了</button>
       <button id="nmStats" class="netbtn" type="button">戦績</button>
       <button id="nmSettings" class="netbtn" type="button">設定</button>
       <button id="nmSolo" class="netbtn" type="button">1人で遊ぶ</button>
@@ -1041,6 +1052,20 @@
     <div class="stbtns">
       <button id="stReset" class="netbtn" type="button">既定に戻す</button>
       <button id="stClose" class="netbtn main" type="button">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- 終了した後の画面。**描画を止めてから出す。**
+     ブラウザのゲームは、タブを閉じるまで裏で3Dを描き続ける。
+     見ていないのにパソコンが熱くなるので、やめる意思を伝えられる出口を置く -->
+<div id="quit" class="hidden">
+  <div class="netpanel">
+    <div class="title">またね</div>
+    <div class="subtitle">おつかれさまでした</div>
+    <div class="hint" id="qtNote"></div>
+    <div class="netbtns">
+      <button id="qtBack" class="netbtn main" type="button">もう一度遊ぶ</button>
     </div>
   </div>
 </div>
