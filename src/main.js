@@ -1198,6 +1198,11 @@ class Game {
       } else if (this.state === 'playing') {
         this.state = 'paused';
         this._showPause();
+        // 手榴弾を構えたまま(離さずに)一時停止すると、pointerlockが外れて
+        // input.buttonsが黙って全部falseになる。断ち切らずにいると、
+        // 再開した1フレーム目が「離した」と誤認して押してもいないのに
+        // 手榴弾が飛ぶ（課題.md #1）
+        this.weapons?.cancelThrowHold();
       }
     });
 
