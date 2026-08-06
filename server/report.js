@@ -75,7 +75,10 @@ export class ReportLimiter {
  * solo は1人プレイ。1人プレイはサーバーに一切繋がらないので、
  * ここを通さないと**遊んだ事実がどこにも残らない**。
  * 実際に遊んだ後でログを見て「1件も無い、壊れている？」となった */
-export const REPORT_KINDS = ['error', 'solo'];
+/* 受け取る種類。**perfは「重い」を感想でなく数字で見るための物。**
+   「なんか重い」と言われても、こちらには何も分からなかった
+   （端末も回線も人数も違うので、手元で再現しようが無い） */
+export const REPORT_KINDS = ['error', 'solo', 'perf'];
 
 /**
  * 受け取った本文を、扱える形へ直す。
@@ -104,6 +107,13 @@ export function reportRecord(bodyText) {
     wave: num(m.wave),
     kills: num(m.kills),
     score: num(m.score),
+    /* 描けた回数。fpsは中央値、lowは遅かった5%（引っかかりの目安）。
+       **平均を取らない。** 60が続いて時々10まで落ちる端末は、
+       平均だと57くらいになって「問題なし」に見えるが、遊んでいる本人には
+       その10の瞬間しか記憶に残らない */
+    fps: num(m.fps),
+    low: num(m.low),
+    players: num(m.players),
   };
 }
 
@@ -111,7 +121,7 @@ export function reportRecord(bodyText) {
 export function reportLine(bodyText) {
   const r = reportRecord(bodyText);
   if (!r) return null;
-  const tag = r.kind === 'solo' ? '[1人で遊んだ]' : '[画面のエラー]';
+  const tag = { solo: '[1人で遊んだ]', perf: '[描画の重さ]' }[r.kind] || '[画面のエラー]';
   return `${tag} ${r.name}: ${r.message}`
     + (r.where ? ` @ ${r.where}` : '')
     + (r.ua ? ` [${r.ua}]` : '');

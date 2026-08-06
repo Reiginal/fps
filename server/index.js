@@ -164,6 +164,7 @@ async function handleReport(req, res) {
   logs.add(rec.kind, {
     name: rec.name, message: rec.message, where: rec.where, ua: rec.ua,
     wave: rec.wave, kills: rec.kills, score: rec.score,
+    fps: rec.fps, low: rec.low, players: rec.players,
   });
   res.writeHead(204).end();
 }

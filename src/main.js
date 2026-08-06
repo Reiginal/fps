@@ -37,6 +37,11 @@ const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
    合計19秒で、サーバーが記録を取っておく60秒（MATCH.REJOIN_S）に収まっている */
 const REJOIN_WAITS = [1000, 2000, 3000, 5000, 8000];
 
+/* 重さを測るのに覚えておく枚数。60fpsで33秒ぶん。
+   全部覚えると長く遊ぶほど記憶を食い続けるし、古い所まで混ぜると
+   「今どうだったか」が薄まる */
+const FRAME_SAMPLES = 2000;
+
 // 倒れてから結果が出るまで。ここが短いと、撃たれた次の瞬間に文字が出て
 // 倒れ切るまでの秒数（1.3秒）は src/core/deathcam.js が持つ。
 // 何が起きたのかを見る時間が無いと短すぎ、長いと待たされる。1.3秒は
@@ -434,6 +439,12 @@ class Game {
     // 最後に実績を数えた時の記録。ここが無いと、起動のたびに
     // 解除済みの実績が全部もう一度知らせに来る
     this._seen = this.stats;
+
+    /* 描いた1枚ごとの秒数。**遊び終わりに1回だけ数字にして送る。**
+       毎フレーム送ったら、その通信でさらに重くなる。
+       上限を置くのは、長く遊ぶほど記憶を食い続けるのを止めるため
+       （2000枚＝60fpsで33秒ぶん。それより古い所は捨てる） */
+    this._frames = [];
     this._lastTime = 0;
     this._invQ = new THREE.Quaternion();
     // 倒れている間の見回し。生きている間はnullで、倒れた瞬間に
@@ -1136,6 +1147,7 @@ class Game {
     if (rank[0]?.me) this._tally('wins');
     this._checkAchievements();
     this._flushStats();
+    this._reportPerf();
     this.hud.matchEnd(rows, true, `${MATCH.ROUND_WINS}本先取で決着`);
     // 次の試合が始まったら畳む。サーバーはINTERMISSION後に0点を配って再開する。
     // 前のタイマーが残っていると、続けて2試合終わった時に早い方が新しい順位を消す
@@ -1309,6 +1321,12 @@ class Game {
     this.stats = saveStats(mergeTally(this.stats, this.session));
     this.session = emptyTally();
     this._seen = this.stats;
+
+    /* 描いた1枚ごとの秒数。**遊び終わりに1回だけ数字にして送る。**
+       毎フレーム送ったら、その通信でさらに重くなる。
+       上限を置くのは、長く遊ぶほど記憶を食い続けるのを止めるため
+       （2000枚＝60fpsで33秒ぶん。それより古い所は捨てる） */
+    this._frames = [];
   }
 
   /* 自分が倒れた。撃たれた・爆風・落下の3経路から同じ形で入る。
@@ -1338,6 +1356,8 @@ class Game {
       this.diag?.event('力尽きた', {
         wave: this.director.wave, kills: this.kills, score: this.score,
       });
+      // 1人用はここが遊び終わり。対戦は試合が終わった時に送る
+      this._reportPerf();
     }
     // すぐ結果を出さない。倒れる間を見せてから出す。
     // 260msで切り替えていた頃は、撃たれた次の瞬間に文字が出ていて、
@@ -2399,6 +2419,32 @@ class Game {
   }
 
   /**
+   * 描画の重さを1行送る。**遊び終わりに1回だけ。**
+   *
+   * 中央値と、遅かった5%の2つを出す。**平均を取らない。**
+   * 60が続いて時々10まで落ちる端末は、平均だと57くらいになって
+   * 「問題なし」に見えるが、遊んでいる本人にはその10の瞬間しか記憶に残らない。
+   *
+   * 送った後は捨てる。次の試合の数字に前の試合が混ざらないように
+   */
+  _reportPerf() {
+    const f = this._frames;
+    // 短すぎる回は数字にならない（湧いた直後に落ちた等）
+    if (f.length < 120) { this._frames = []; return; }
+    const sorted = f.slice().sort((a, b) => a - b);
+    const at = (q) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))];
+    const fps = (dt) => (dt > 0 ? Math.round(1 / dt) : 0);
+    this.diag?.perf({
+      fps: fps(at(0.5)),
+      // 遅かった5%＝引っかかりの目安。並びの後ろから5%の所
+      low: fps(at(0.95)),
+      players: this.mode === 'versus' ? (this.net?.players.size | 0) : 1,
+      wave: this.mode === 'solo' ? this.director.wave : null,
+    });
+    this._frames = [];
+  }
+
+  /**
    * 声の状態を画面へ出す。
    *
    * 出すのは**自分が送っているかどうか**と、**マイクが使えない事**の2つだけ。
@@ -2531,6 +2577,14 @@ class Game {
     // タブ復帰などで巨大なdtが来ると物理が破綻するので頭を押さえる
     if (dt > 0.1) dt = 0.1;
     if (dt < 0) dt = 0;
+
+    /* 重さを測る。遊んでいる間だけ数える（メニューやロビーの数字を混ぜると、
+       描く物が少ない画面のぶんだけ良く見える）。
+       頭を押さえた後のdtを使うので、タブを離していた間は0.1で頭打ちになる */
+    if (this.state === 'playing' && dt > 0) {
+      this._frames.push(dt);
+      if (this._frames.length > FRAME_SAMPLES) this._frames.shift();
+    }
 
     const playing = this.state === 'playing';
 
