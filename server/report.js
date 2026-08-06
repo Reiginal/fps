@@ -90,7 +90,17 @@ export function reportRecord(bodyText) {
   try { m = JSON.parse(bodyText); } catch { return null; }
   if (!m || typeof m.message !== 'string') return null;
 
-  const one = (v, max = REPORT_MAX) => stripControl(v ?? '').trim().slice(0, max);
+  // slice(0, max)はUTF-16の単位で切るので、絵文字など2単位で1文字の所を
+  // ちょうど跨ぐと、片割れのサロゲートだけが残ることがある。
+  // logs.jsのclean()と同じく、文字(コードポイント)ごと足すかどうかで切る
+  const one = (v, max = REPORT_MAX) => {
+    let out = '';
+    for (const ch of stripControl(v ?? '').trim()) {
+      out += ch;
+      if (out.length >= max) break;
+    }
+    return out;
+  };
   const message = one(m.message);
   if (!message) return null;
 
