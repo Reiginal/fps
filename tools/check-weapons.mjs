@@ -509,5 +509,56 @@ console.log('\n[6] server/sim.js の退避武器表');
   }
 }
 
+console.log('\n[モデル差し替え] 買ったモデルを被せられるか');
+/* **今の武器はコードで組んである。** 銃口・薬莢の出口・照準の位置がその中で決まっていて、
+   閃光も煙もそこへぶら下がっている。丸ごと差し替えると印まで消えて、
+   撃った時に何も出なくなる。**印は残して、見えている所だけ差し替える** */
+{
+  const { modelUrl, hideBuiltMeshes, fitModel, MODEL_DIR } = await import('../src/player/glbview.js');
+
+  ok(MODEL_DIR.startsWith('assets/'), `置き場は外へ配る所（${MODEL_DIR}）`);
+  ok(modelUrl('rifle').endsWith('/rifle.glb'), `名前から場所が引ける（${modelUrl('rifle')}）`);
+
+  // 手を消してはいけない。銃だけ替わって手が消えると、宙に浮いた銃になる
+  {
+    const inner = new THREE.Group();
+    const hand = new THREE.Group();
+    hand.userData.isHand = true;
+    const finger = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial());
+    hand.add(finger);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial());
+    const mark = new THREE.Object3D();
+    inner.add(hand, body, mark);
+
+    const hidden = hideBuiltMeshes(inner);
+    ok(body.visible === false, '面を持っている所は隠れる');
+    ok(finger.visible === true, '手は残る（消すと宙に浮いた銃になる）');
+    ok(mark.visible === true, '印（面を持たない物）は残る＝閃光と煙の出所');
+    ok(hidden.length === 1, `隠したのは1つだけ（${hidden.length}）`);
+  }
+
+  // 買った物は向きも大きさもばらばら。そのまま置くと巨大な銃が横を向いて出る
+  {
+    const big = new THREE.Group();
+    big.add(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 12), new THREE.MeshBasicMaterial()));
+    fitModel(big, -0.685);
+    const box = new THREE.Box3().setFromObject(big);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const longest = Math.max(size.x, size.y, size.z);
+    ok(longest < 1.2 && longest > 0.4, `銃身の長さへ縮む（${longest.toFixed(2)}m）`);
+    const c = new THREE.Vector3();
+    box.getCenter(c);
+    ok(Math.abs(c.x) < 0.02 && Math.abs(c.z) < 0.02, '真ん中が原点へ来る');
+  }
+  // 長辺が横向きのモデルは回して前へ向ける
+  {
+    const sideways = new THREE.Group();
+    sideways.add(new THREE.Mesh(new THREE.BoxGeometry(8, 0.3, 0.3), new THREE.MeshBasicMaterial()));
+    fitModel(sideways, -0.685);
+    ok(Math.abs(sideways.rotation.y) > 1, '横を向いたモデルは回す');
+  }
+}
+
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);
 process.exit(bad === 0 ? 0 : 1);

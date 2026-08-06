@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { muzzleFlashTexture, radialTexture, smokeTexture } from '../world/textures.js';
+import { tryModelOverride } from './glbview.js';
 // 持ち物の決まりだけ取り込む。protocol.jsはこちらを読まないので輪にならない
 import { loadoutOf } from '../net/protocol.js';
 
@@ -2434,6 +2435,12 @@ class Weapon {
     this.model.add(this.inner);
     this.model.visible = false;
     viewScene.add(this.model);
+
+    /* 買った（もらった）3Dモデルが assets/models/<id>.glb に置いてあれば、
+       見えている所だけ差し替える。**置いていなければ何も起きない。**
+       読み込みは後から届くので、ここでは頼むだけで待たない
+       （待つと、素材を持たないこのゲームで起動が素材待ちになる） */
+    tryModelOverride(this, def.id).catch(() => {});
 
     this.ammo = def.mag;
     this.reserve = def.reserve;
