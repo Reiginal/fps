@@ -325,12 +325,18 @@ class ParticleGroup {
     this.count = n;
     this.geo.setDrawRange(0, n);
     if (n > 0) {
-      this.geo.attributes.position.needsUpdate = true;
-      this.geo.attributes.aSize.needsUpdate = true;
-      this.geo.attributes.aAlpha.needsUpdate = true;
-      this.geo.attributes.aColor.needsUpdate = true;
-      this.geo.attributes.aRot.needsUpdate = true;
-      if (this.streak) this.geo.attributes.aVel.needsUpdate = true;
+      // needsUpdateだけを立てると、three.jsはupdateRangeが空の時
+      // 容量ぶん(capacity)を丸ごとbufferSubDataで送る。生きている粒がn個でも
+      // spark(2000)やsmoke(1300)の容量ぶんを毎フレーム送ることになっていた。
+      // addUpdateRangeで先頭n個ぶんだけに絞る（範囲は要素数。position/aColorは
+      // 1粒3要素、aSize/aAlpha/aRotは1粒1要素）
+      const { position, aSize, aAlpha, aColor, aRot, aVel } = this.geo.attributes;
+      position.addUpdateRange(0, n * 3); position.needsUpdate = true;
+      aSize.addUpdateRange(0, n); aSize.needsUpdate = true;
+      aAlpha.addUpdateRange(0, n); aAlpha.needsUpdate = true;
+      aColor.addUpdateRange(0, n * 3); aColor.needsUpdate = true;
+      aRot.addUpdateRange(0, n); aRot.needsUpdate = true;
+      if (this.streak) { aVel.addUpdateRange(0, n * 3); aVel.needsUpdate = true; }
     }
   }
 
