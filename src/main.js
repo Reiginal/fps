@@ -1,6 +1,7 @@
 // 全部を繋ぐ本体。読み込み → 生成 → ゲームループ。
 import * as THREE from 'three';
 import { buildMaterials, createSky, skyFogColor } from './world/textures.js';
+import { currentTimeOfDay } from './world/sun.js';
 import { buildLevel } from './world/level.js';
 import { Effects } from './world/effects.js';
 import { Input } from './core/input.js';
@@ -66,7 +67,11 @@ const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
 //   ・面ごとに明暗差がついて立体が起きる
 //   ・輪郭に逆光気味の縁が出る
 // の3つが同時に効く。夕方寄りの空の色ともこの高度が合う。
-const SUN_DIR = new THREE.Vector3(-0.78, 0.46, -0.34).normalize();
+// 遊びに来た時刻でどの時間帯かが決まる（src/world/sun.js）。
+// **起動時に1回だけ決める。** 空も影も焼き上げは起動時の1回きりなので、
+// 途中で変えるとそこを作り直す話になる
+const TOD = currentTimeOfDay();
+const SUN_DIR = new THREE.Vector3(...TOD.dir).normalize();
 
 // ビューモデルのキーライトが必ず確保する向き（カメラ空間・右上手前）。
 // 太陽追従だけにすると背を向けた時に銃が真っ黒になるので、これへ寄せて下限を作る
@@ -570,7 +575,9 @@ class Game {
     this._shadowTick = 0;
 
     this.cascades = CASCADES.map((c) => {
-      const light = new THREE.DirectionalLight(0xfff0d8, 3.6);
+      // 日射しの色も時間帯で変える。向きだけだと「影が伸びた」で終わって、
+      // 朝なのか夕方なのかが読めない
+      const light = new THREE.DirectionalLight(TOD.color, 3.6);
       light.castShadow = true;
       light.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_MINOR);
       const sc = light.shadow.camera;
