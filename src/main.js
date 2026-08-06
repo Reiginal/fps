@@ -42,6 +42,10 @@ const REJOIN_WAITS = [1000, 2000, 3000, 5000, 8000];
    「今どうだったか」が薄まる */
 const FRAME_SAMPLES = 2000;
 
+/* 地図を塗り直す回数（毎秒）。**他人の位置が届くのと同じ速さ。**
+   これより速く塗っても、他人の点は1つも動かない */
+const MAP_HZ = 20;
+
 // 倒れてから結果が出るまで。ここが短いと、撃たれた次の瞬間に文字が出て
 // 倒れ切るまでの秒数（1.3秒）は src/core/deathcam.js が持つ。
 // 何が起きたのかを見る時間が無いと短すぎ、長いと待たされる。1.3秒は
@@ -2173,8 +2177,11 @@ class Game {
       }
     }
     this.hud.matchInfo(mine, theirs, MATCH.ROUND_WINS, net.phase, net.timeLeft, leader);
-    this.hud.roster(net.scoreRows());
-    this.hud.scoreboard(net.scoreRows(), input.down('Tab'));
+    // **1回だけ作る。** 名簿と順位表で別々に呼んでいた頃は、
+    // 人数ぶんの入れ物を毎フレーム2組作って捨てていた
+    const rows = net.scoreRows();
+    this.hud.roster(rows);
+    this.hud.scoreboard(rows, input.down('Tab'));
     this.hud.netStatus(net.ping > 220 ? `回線が不安定です (${Math.round(net.ping)}ms)` : '');
     input.endFrame();
   }
@@ -2556,6 +2563,18 @@ class Game {
       if (b.t <= 0) this._blips.delete(id);
       else this._blipList.push(b);
     }
+
+    /* **地図を塗り直すのは毎フレームではない。**
+       168pxの枠でも、塗り直すたびに 焼いた地図の切り出し＋拡大＋円と点の描画 が走り、
+       そのうえ描き上がった絵を毎回画面へ送り直すことになる。60分の1秒ごとにやると、
+       小さい絵なのにパソコンが温まり続ける。
+
+       20回/秒にしてある。**他人の位置がサーバーから届くのが20回/秒**なので、
+       それより速く塗り直しても他人の点は1つも動かない（自分の向きだけが滑らかになるが、
+       168pxの地図でそこを見ている人はいない） */
+    this._mapAcc = (this._mapAcc ?? 0) + dt;
+    if (this._mapAcc < 1 / MAP_HZ) return;
+    this._mapAcc = 0;
 
     const p = this.player.collider.start;
     const versus = this.mode === 'versus';
