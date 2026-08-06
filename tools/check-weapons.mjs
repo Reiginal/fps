@@ -639,6 +639,34 @@ console.log('\n[モデル差し替え] 買ったモデルを被せられるか')
     ok(c.distanceTo(wc) < 0.01, `中心が元と同じ（${c.z.toFixed(3)} / ${wc.z.toFixed(3)}）`);
   }
 
+  /* **本物の道筋で測る。** ここが今回の肝。
+     銃だけを手で組んで測っている限り、親も縮尺も無いので正しく見える。
+     実際の場面では inner に0.86倍が掛かっていて構えの姿勢も乗っているので、
+     世界の座標で測ると**箱が1.16倍**になり、その箱へ合わせたモデルが
+     画面の右半分を覆う黒い板になった。**画面を撮って初めて分かった。**
+
+     あわせて、閃光と煙の板（銃より広い平らな面）を数えていないことも見る */
+  {
+    const cam2 = new THREE.PerspectiveCamera(75, 1.6, 0.05, 900);
+    const ws2 = new WeaponSystem(new THREE.Scene(), cam2,
+      new THREE.PerspectiveCamera(55, 1.6, 0.002, 12), new THREE.Scene());
+    const rifle = ws2.weapons[WEAPONS.findIndex((w) => w.id === 'rifle')];
+
+    // 組み立てただけの物（親も縮尺も無い）と、本物の道筋で測った物が同じであること
+    const bare = builtBox(WEAPONS.find((w) => w.id === 'rifle').build(WEAPONS.find((w) => w.id === 'rifle').view));
+    const real = builtBox(rifle.inner);
+    const bs = new THREE.Vector3();
+    const rs = new THREE.Vector3();
+    bare.getSize(bs);
+    real.getSize(rs);
+    ok(Math.abs(bs.z - rs.z) < 0.005,
+      `親や縮尺が付いても箱が変わらない（素 ${bs.z.toFixed(3)} / 本番 ${rs.z.toFixed(3)}）`);
+    ok(Math.abs(bs.x - rs.x) < 0.005, `幅も変わらない（素 ${bs.x.toFixed(3)} / 本番 ${rs.x.toFixed(3)}）`);
+
+    // 閃光の板は銃より広い（幅0.48）。数えていたら幅がそこまで膨らむ
+    ok(rs.x < 0.2, `閃光や煙の板を数えていない（幅 ${rs.x.toFixed(3)}。数えると0.48になる）`);
+  }
+
   // 手を除いた本体の箱が引ける。手まで入れると銃だけが大きくなる
   {
     const inner = new THREE.Group();
