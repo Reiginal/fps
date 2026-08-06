@@ -117,6 +117,11 @@ jobs:
       - name: 検査 電文の食い違い
         run: node tools/check-protocol.mjs
 
+      # 電文の項目名が揃っていても、中身のビットの読み替えがずれると
+      # 同じキーを押したのに片側だけ効かない。そこは実際に両方走らせて比べる
+      - name: 検査 手元とサーバーで移動が一致するか
+        run: node tools/check-parity.mjs
+
       - name: 検査 ログ
         run: node tools/check-logs.mjs
 
