@@ -2049,8 +2049,7 @@ class Game {
 
   /* 対戦の1フレーム。物理だけ60Hz固定で回す。
      可変dtのまま送ると、同じキーを同じ長さ押してもサーバーと到達位置が食い違う */
-  _versusFrame(dt) {
-    const input = this.input;
+  _versusFrame(dt, input) {
     const net = this.net;
     const player = this.player;
 
@@ -2643,9 +2642,12 @@ class Game {
         this.chat.open();
       }
       const input = typing ? this._noInput : this.input;
-      // 打っている間も、押した印は毎フレーム捨てる。
-      // 溜めたままにすると、打ち終わった瞬間に溜まっていた分が一度に効く
-      if (typing) this.input.endFrame();
+      // 打っている間も、押した印とマウスの移動量は毎フレーム捨てる。
+      // 溜めたままにすると、打ち終わった瞬間に溜まっていた分が一度に効く。
+      // 特にlookは、掴んだままなのでmousemoveが溜まり続け、捨てないと
+      // 打ち終わりに視点が一気に飛ぶ（_versusFrameは凍結inputを見るので
+      // 打っている間はtakeLook()を呼ばず、ここで捨てないと溜まりっぱなしになる）
+      if (typing) { this.input.endFrame(); this.input.takeLook(); }
 
       // 対戦では倒れている間の操作を受け付けない。復帰待ちの3秒に装填や持ち替えを
       // 通すと、湧いた瞬間の弾数がサーバーと食い違う
@@ -2686,7 +2688,7 @@ class Game {
       }
 
       if (this.mode === 'versus') {
-        this._versusFrame(dt);
+        this._versusFrame(dt, input);
       } else {
         this.player.update(dt, input, true);
         this.weapons.update(dt, input, this.player, {
