@@ -15,7 +15,8 @@
 //
 //   node tools/check-modes.mjs
 import '../server/dom-stub.js';
-import { PHASE, MODE_IDS, GUN_ORDER, MATCH, TICK_DT } from '../src/net/protocol.js';
+import { readFileSync } from 'node:fs';
+import { PHASE, MODE_IDS, GUN_ORDER, MATCH, TICK_DT, Sv } from '../src/net/protocol.js';
 
 const { getRoom } = await import('../server/room.js');
 const { buildWorld } = await import('../server/world.js');
@@ -220,6 +221,48 @@ console.log('\n[10] 決まりはサーバーだけが持っている');
   ok(gun.stagesOf(WEAPONS) === GUN_ORDER.length,
     `ガンゲームの段数は ${gun.stagesOf(WEAPONS)}（武器の並びと同じ）`);
   ok(modeOf('でたらめ').id === 'dm', '知らない名前はデスマッチへ寄せる');
+}
+
+console.log('\n[11] 選んだ遊び方が画面まで届く');
+/* **ここが抜けていた。** サーバー側は切り替わっているのに、
+   ロビーの電文に「今どれか」が入っていなかったので、押した側の画面は
+   前の物に印が付いたまま。**「押せないボタン」に見えていた。**
+   （項目を足す時に、間違えて発言の電文のほうへ入れていた） */
+{
+  clear();
+  room.phase = PHASE.WAIT;
+  room.setMode('dm');
+  const a = join('あき');
+  a.conn.sent.length = 0;
+  room.sendLobby();
+
+  const lobbyOf = (p) => [...p.conn.sent].reverse().find((m) => m.t === Sv.LOBBY);
+  ok(!!lobbyOf(a), 'ロビーの電文が届いている');
+  ok(lobbyOf(a).md === 'dm', `今の遊び方が入っている（${lobbyOf(a).md}）`);
+
+  for (const id of MODE_IDS) {
+    // 今と同じ物を押しても何も起きない（[1]で見ている）ので、一度別の物にしてから押す
+    room.setMode(MODE_IDS.find((x) => x !== id));
+    a.conn.sent.length = 0;
+    room.setMode(id);
+    const msg = lobbyOf(a);
+    ok(!!msg, `${id} … 押すとロビーが配り直される`);
+    ok(msg?.md === id, `${id} … 押した物が画面へ届く（${msg?.md}）`);
+  }
+  room.setMode('dm');
+
+  // 発言の電文には要らない。入れていたせいで、こちらに紛れ込んでいた
+  a.conn.sent.length = 0;
+  room.chat(a.slot, 'てすと');
+  const chat = a.conn.sent.find((m) => m.t === Sv.CHAT);
+  ok(!!chat && chat.m === 'てすと', '発言は届く');
+  ok(chat.md === undefined, '発言の電文に遊び方は入っていない');
+
+  // 読む側も同じ項目を見ているか
+  const client = readFileSync(new URL('../src/net/client.js', import.meta.url), 'utf8');
+  ok(/mode: m\.md/.test(client), '手元がロビーの md を読んでいる');
+  const lobby = readFileSync(new URL('../src/ui/lobby.js', import.meta.url), 'utf8');
+  ok(/if \(mode\) this\.mode = mode;/.test(lobby), '画面が届いた物へ印を付け替えている');
 }
 
 clear();

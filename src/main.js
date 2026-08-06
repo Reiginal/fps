@@ -442,9 +442,14 @@ class Game {
 
     /* 描いた1枚ごとの秒数。**遊び終わりに1回だけ数字にして送る。**
        毎フレーム送ったら、その通信でさらに重くなる。
-       上限を置くのは、長く遊ぶほど記憶を食い続けるのを止めるため
-       （2000枚＝60fpsで33秒ぶん。それより古い所は捨てる） */
-    this._frames = [];
+
+       **輪にして使い回す。** 最初は普通の配列に push して、溢れたら shift していたが、
+       shift は先頭を抜いて残り全部を1つずつ前へ詰める処理で、
+       2000件の配列を**毎フレーム**ずらすことになる。
+       測るための仕掛けが測られる物を重くしていたら本末転倒 */
+    this._frames = new Float64Array(FRAME_SAMPLES);
+    this._frameAt = 0;    // 次に書く場所
+    this._frameN = 0;     // 溜まった数（上限はFRAME_SAMPLES）
     this._lastTime = 0;
     this._invQ = new THREE.Quaternion();
     // 倒れている間の見回し。生きている間はnullで、倒れた瞬間に
@@ -1324,9 +1329,14 @@ class Game {
 
     /* 描いた1枚ごとの秒数。**遊び終わりに1回だけ数字にして送る。**
        毎フレーム送ったら、その通信でさらに重くなる。
-       上限を置くのは、長く遊ぶほど記憶を食い続けるのを止めるため
-       （2000枚＝60fpsで33秒ぶん。それより古い所は捨てる） */
-    this._frames = [];
+
+       **輪にして使い回す。** 最初は普通の配列に push して、溢れたら shift していたが、
+       shift は先頭を抜いて残り全部を1つずつ前へ詰める処理で、
+       2000件の配列を**毎フレーム**ずらすことになる。
+       測るための仕掛けが測られる物を重くしていたら本末転倒 */
+    this._frames = new Float64Array(FRAME_SAMPLES);
+    this._frameAt = 0;    // 次に書く場所
+    this._frameN = 0;     // 溜まった数（上限はFRAME_SAMPLES）
   }
 
   /* 自分が倒れた。撃たれた・爆風・落下の3経路から同じ形で入る。
@@ -2428,10 +2438,10 @@ class Game {
    * 送った後は捨てる。次の試合の数字に前の試合が混ざらないように
    */
   _reportPerf() {
-    const f = this._frames;
+    const n = this._frameN;
     // 短すぎる回は数字にならない（湧いた直後に落ちた等）
-    if (f.length < 120) { this._frames = []; return; }
-    const sorted = f.slice().sort((a, b) => a - b);
+    if (n < 120) { this._frameN = 0; this._frameAt = 0; return; }
+    const sorted = Array.from(this._frames.subarray(0, n)).sort((a, b) => a - b);
     const at = (q) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))];
     const fps = (dt) => (dt > 0 ? Math.round(1 / dt) : 0);
     this.diag?.perf({
@@ -2441,7 +2451,8 @@ class Game {
       players: this.mode === 'versus' ? (this.net?.players.size | 0) : 1,
       wave: this.mode === 'solo' ? this.director.wave : null,
     });
-    this._frames = [];
+    this._frameN = 0;
+    this._frameAt = 0;
   }
 
   /**
@@ -2455,9 +2466,13 @@ class Game {
   _updateVoiceHud() {
     const v = this.voice;
     if (!v || this.mode !== 'versus' || !v.enabled) { this.hud.voice('off'); return; }
-    if (v.micDenied) { this.hud.voice('nomic', 'マイクが使えません（聞く側）'); return; }
-    if (v.talking) { this.hud.voice('talk', `送信中（${v.liveCount}人）`); return; }
-    this.hud.voice('off');
+    if (!v.talking) { this.hud.voice('off'); return; }
+    // マイクが使えない時も、押している間は出す。**押しても何も起きない理由**が
+    // ここに出ていないと、キーが効いていないのか声が届いていないのか分からない
+    if (v.micDenied) { this.hud.voice('nomic', 'マイクが使えません'); return; }
+    // 繋がっている人数まで出す。0人なら「押せてはいるが届いていない」と分かる
+    const n = v.liveCount;
+    this.hud.voice('talk', n > 0 ? `送信中 ${n}人へ` : '送信中（相手なし）');
   }
 
   /* ------------------------------------------ 地面に落ちている物 */
@@ -2582,8 +2597,9 @@ class Game {
        描く物が少ない画面のぶんだけ良く見える）。
        頭を押さえた後のdtを使うので、タブを離していた間は0.1で頭打ちになる */
     if (this.state === 'playing' && dt > 0) {
-      this._frames.push(dt);
-      if (this._frames.length > FRAME_SAMPLES) this._frames.shift();
+      this._frames[this._frameAt] = dt;
+      this._frameAt = (this._frameAt + 1) % FRAME_SAMPLES;
+      if (this._frameN < FRAME_SAMPLES) this._frameN++;
     }
 
     const playing = this.state === 'playing';

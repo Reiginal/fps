@@ -557,7 +557,9 @@
   /* 十字の少し下。**視線の先に近い所に置く。**
      画面の隅だと、撃ち合いの最中に見に行けない（見に行った時点で撃たれる） */
   #voice {
-    position: absolute; left: 50%; top: calc(50% + 46px); transform: translateX(-50%);
+    /* #hudの外にあるので fixed。z-indexはロビー(10前後)より上に置く */
+    position: fixed; left: 50%; top: calc(50% + 46px); transform: translateX(-50%);
+    z-index: 25; pointer-events: none;
     display: flex; align-items: center; gap: 6px;
     font-size: 10px; letter-spacing: .2em; color: var(--ok);
     text-shadow: 0 0 5px rgba(0,0,0,.9);
@@ -884,10 +886,6 @@
   <!-- 実績の解除。キルログと別の列にする（撃った直後に出るので混ぜると読まれない） -->
   <div id="achfeed"></div>
 
-  <!-- 声の状態。**自分が今送っているかどうかが見えないのが一番痛い。**
-       押しているつもりで押せていない／離したつもりで押しっぱなし、が
-       どちらも起きる。押している間だけ光らせる -->
-  <div id="voice" class="hidden"><i></i><span id="voiceText">送信中</span></div>
 
   <div id="scoreboard" class="hidden">
     <div class="sbtitle">戦績</div>
@@ -987,6 +985,14 @@
      Windowsの人から「Fが効かない」「武器が変えられない」と言われた時、
      こちらには何も情報が無く、何回試してもらっても推測しか増えなかった。
      遊ぶ側が読める言葉で状態を出して、次の1回で原因が分かる形にする -->
+<!-- 声の状態。**自分が今送っているかどうかが見えないのが一番痛い。**
+     押しているつもりで押せていない／離したつもりで押しっぱなし、がどちらも起きる。
+
+     **#hudの外へ置いてある。** 中に入れていた時は、HUDが隠れている間
+     （＝ロビーにいる間）は一緒に消えていた。**ロビーが一番「効いているか確かめたい」場所**
+     なのに、そこで押しても何も出なかった -->
+<div id="voice" class="hidden"><i></i><span id="voiceText">送信中</span></div>
+
 <div id="diag" class="hidden"></div>
 
 <div id="chat" class="hidden">

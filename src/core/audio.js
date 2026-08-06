@@ -1389,32 +1389,40 @@ export class AudioEngine {
     this._reap([fg], 1.6);
     floor.start(t + 0.48); floor.stop(t + 1.0);
 
-    /* 4. 耳鳴り。**ここを直したのが一番効いた。**
-       前は3.1kHzの純音1本が全体の35%を占めていて、そこが安っぽさの正体だった。
-       減らすと、他の帯の取り分がそのぶん上がる（中低 17.7 → 23.7）。
-       2本を少しずらして重ねると唸りが出て「機械の音」から離れる。
-       細いノイズを足すのは、純音のままだと耳が「合成した音」だと聞き分けるため */
-    for (const [f0, f1, lv] of [[3100, 2350, 0.013], [3160, 2402, 0.010]]) {
-      const ring = ctx.createOscillator();
-      ring.type = 'sine';
-      ring.frequency.setValueAtTime(f0, t);
-      ring.frequency.exponentialRampToValueAtTime(f1, t + 1.6);
-      const rg = ctx.createGain();
-      ring.connect(rg); rg.connect(this.postBus);
-      this._env(rg, t + 0.05, lv, 0.05, 1.2);
-      this._reap([rg], 2.2);
-      ring.start(t); ring.stop(t + 1.9);
-    }
-    const air = this._noiseSource(1.0);
+    /* 4. 余韻。**純音（サイン波1本）は使わない。**
+       前は3.1kHzのサイン波を「耳鳴り」として鳴らしていた。音量を35%から
+       13%まで落としても、**「甲高いピュー」が不快**だと言われた。
+       音量の問題ではなく、**純音そのものが耳につく**のが原因。
+       サイン波は自然界にほぼ無い音なので、小さくても耳が必ず拾い上げる。
+
+       替わりに、低めの雑音を1枚だけ残す。同じ「音が切れない」役目を果たしつつ、
+       高さを持たないので「鳴っている」と意識されない。
+       中心を900Hzまで下げてあるのは、2kHzより上に山があると
+       どんな作り方でも「ピー」に寄るため */
+    const air = this._noiseSource(0.7);
     const ap = ctx.createBiquadFilter();
     ap.type = 'bandpass';
-    ap.frequency.value = 2700;
-    ap.Q.value = 3.2;
+    ap.frequency.setValueAtTime(900, t);
+    ap.frequency.exponentialRampToValueAtTime(420, t + 1.1);
+    ap.Q.value = 1.1;
     const ag = ctx.createGain();
     air.connect(ap); ap.connect(ag); ag.connect(this.postBus);
-    this._env(ag, t + 0.05, 0.028, 0.12, 1.1);
-    this._reap([ag], 2.0);
-    air.start(t); air.stop(t + 1.8);
+    this._env(ag, t + 0.05, 0.12, 0.12, 0.9);
+    this._reap([ag], 1.8);
+    air.start(t); air.stop(t + 1.6);
+
+    /* 遠くの低い唸り。倒れた後の「まだ世界は続いている」を残す。
+       ここも高さを持たせない（音程が聞こえると、それはそれで耳につく）ので、
+       低い所へ薄く1枚だけ */
+    const hum = ctx.createOscillator();
+    hum.type = 'sine';
+    hum.frequency.setValueAtTime(74, t);
+    hum.frequency.exponentialRampToValueAtTime(58, t + 1.4);
+    const hg = ctx.createGain();
+    hum.connect(hg); hg.connect(this.postBus);
+    this._env(hg, t + 0.1, 0.1, 0.2, 1.1);
+    this._reap([hg], 1.8);
+    hum.start(t); hum.stop(t + 1.6);
   }
 
   /**
