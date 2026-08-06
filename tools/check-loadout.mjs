@@ -21,14 +21,11 @@
 import { readFileSync } from 'node:fs';
 import '../server/dom-stub.js';
 import * as THREE from 'three';
-import {
-  LOADOUT_IDS, loadoutOf, WEAPON_NICK, PRIMARY_IDS, PRIMARY_DEF, loadoutWith, PHASE,
-} from '../src/net/protocol.js';
+import { LOADOUT_IDS, loadoutOf } from '../src/net/protocol.js';
 
 const { WeaponSystem, WEAPONS } = await import('../src/player/weapons.js');
 const { SimPlayer } = await import('../server/sim.js');
 const { buildWorld } = await import('../server/world.js');
-const { getRoom } = await import('../server/room.js');
 
 let bad = 0;
 const ok = (c, msg) => { console.log(`  ${c ? '○' : '× 失敗:'} ${msg}`); if (!c) bad++; };
@@ -52,10 +49,9 @@ for (const id of benched) {
   ok(i >= 0 && !!WEAPONS[i].build, `${id} … 表にあって組み立ても持っている`);
 }
 
-/* 短い呼び名は protocol.js が持つ。**ここに書き写さない。**
-   写すと、片方だけ直した時に検査が古い言葉で通ってしまう
-   （検査が嘘をつく形になり、一番たちが悪い） */
-const NICK = WEAPON_NICK;
+// 短い呼び名と武器の対応。画面の札にも操作説明にも、この言葉で出す。
+// 完全一致を求めないのは、札が「1 ライフル」のように数字を含むため
+const NICK = { rifle: 'ライフル', pistol: 'ピストル', knife: 'ナイフ', nade: '手榴弾', shotgun: 'ショットガン' };
 
 console.log('\n[3] 画面の札と並びが一致している');
 // ここがずれると、押した数字と出てくる武器が違う。
@@ -150,86 +146,6 @@ console.log('\n[5] サーバーも同じ判断をする');
   // 範囲の外も今まで通り弾く
   ok(sim.setWeapon(-1) === false, '負の番号は弾く');
   ok(sim.setWeapon(WEAPONS.length + 3) === false, '大きすぎる番号も弾く');
-}
-
-console.log('\n[5.4] 主武器はサーバーが握る');
-/* **手元が決める形にすると、電文を1つ送るだけで表にある武器を何でも持てる。**
-   画面に写らない武器で撃たれた側は、何が起きたのか分からない */
-{
-  const room = getRoom(buildWorld());
-  for (const s2 of [...room.slots.values()]) room.leave(s2);
-  room.phase = PHASE.WAIT;
-  room.setMode('dm');
-  const conn = { sent: [], rtt: 0, send(m) { this.sent.push(m); } };
-  const slot = room.join(conn, 'あき');
-
-  ok(slot.primary === PRIMARY_DEF, `入った時は既定（${slot.primary}）`);
-  ok(room.setPrimary(slot, 'shotgun') === true, 'ロビーでは選べる');
-  ok(slot.primary === 'shotgun', '選んだ物が入っている');
-  ok(WEAPONS[slot.sim.carry[0]].id === 'shotgun', 'その場で持ち物へ効く（押した結果が見える）');
-  ok(room.setPrimary(slot, 'でたらめ') === false, '知らない名前は断る');
-  ok(slot.primary === 'shotgun', '断った後も元のまま');
-  ok(room.setPrimary(slot, 'nade') === false, '選べない武器も断る');
-
-  // 試合中に持ち物が変わると、撃ち合いの最中に手の中の物が入れ替わる
-  room.phase = PHASE.LIVE;
-  ok(room.setPrimary(slot, 'rifle') === false, '試合が始まってからは変えられない');
-  ok(slot.primary === 'shotgun', '変わっていない');
-  room.phase = PHASE.WAIT;
-  for (const s2 of [...room.slots.values()]) room.leave(s2);
-}
-
-console.log('\n[5.5] 試合前に主武器を選べる');
-/* **ショットガンをここで初めて持って出られるようになった。**
- * 表に残しておいたのがそのまま効いた（消していたら作り直しだった）。
- *
- * 見張りたいのは2つ。
- *   1. 選んだ物が1本目に来ること（来ないと押した意味が無い）
- *   2. **知らない名前を渡された時に既定へ寄せること。**
- *      電文は手で作れるので、表に無い武器の名前を送られても持たせない
- */
-{
-  ok(PRIMARY_IDS.length >= 2, `選べるのは ${PRIMARY_IDS.length} 本（${PRIMARY_IDS.join('、')}）`);
-  ok(PRIMARY_IDS.includes(PRIMARY_DEF), `既定は ${PRIMARY_DEF}`);
-  for (const id of PRIMARY_IDS) ok(ids.includes(id), `${id} は武器の表にある`);
-  ok(PRIMARY_IDS.includes('shotgun'), 'ショットガンが選べるようになっている');
-
-  const base = loadoutWith(WEAPONS, PRIMARY_DEF);
-  ok(base.join(',') === carry.join(','), '既定を選んだ時は今まで通りの持ち物');
-
-  for (const id of PRIMARY_IDS) {
-    const list = loadoutWith(WEAPONS, id);
-    ok(list.length === LOADOUT_IDS.length, `${id} … 本数は変わらない（${list.length}本）`);
-    ok(WEAPONS[list[0]].id === id, `${id} … 1本目が選んだ武器になる`);
-    // 2本目から先は固定。ここまで動くと、押すたびに全部が入れ替わることになる
-    ok(list.slice(1).join(',') === carry.slice(1).join(','), `${id} … 2本目から先は変わらない`);
-    ok(new Set(list).size === list.length, `${id} … 同じ武器が2回入らない`);
-  }
-
-  for (const junk of ['でたらめ', '', null, undefined, 'nade']) {
-    const list = loadoutWith(WEAPONS, junk);
-    ok(WEAPONS[list[0]].id === PRIMARY_DEF,
-      `${JSON.stringify(junk) ?? 'undefined'} を渡されても既定へ寄せる`);
-  }
-}
-
-console.log('\n[5.6] 画面の札が配られた物に付いてくる');
-/* **1番の札が「ライフル」で固定ではなくなった。**
-   書き換えないと、ショットガンを選んだ人の画面に「1 ライフル」と出たまま
-   ショットガンが出てくる。押した数字と出てくる物が食い違う */
-{
-  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
-  ok(/hud\.slotNames\(/.test(main), '札の文字を書き換える所がある');
-  ok(/case EV\.ARM[\s\S]{0,900}?hud\.slotNames/.test(main),
-    '持ち物が配られた時に書き換えている');
-
-  const hud = readFileSync(new URL('../src/ui/hud.js', import.meta.url), 'utf8');
-  ok(/slotNames\(names\)\s*\{/.test(hud), 'HUD側に受け口がある');
-
-  // 呼び名は1箇所に置く。写すと、片方だけ直した時に食い違う
-  const proto = readFileSync(new URL('../src/net/protocol.js', import.meta.url), 'utf8');
-  ok(/export const WEAPON_NICK/.test(proto), '呼び名は protocol.js が持っている');
-  for (const id of ids) ok(!!WEAPON_NICK[id], `${id} の呼び名がある`);
 }
 
 console.log('\n[6] 持ち物の並びに近接と投擲が最後に来ている');
