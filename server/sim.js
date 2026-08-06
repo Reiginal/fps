@@ -33,6 +33,11 @@ export const FALLBACK_WEAPONS = [
     range: 40, falloffStart: 8, falloffEnd: 26, falloffMin: 0.18,
   },
   {
+    id: 'pistol', name: 'P-9 サイドアーム', damage: 26, rpm: 400, pellets: 1,
+    mag: 15, reloadTime: 1.55, adsTime: 0.11,
+    range: 70, falloffStart: 18, falloffEnd: 46, falloffMin: 0.42,
+  },
+  {
     id: 'knife', name: 'ナイフ', damage: 70, rpm: 95, pellets: 1,
     mag: 9999, reloadTime: 0, adsTime: 0.16,
     range: 1.8, falloffStart: 1.8, falloffEnd: 1.8, falloffMin: 1.0,
