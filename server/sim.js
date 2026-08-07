@@ -24,7 +24,7 @@ import {
 export const FALLBACK_WEAPONS = [
   {
     id: 'rifle', name: 'MK-4 カービン', damage: 27, rpm: 640, pellets: 1,
-    mag: 30, reloadTime: 2.15, adsTime: 0.16,
+    mag: 25, reloadTime: 2.15, adsTime: 0.16,
     range: 120, falloffStart: 42, falloffEnd: 95, falloffMin: 0.5,
   },
   {
