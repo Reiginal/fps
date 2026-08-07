@@ -2705,8 +2705,10 @@ class Game {
       this.diag?.setState('chatHint', this._chatHintT > 0 ? '発言は対戦でだけ使えます' : '');
       // Pでスクショをクリップボードへ（課題.md #7）。全画面＋マウス固定なので
       // OSのスクショが撮りにくく、見た目の不具合を言葉だけで詰めることになっていた。
-      // typing中はchat.js側がstopPropagationしているのでPはここまで届かない
-      if (!typing && this.input.pressed('KeyP')) this._screenshot();
+      // typing中はchat.js側がstopPropagationしているのでPはここまで届かない。
+      // ここでは押した印だけ立てる。実際に読むのはこの回のcomposer.render()の後
+      // （下の_wantShotを参照。ここで即座に読むと真っ白になる不具合があった）
+      if (!typing && this.input.pressed('KeyP')) this._wantShot = true;
       this._shotMsgT = Math.max(0, (this._shotMsgT || 0) - dt);
       this.diag?.setState('shot', this._shotMsgT > 0 ? (this._shotMsg || '') : '');
       const input = typing ? this._noInput : this.input;
@@ -2832,6 +2834,11 @@ class Game {
     this._updateSunCascades();
 
     this.fx.composer.render();
+
+    // Pの押した印はここで拾う。preserveDrawingBufferを立てていないので、
+    // 描いた直後・ブラウザに制御を返す前でないと中身が読めない
+    // （render()より前で読んでいた時は、真っ白なままコピーされることがあった）
+    if (this._wantShot) { this._wantShot = false; this._screenshot(); }
   }
 }
 
