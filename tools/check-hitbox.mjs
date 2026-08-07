@@ -143,5 +143,18 @@ console.log('\n[4] 当たった弾のうち頭になる割合');
   ok(pct > 4 && pct < 16, `頭になるのは ${pct.toFixed(1)}%（4〜16%に収まっている）`);
 }
 
+console.log('\n[軽さ] 判定づくりのために全身の行列を強制計算し直していない');
+/* root.updateMatrixWorld(true)は69個の節を毎回強制で計算し直すうえ、
+   同じフレームの描画時にthree側がもう一度計算する（二重払い）。
+   getWorldPosition()が先祖の行列を自分で計算するので、読みたい骨のぶんで足りる。
+   1体2〜3回×最大22体で毎フレーム4千回を超える行列合成になっていた */
+{
+  const { readFileSync } = await import('node:fs');
+  const enemy = readFileSync(new URL('../src/ai/enemy.js', import.meta.url), 'utf8');
+  const remote = readFileSync(new URL('../src/net/remote.js', import.meta.url), 'utf8');
+  ok(!/this\.root\.updateMatrixWorld\(true\)/.test(enemy), '敵側に全身の強制計算が無い');
+  ok(!/^\s*root\.updateMatrixWorld\(true\)/m.test(remote), '対戦の相手側にも無い');
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);

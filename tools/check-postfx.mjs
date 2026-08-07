@@ -140,5 +140,19 @@ console.log('\n[霧] 霧の向きが、時刻で動く太陽と同期してい�
   ok(sunDirAt >= 0 && callAt > sunDirAt, 'main.jsがSUN_DIRを決めた直後に渡している');
 }
 
+console.log('\n[5] AOから外す物を毎フレーム探し直していない');
+/* AOの法線パスは半透明の板を隠してから描く。前はその「隠す物探し」を
+   毎フレームscene.traverse()（2千個超の全訪問）でやっていた。
+   候補は起動時のプールでほぼ固定なので、一覧を使い回し、
+   増え物の取りこぼしは2秒に1回の組み直しで自己回復する */
+{
+  const src = readFileSync(new URL('../src/core/postfx.js', import.meta.url), 'utf8');
+  const override = src.slice(src.indexOf('ao._overrideVisibility'), src.indexOf('composer.addPass(ao)'));
+  ok(/aoScanIn = 120/.test(src), '組み直しの間隔が決めてある（120フレーム=2秒）');
+  ok(/if \(--aoScanIn <= 0\)/.test(override), '間隔が来た時だけ全走査する');
+  ok(/if \(!o\.visible\) continue;/.test(override),
+    '元から隠れている物は触らない（戻す側が一律trueにするため）');
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);

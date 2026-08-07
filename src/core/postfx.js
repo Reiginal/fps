@@ -1383,15 +1383,35 @@ export function createComposer(renderer, scene, camera, viewScene, viewCamera) {
   // 半透明の板(着弾痕・曳光弾・マズルフラッシュ・煙)まで法線バッファに描くと、
   // 手前に偽の遮蔽物ができて撃つたびに画面が暗くなる。深度を書かない物はAOの計算から外す
   const aoHidden = ao._visibilityCache;
+  /* 外す候補を毎フレームscene.traverse()で探さない。
+     traverseはシーンの全部（地形550＋敵の関節×体数＋粒＋…で2千個超）を
+     コールバック付きで訪ねるので、探すこと自体が毎フレームのCPU仕事になる。
+     候補（粒・曳光弾・着弾痕・貼り分けの板）は起動時に組んだプールでほぼ固定なので、
+     一覧を作って使い回す。
+     ただし完全な固定と決め打ちすると、後から増えた半透明の板を外し損ねて
+     「撃つと画面が暗くなる」が再発しうる。そこで2秒に1回だけ全走査で一覧を
+     組み直す——増え物を見逃しても最長2秒で自己回復する保険 */
+  const aoCands = [];
+  let aoScanIn = 0;
+  const aoPick = (o) => {
+    const m = o.material;
+    if (o.isPoints || o.isLine || o.isLine2 || o.isSprite || (m && m.depthWrite === false)) {
+      aoCands.push(o);
+    }
+  };
   ao._overrideVisibility = function () {
-    this.scene.traverse((o) => {
-      if (!o.visible) return;
-      const m = o.material;
-      if (o.isPoints || o.isLine || o.isLine2 || o.isSprite || (m && m.depthWrite === false)) {
-        o.visible = false;
-        aoHidden.push(o);
-      }
-    });
+    if (--aoScanIn <= 0) {
+      aoScanIn = 120;
+      aoCands.length = 0;
+      this.scene.traverse(aoPick);
+    }
+    for (const o of aoCands) {
+      // 見えていない物は触らない。触ると、戻す時に「元から隠れていた物」まで
+      // 表示されてしまう（戻す側は一律visible=trueにするため）
+      if (!o.visible) continue;
+      o.visible = false;
+      aoHidden.push(o);
+    }
   };
 
   // GTAOは法線バッファを作るのに renderer.render() をもう一度呼ぶ。そのままだと
