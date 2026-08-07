@@ -17,7 +17,6 @@ import { NetMenu, NET_MSG } from './ui/netmenu.js';
 import { SettingsMenu } from './ui/settings.js';
 import { loadSettings, saveSetting } from './core/settings.js';
 import { AutoQuality } from './core/autoquality.js';
-import { StatsMenu } from './ui/statsmenu.js';
 import { VoiceChat, PTT_CODE } from './net/voice.js';
 import { emptyTally, mergeTally, loadStats, saveStats, newlyUnlocked } from './core/stats.js';
 import { Lobby } from './ui/lobby.js';
@@ -961,11 +960,8 @@ class Game {
     };
     menu.onSettings = () => this.settings.show();
 
-    /* 戦績と実績。開くたびに端末から読み直すのではなく、まだ書いていない今回ぶんも
-       足した物を渡す。**渡さないと、遊んだ直後に開いた時だけ数字が古い。**
-       「今30人倒したのに通算が増えていない」は、壊れているようにしか見えない */
-    this.statsMenu = new StatsMenu();
-    menu.onStats = () => this.statsMenu.show(this.totalStats);
+    // 戦績の画面はここにあったが消した（2026-08-07、「誰も見ない」）。
+    // 記録そのもの(stats.js)は死亡画面の自己ベストと実績の解除通知が使うので残っている
     menu.onQuit = () => this._quitGame();
 
     // タブを閉じる・別のタブへ移る時に、今回ぶんを書き出す。
@@ -1066,7 +1062,6 @@ class Game {
     if (this.mode === 'versus') this._quitMatch();
     this.menu.hide();
     this.settings?.hide();
-    this.statsMenu?.hide();
     this.hud.show(false);
     this.hud.hideOverlay();
     this.chat.hide();
@@ -1347,7 +1342,7 @@ class Game {
       // 設定も同じで、一時停止から開いている最中にロックを取られると
       // つまみを掴んだ瞬間に試合へ戻ってしまう
       if (this.menu?.isOpen || this.lobby?.isOpen
-        || this.settings?.isOpen || this.statsMenu?.isOpen) return;
+        || this.settings?.isOpen) return;
       this.audio.init();
       this.audio.resume();
       if (this.state === 'dead') this._restart();
