@@ -62,6 +62,9 @@ const CAMO_NAME = { 0x5f6a4a: 'オリーブ', 0x7a6949: 'タン', 0x5e626b: 'グ
 const HEAD_NAME = ['ヘルメット', 'ブーニー', 'キャップ', '素頭'];
 for (let i = 0; i < CHARACTERS.length; i++) {
   const c = CHARACTERS[i];
+  /* 外部モデルの枠は、見た目がGLBから来るので迷彩の名前・色と対応しない。
+     この枠の実物が壊れていないかは[8]が実物を読んで見ている */
+  if (c.model) continue;
   const v = variantOf(c.seed);
   const camo = CAMO_NAME[v.camo.fatigue];
   const head = HEAD_NAME[v.headGear];
@@ -181,6 +184,65 @@ console.log('\n[7] ロビーのプレビューに、兵士が丸ごと収まっ�
     // 背丈が画面の半分は無いと、迷彩の違いが読めない
     const bodyH = (headTop - footLow) / 2 * 100;
     ok(bodyH > 50, `兵士の背丈が画面の${bodyH.toFixed(0)}%（50%以上）`);
+  }
+}
+
+console.log('\n[8] 外部モデルの枠（model欄が付いた物）');
+/* CHARACTERSにmodel:'soldier'と書くと、その枠だけ外部のGLB
+   (assets/models/<model>.glb)で出る。書いたのにファイルが無い・
+   クリップの名前が違う・頭の骨が見つからない、のどれでも
+   **黙ってコード製の代役に落ちる**作りなので、壊れても画面には何も出ない。
+   ここで実物を読んで確かめる */
+{
+  const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
+  const withModel = CHARACTERS.filter((c) => c.model);
+  ok(withModel.length > 0, `外部モデルの枠が ${withModel.length} 個ある`);
+  for (const c of withModel) {
+    const path = new URL(`../assets/models/chars/${c.model}.glb`, import.meta.url);
+    let buf = null;
+    try { buf = readFileSync(path); } catch { /* 下で落とす */ }
+    ok(!!buf, `${c.model}.glb … ファイルが置いてある`);
+    if (!buf) continue;
+
+    const gltf = await new Promise((res, rej) => new GLTFLoader().parse(
+      buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength), '', res, rej,
+    )).catch(() => null);
+    ok(!!gltf, `${c.model}.glb … GLBとして読める`);
+    if (!gltf) continue;
+
+    // glbchar.jsが名前で引くクリップ。1本でも欠けると歩様が混ざらない
+    const names = gltf.animations.map((a) => a.name);
+    for (const need of ['Idle', 'Walk', 'Run']) {
+      ok(names.includes(need), `${c.model} … クリップ ${need} がある（${names.join('、')}）`);
+    }
+
+    let skinned = null;
+    let head = null;
+    gltf.scene.traverse((o) => {
+      if (o.isSkinnedMesh && !skinned) skinned = o;
+      if (o.isBone && /Head$/.test(o.name)) head = o;
+    });
+    ok(!!skinned, `${c.model} … スキンメッシュがある（無いと骨で動かない）`);
+    ok(!!head, `${c.model} … 頭の骨がある（名札と銃声の位置に使う）`);
+
+    gltf.scene.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(gltf.scene);
+    const h = box.max.y - box.min.y;
+    ok(h > 1.4 && h < 2.2, `${c.model} … 人の背丈の範囲（${h.toFixed(2)}m）`);
+
+    /* 前が-zを向いていること。つま先の骨が腰よりも-z側に出ているかで測る。
+       裏返っていると、全員が後ろ歩きで詰めてくる画になる */
+    if (skinned) {
+      const v = new THREE.Vector3();
+      const bone = (re) => skinned.skeleton.bones.find((b) => re.test(b.name));
+      const toe = bone(/ToeBase/);
+      const hips = bone(/Hips/);
+      if (toe && hips) {
+        toe.getWorldPosition(v); const toeZ = v.z;
+        hips.getWorldPosition(v); const hipsZ = v.z;
+        ok(toeZ < hipsZ, `${c.model} … 前が-zを向いている（つま先z=${toeZ.toFixed(2)} 腰z=${hipsZ.toFixed(2)}）`);
+      }
+    }
   }
 }
 
