@@ -77,6 +77,9 @@ const mkStore = () => {
   return {
     getItem: (k) => (m.has(k) ? m.get(k) : null),
     setItem: (k, v) => m.set(k, String(v)),
+    // 消す口も本物と揃える。無いと、消す系(既定に戻す・強制リセット)が
+    // 例外→握り潰しで**何もしないのに検査は通る**形になる（実際になった）
+    removeItem: (k) => m.delete(k),
     _map: m,
   };
 };
