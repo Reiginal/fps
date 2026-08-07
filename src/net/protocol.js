@@ -498,16 +498,20 @@ export const TEAM_COLORS = ['#63d2ff', '#ffab5e'];
 // （tools/check-character.mjs が今もばらけていることを測っている）。
 // 見た目に効くだけで、当たり判定にも足の速さにも一切効かない。
 // ここに強さの差を入れると、選んだ物で有利不利が出る
+/* modelが付いた枠は、見た目だけ外部の3Dモデル(assets/models/chars/<model>.glb)で出す。
+   読み込みが届くまで・失敗した時はseedのコード製の姿で出る(だからseedも残す)。
+   見た目にしか効かない。当たり判定も足の速さも全員同じ(HITBOX/サーバー側)。
+
+   **今は外部モデルの品評会の並び(2026-08-07)。** どれを本採用するか選ぶために、
+   取れた素材を全部プレビューへ出している。最後の1枠は比較用のコード製。
+   決まったら、この並びごと作り直す(出どころと割り切りはassets/models/CREDITS.md) */
 export const CHARACTERS = [
-  { seed: 1, name: 'オリーブ／キャップ', color: '#5f6a4a' },
-  { seed: 13, name: 'オリーブ／ヘルメット', color: '#5f6a4a' },
-  { seed: 3, name: 'グレー／ヘルメット', color: '#5e626b' },
-  { seed: 2, name: 'グレー／素頭', color: '#5e626b' },
-  { seed: 14, name: 'タン／ブーニー', color: '#7a6949' },
-  /* modelが付いた枠は、見た目だけ外部の3Dモデル(assets/models/chars/<model>.glb)で出す試験枠。
-     読み込みが届くまで・失敗した時はseedのコード製の姿で出る(だからseedも残す)。
-     見た目にしか効かない。当たり判定も足の速さも全員同じ(HITBOX/サーバー側) */
-  { seed: 8, name: '外部モデル（試験）', color: '#4a5568', model: 'soldier' },
+  { seed: 1, name: '兵士（外部）', color: '#4a5568', model: 'soldier' },
+  { seed: 13, name: 'マネキン（外部）', color: '#8b95a1', model: 'xbot' },
+  { seed: 3, name: 'ロボ（外部）', color: '#d9a13b', model: 'robot' },
+  { seed: 2, name: '作業員（外部・歩きのみ）', color: '#3f6d5a', model: 'cesium' },
+  { seed: 14, name: 'ダンサー（外部・踊りのみ）', color: '#8a4f8d', model: 'michelle' },
+  { seed: 8, name: 'タン／素頭', color: '#7a6949' },
 ];
 
 /** 番号から兵士を引く。範囲の外は0番へ寄せる（知らない番号が来ても姿が消えない） */

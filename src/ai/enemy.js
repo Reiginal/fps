@@ -1557,6 +1557,13 @@ export class Enemy {
       this._glbVis = v;
       // コード製の体を隠す。骨は動き続けるが、面は描かない
       for (const m of this.meshes) m.visible = false;
+      /* **銃だけは見せたまま残す。** 銃は隠れた骨(gunMount)に付いていて、
+         狙いへの追従・撃った時の跳ね・装填で下げる・死んだら落として転がる、
+         まで全部そちらで動き続けている。消すと丸腰で撃つ嘘になるし、
+         出し直すだけでその全部がそのまま画に出る。
+         手(コード製)は別の入れ物なので出ない＝握ってはいない(試験の割り切り。
+         ちゃんと握らせるには武器持ちのアニメクリップが要る) */
+      this.parts.gun.traverse((o) => { if (o.isMesh) o.visible = true; });
     }
     const v = this._glbVis;
     v.root.rotation.set(0, 0, 0);
@@ -2231,20 +2238,12 @@ export class Enemy {
     const t = this.deathTime;
     const p = this.parts;
 
-    /* 外部モデルの見た目(試験)。倒れるクリップが無いので体ごと倒す。
-       見えない骨の死に方(下のdeathKind)はそのまま進み、rootへ掛かる
-       持ち上げ・傾き(_conformToGround)はこちらの見た目にもそのまま乗る */
-    if (this._glbVis) {
-      const v = this._glbVis;
-      if (!this._glbFall) {
-        this._glbFall = Math.random() < 0.5 ? 1 : -1;
-        v.mixer.timeScale = 0;   // 待機のまま倒すと、死体が呼吸して見える
-      }
-      const k = clamp(t / 0.75, 0, 1);
-      const fall = (1 - Math.pow(1 - k, 3)) * this._glbFall * Math.PI * 0.5;
-      v.root.rotation.x = fall;
-      // 足元を軸に倒すので、胴の太さのぶん持ち上げないと床にめり込む
-      v.root.position.y = Math.abs(Math.sin(fall)) * 0.24;
+    /* 外部モデルの見た目(試験)は、この関数の末尾で倒す。
+       コード製の死に方が下でrootを回すので、その後に合計で90度になるよう
+       こちらが補う形にしないと、二重に回って裏返る */
+    if (this._glbVis && !this._glbFall) {
+      this._glbFall = Math.random() < 0.5 ? 1 : -1;
+      this._glbVis.mixer.timeScale = 0;   // 待機のまま倒すと、死体が呼吸して見える
     }
 
     // 空中で撃たれた個体がその場で固まると一気に嘘くさい。倒れる間は落ちる
@@ -2375,6 +2374,25 @@ export class Enemy {
 
     // 足元の暗がりは死体にも要る。動かなくなった位置に置いたままにする
     this._updateContact();
+
+    /* 外部モデルの見た目(試験)。倒れるクリップが無いので体ごと倒す。
+       コード製の死に方は倒れ方の種類によってrootを回す量がばらばら
+       （ほぼ全部rootで倒す型も、骨の折り畳みが主でrootは少しの型もある）。
+       骨の折り畳みは隠れて見えないので、**rootの回転と合わせて合計がちょうど
+       90度になるぶんだけ**をこちらの入れ物へ足す。rootの後に計算しないと
+       二重に回って裏返る（実際に裏返った）。横の傾き(z)と地形への馴染みは
+       rootのままこちらにも乗る */
+    if (this._glbVis) {
+      const v = this._glbVis;
+      const k = clamp(t / 0.75, 0, 1);
+      const ease = 1 - Math.pow(1 - k, 3);
+      // 倒す向きはrootが既に回り始めていればそちらへ、まだなら抽選した側へ
+      const dir = Math.abs(this.root.rotation.x) > 0.25
+        ? Math.sign(this.root.rotation.x) : this._glbFall;
+      v.root.rotation.x = ease * dir * Math.PI * 0.5 - this.root.rotation.x;
+      // 足元を軸に倒すので、胴の太さのぶん持ち上げないと床にめり込む
+      v.root.position.y = ease * 0.24;
+    }
 
     // 時間で消さない。自分が倒した死体が目の前で溶けるのは戦闘の痕跡が
     // 残らないということで、AAAとの距離が一番出る挙動。数はDirectorが抑える

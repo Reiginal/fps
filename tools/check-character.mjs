@@ -210,37 +210,48 @@ console.log('\n[8] 外部モデルの枠（model欄が付いた物）');
     ok(!!gltf, `${c.model}.glb … GLBとして読める`);
     if (!gltf) continue;
 
-    // glbchar.jsが名前で引くクリップ。1本でも欠けると歩様が混ざらない
-    const names = gltf.animations.map((a) => a.name);
-    for (const need of ['Idle', 'Walk', 'Run']) {
-      ok(names.includes(need), `${c.model} … クリップ ${need} がある（${names.join('、')}）`);
-    }
+    /* クリップは名前の揺れごとglbchar.jsのpickClips()が吸収する。
+       検査も同じ関数で引く（別の引き方で検査すると、直した時に片方だけ残る） */
+    const { pickClips, modelRotY } = await import('../src/ai/glbchar.js');
+    const picked = pickClips(gltf.animations);
+    const uniq = [...new Set([picked.idle, picked.walk, picked.run])].filter(Boolean);
+    ok(uniq.length > 0,
+      `${c.model} … 待機/歩き/走りが引ける（${uniq.map((a) => a.name).join('、')}${uniq.length < 3 ? '＝足りない分はこれへ倒す' : ''}）`);
 
     let skinned = null;
     let head = null;
     gltf.scene.traverse((o) => {
       if (o.isSkinnedMesh && !skinned) skinned = o;
-      if (o.isBone && /Head$/.test(o.name)) head = o;
+      if (o.isBone && /Head$/i.test(o.name)) head = o;
     });
     ok(!!skinned, `${c.model} … スキンメッシュがある（無いと骨で動かない）`);
-    ok(!!head, `${c.model} … 頭の骨がある（名札と銃声の位置に使う）`);
+    // 頭の骨は無くてもよい(名札と銃声は身長から出す)。何で出しているかだけ残す
+    ok(true, `${c.model} … 名札と銃声の位置: ${head ? `頭の骨(${head.name})` : '骨が無いので身長から'}`);
 
     gltf.scene.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(gltf.scene);
     const h = box.max.y - box.min.y;
-    ok(h > 1.4 && h < 2.2, `${c.model} … 人の背丈の範囲（${h.toFixed(2)}m）`);
+    // 素の高さはばらばらでよい(表示時に身長へ揃える)。0や巨大だけ弾く
+    ok(h > 0.5 && h < 8, `${c.model} … 高さが測れる（素で${h.toFixed(2)}m。表示時に揃える）`);
 
-    /* 前が-zを向いていること。つま先の骨が腰よりも-z側に出ているかで測る。
-       裏返っていると、全員が後ろ歩きで詰めてくる画になる */
+    /* **前の向きと調整表(glbchar.jsのMODELS)が合っていること。**
+       素の前は骨で測れる: つま先(ToeBase)か、膝のIKの目印(PoleTarget)は
+       必ず体の前に出る。素が+zならrotY=180度が要る。
+       ここがずれると、全員が後ろ歩きで詰めてくる画になる */
     if (skinned) {
       const v = new THREE.Vector3();
       const bone = (re) => skinned.skeleton.bones.find((b) => re.test(b.name));
-      const toe = bone(/ToeBase/);
-      const hips = bone(/Hips/);
-      if (toe && hips) {
-        toe.getWorldPosition(v); const toeZ = v.z;
-        hips.getWorldPosition(v); const hipsZ = v.z;
-        ok(toeZ < hipsZ, `${c.model} … 前が-zを向いている（つま先z=${toeZ.toFixed(2)} 腰z=${hipsZ.toFixed(2)}）`);
+      const front = bone(/ToeBase/i) || bone(/PoleTarget/i);
+      const hips = bone(/Hips$/i);
+      if (front && hips) {
+        front.getWorldPosition(v); const fz = v.z;
+        hips.getWorldPosition(v); const hz = v.z;
+        const rawPlusZ = fz > hz;                       // 素の前が+zか
+        const flipped = modelRotY(c.model) !== 0;
+        ok(rawPlusZ === flipped,
+          `${c.model} … 前の向きと調整表が合っている（素=${rawPlusZ ? '+z' : '-z'}、回転=${flipped ? '180度' : '無し'}）`);
+      } else {
+        ok(true, `${c.model} … 前を測る骨が無い（目で確かめる）`);
       }
     }
   }
@@ -272,7 +283,17 @@ console.log('\n[9] 1人プレイの敵も外部モデルの見た目で出る（
   e.spawn(level.enemySpawns[0]);
   ok(!!e._glbVis, '外部モデルが付いた');
   ok(e._glbVis.root.parent === e.root, '体(root)へぶら下がっている＝位置と向きが一緒に動く');
-  ok(e.meshes.every((m) => !m.visible), 'コード製の体の面は全部隠れた');
+
+  // 体は隠れるが、**銃だけは見えたまま残る**（丸腰で撃つ嘘を作らない）。
+  // 銃は隠れた骨に付いていて、狙い・跳ね・死んだら落とす、が全部生きている
+  const underGun = (m) => {
+    for (let o = m; o; o = o.parent) if (o === e.parts.gun) return true;
+    return false;
+  };
+  const body = e.meshes.filter((m) => !underGun(m));
+  const gunMeshes = e.meshes.filter(underGun);
+  ok(body.length > 0 && body.every((m) => !m.visible), `コード製の体の面は全部隠れた（${body.length}枚）`);
+  ok(gunMeshes.length > 0 && gunMeshes.every((m) => m.visible), `銃の面は見えている（${gunMeshes.length}枚）`);
 
   // 判定は今まで通り、見えない骨から取れること
   e.root.updateMatrixWorld(true);
@@ -295,11 +316,15 @@ console.log('\n[9] 1人プレイの敵も外部モデルの見た目で出る（
   hips.getWorldPosition(v1);
   ok(v0.distanceTo(v1) > 0.001, `クリップで骨が動く（${(v0.distanceTo(v1) * 1000).toFixed(1)}mm動いた）`);
 
-  // 倒すと体ごと倒れて、待機の再生が止まる（死体が呼吸しない）
+  // 倒すと体ごと倒れて、待機の再生が止まる（死体が呼吸しない）。
+  // コード製の死に方がrootを回すぶんと、見た目の入れ物が補うぶんの**合計**が
+  // 90度あたりに収まること（片方だけ見ると、二重に回って裏返っていても通ってしまう。
+  // 実際に裏返っていた）
   e.hit(9999, 'chest', new THREE.Vector3(0, 0, -1));
   ok(!e.alive, '倒れた');
   for (let i = 0; i < 90; i++) e._updateDeath(1 / 60);
-  ok(Math.abs(e._glbVis.root.rotation.x) > 1.2, `体ごと倒れている（${e._glbVis.root.rotation.x.toFixed(2)}rad）`);
+  const total = Math.abs(e.root.rotation.x + e._glbVis.root.rotation.x);
+  ok(total > 1.2 && total < 2.0, `合計でちょうど倒れている（root+見た目=${total.toFixed(2)}rad）`);
   ok(e._glbVis.mixer.timeScale === 0, '倒れた後はアニメが止まっている');
 
   // 湧き直したら立ち姿へ戻る

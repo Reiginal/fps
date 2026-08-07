@@ -24,6 +24,33 @@ export const CHAR_DIR = 'assets/models/chars';
    ここを空文字にすれば、敵は全部コード製の見た目へ戻る */
 export const SOLO_MODEL = 'soldier';
 
+/* モデルごとの調整表。
+   rotY: 前を-zへ向けるための回転。作った人によって前の向きがばらばらで、
+   mixamo系の素体は+z向きが多い。**裏返っていると全員が後ろ歩きで詰めてくる。**
+   前がどちらかは骨で測れる(check-character.mjsの[8]が調整表と突き合わせる) */
+const MODELS = {
+  soldier: { rotY: 0 },
+  xbot: { rotY: Math.PI },
+  robot: { rotY: Math.PI },
+  michelle: { rotY: Math.PI },
+  cesium: { rotY: 0 },
+};
+export const modelRotY = (name) => MODELS[name]?.rotY ?? 0;
+
+/**
+ * クリップを名前で引く。名前はモデルごとに揺れる(Walk/walk/Walking)ので正規表現で。
+ * 3本揃っていないモデル(1クリップだけの物)は、有る物へ倒す——全部同じクリップに
+ * なっても、混ぜる重みの式はそのまま動く(見た目は常にそのクリップになるだけ)
+ */
+export function pickClips(clips) {
+  const find = (re) => clips.find((c) => re.test(c.name)) || null;
+  const idle = find(/^idle$/i) || find(/idle/i);
+  const walk = find(/^walk(ing)?$/i) || find(/walk/i);
+  const run = find(/^run(ning)?$/i) || find(/run/i);
+  const any = idle || walk || run || clips[0] || null;
+  return { idle: idle || any, walk: walk || any, run: run || any };
+}
+
 /* 読み込んだ雛形の置き場。name -> {scene, clips} 。
    'loading'/'failed' も入れて、失敗した物を何度も読みに行かない */
 const CACHE = new Map();
@@ -76,7 +103,9 @@ export function spawnCharModel(name, height) {
   const tpl = CACHE.get(name);
   const inner = SkeletonUtils.clone(tpl.scene);
 
-  // 身長をそろえる。素の高さはモデルごとにばらばら(この兵士は1.83m)
+  // 前を-zへ向ける(調整表)。y回転は高さを変えないので、測る前に回してよい
+  inner.rotation.y = modelRotY(name);
+  // 身長をそろえる。素の高さはモデルごとにばらばら(兵士1.83m、ロボは4.79m)
   inner.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(inner);
   const natural = Math.max(0.01, box.max.y - box.min.y);
@@ -96,11 +125,13 @@ export function spawnCharModel(name, height) {
   });
 
   const mixer = new THREE.AnimationMixer(inner);
-  const clip = (n) => tpl.clips.find((c) => c.name === n);
-  const idle = mixer.clipAction(clip('Idle'));
-  const walk = mixer.clipAction(clip('Walk'));
-  const run = mixer.clipAction(clip('Run'));
-  // 3本とも常に再生して、重みで混ぜる。都度play/stopすると切り替わりの瞬間に跳ねる
+  const picked = pickClips(tpl.clips);
+  const idle = mixer.clipAction(picked.idle);
+  const walk = mixer.clipAction(picked.walk);
+  const run = mixer.clipAction(picked.run);
+  // 3本とも常に再生して、重みで混ぜる。都度play/stopすると切り替わりの瞬間に跳ねる。
+  // クリップが足りないモデルではidle/walk/runが同じ実体になる(mixerは同じクリップに
+  // 同じactionを返す)ので、重複がある前提で組む
   for (const a of [idle, walk, run]) { a.play(); a.setEffectiveWeight(0); }
   idle.setEffectiveWeight(1);
 
@@ -112,12 +143,21 @@ export function spawnCharModel(name, height) {
     scale: k,
     /**
      * 歩様を混ぜる。move=0で待機、1で歩き。runはそのうち走りに寄せる割合。
-     * しゃがみのクリップはこのモデルに無いので、しゃがみの見た目は出ない(試験の割り切り)
+     * しゃがみのクリップは無いので、しゃがみの見た目は出ない(試験の割り切り)。
+     *
+     * **重複しているactionには重みを合算してから1回だけ書く。**
+     * 別々に書くと後の書き込みが前を上書きして、1クリップしか無いモデルは
+     * 止まっている間ずっと重み0＝Tポーズで立つ
      */
     mix(move, runK) {
-      idle.setEffectiveWeight(1 - move);
-      walk.setEffectiveWeight(move * (1 - runK));
-      run.setEffectiveWeight(move * runK);
+      let wi = 1 - move;
+      let ww = move * (1 - runK);
+      let wr = move * runK;
+      if (walk === idle) { wi += ww; ww = 0; }
+      if (run === idle) { wi += wr; wr = 0; } else if (run === walk) { ww += wr; wr = 0; }
+      idle.setEffectiveWeight(wi);
+      if (walk !== idle) walk.setEffectiveWeight(ww);
+      if (run !== idle && run !== walk) run.setEffectiveWeight(wr);
     },
   };
 }
