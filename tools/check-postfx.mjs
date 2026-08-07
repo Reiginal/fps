@@ -110,5 +110,35 @@ console.log('\n[時間帯] 遊びに来た時刻で太陽が変わる');
   ok(!!currentTimeOfDay()?.dir, '今の時刻でも向きが返る');
 }
 
+console.log('\n[霧] 霧の向きが、時刻で動く太陽と同期している');
+/* installAerialPerspective()は太陽の向きをGLSLの定数へ焼く（ShaderChunkは
+   静的な文字列でuniformを持てないため）。以前はこのファイルの中だけで
+   夕方の値を固定で持っていて、main.js側のSUN_DIRが時刻で動くようになった後も
+   同期されないまま置き去りになっていた（朝・昼に遊んでも霧の暖色側が
+   夕方の方角を向いたまま）。渡した向きが実際にShaderChunkへ焼かれることと、
+   main.js側が「時刻で決めたSUN_DIR」をそのまま渡していることの両方を見る */
+{
+  const THREE = await import('three');
+  const { installAerialPerspective } = await import('../src/world/textures.js');
+
+  // 夕方(-0.78,0.46,-0.34)とはっきり違う向きを渡して、古い固定値が
+  // 残っていないか（=渡した値ではなく夕方の値のままでないか）を見分ける
+  const morning = new THREE.Vector3(0.72, 0.38, -0.46).normalize();
+  installAerialPerspective(morning);
+  const frag = THREE.ShaderChunk.fog_pars_fragment;
+  ok(frag.includes(morning.x.toFixed(5)) && frag.includes(morning.y.toFixed(5))
+    && frag.includes(morning.z.toFixed(5)), '渡した向きがShaderChunkに焼かれる');
+  ok(!frag.includes('-0.78000'), '夕方の固定値が残っていない');
+
+  // main.js側の呼び出しが、SUN_DIRを決めた直後にそのまま渡しているか。
+  // main.jsはGameクラスを起動するのでNode上では実行できない（DOM前提）。
+  // ソースの並びだけを見る: installAerialPerspective(SUN_DIR)が、
+  // SUN_DIRを定義する行より後ろにあること
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  const sunDirAt = main.indexOf('const SUN_DIR');
+  const callAt = main.indexOf('installAerialPerspective(SUN_DIR)');
+  ok(sunDirAt >= 0 && callAt > sunDirAt, 'main.jsがSUN_DIRを決めた直後に渡している');
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);
