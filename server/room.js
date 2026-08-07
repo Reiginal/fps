@@ -1022,7 +1022,11 @@ export class Room {
     const what = this.rules.onKill(killer, victim, WEAPONS);
     if (what === 'win') {
       logs.add('match', { winner: `${killer.name}(${this.mode})`, why: 'stage' });
-      this._endMatch('score');
+      // 既にここで正しい勝者を記録済みなので、_endMatch側の（s.roundsから
+      // 探す。ガンゲームでは誰も増えないので不正確）二重記録を止める。
+      // whyも'score'ではなくここでの'stage'に揃える（MATCHEND電文の理由が
+      // ログと食い違わないように）
+      this._endMatch('stage', true);
       return;
     }
     if (what === 'advance') this._arm(killer);
@@ -1348,17 +1352,26 @@ export class Room {
   // 最終得点を配ってから、少し置いて次の試合を始める。
   // 終わったまま止めると待っている人が部屋に取り残されるが、
   // その場で0点に戻すと最終順位と0点が1ms差で届いて、順位が読めないまま消える
-  _endMatch(why = 'score') {
+  //
+  // winnerLogged: 呼ぶ側が既に正しい勝者でlogs.add('match', ...)を済ませている時true。
+  // ガンゲームの段勝ち（_kill）がこれ。ここのbest探しはs.roundsを見るが、
+  // ガンゲームはrules.rounds===falseでs.roundsが誰も増えないため、
+  // 探しても勝った本人とは限らない（並びの先頭が拾われるだけ）。
+  // ここを素通しすると、勝者が正しい1件と、roundsから拾った不正確なもう1件が
+  // 二重に/logsへ残り、悪くすると敗者が「優勝」と記録される
+  _endMatch(why = 'score', winnerLogged = false) {
     this.phase = PHASE.END;
     this.timeLeft = MATCH.MATCH_BREAK_S;
     // 得点だけを配ると、受け取った側は「これが最終順位なのか途中経過なのか」を
     // 区別できない。次の試合の0点で必ず上書きされるので、専用の電文で名乗る
     const rows = this._rows();
-    // 取得ラウンドが一番多い人が勝ち。同数なら並びの先頭になるが、
-    // ここは記録であって判定ではないので、その粗さで足りる
-    let best = null;
-    for (const s of this.slots.values()) if (!best || s.rounds > best.rounds) best = s;
-    logs.add('match', { winner: best ? `${best.name}(${best.rounds})` : '', why });
+    if (!winnerLogged) {
+      // 取得ラウンドが一番多い人が勝ち。同数なら並びの先頭になるが、
+      // ここは記録であって判定ではないので、その粗さで足りる
+      let best = null;
+      for (const s of this.slots.values()) if (!best || s.rounds > best.rounds) best = s;
+      logs.add('match', { winner: best ? `${best.name}(${best.rounds})` : '', why });
+    }
     for (const s of this.slots.values()) {
       s.conn.send({ t: Sv.MATCHEND, rows, why, next: MATCH.MATCH_BREAK_S });
     }

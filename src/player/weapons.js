@@ -2598,6 +2598,8 @@ export class WeaponSystem {
     this.burstLeft = 0;
     // 近接の振りの残り時間。0で構えに戻っている
     this.swing = 0;
+    // 手榴弾を長押しで構えている最中か。trueの間に離すと投げる
+    this._throwCharging = false;
     this.flashTimer = 0;
     this.flashLife = 0.035;
     this.flashBase = 1;
@@ -2803,9 +2805,21 @@ export class WeaponSystem {
     this.swing = 0;
     this.burstLeft = 0;
     this.adsHeld = false;
+    // 手榴弾を構えたまま(離さずに)持ち替えると、離した扱いが漏れて
+    // 戻ってきた時に勝手に投げるということが起きる。持ち替えた時点で構えは解く
+    this._throwCharging = false;
     this._pendingIndex = i;
     return true;
   }
+
+  /**
+   * 手榴弾を構えている途中（離せば投げる状態）を、投げずに断ち切る。
+   * 一時停止で呼ぶ。pointerlockが外れるとinput.buttonsが黙って全部falseに
+   * なるので、断ち切らずにいると再開した1フレーム目が「離した」と誤認して
+   * 押してもいないのに手榴弾が飛ぶ（課題.md #1で新たに増えた状態なので、
+   * 増やした側が閉じる）
+   */
+  cancelThrowHold() { this._throwCharging = false; }
 
   /**
    * 装填を始める。始められたらtrue。
@@ -2976,6 +2990,9 @@ export class WeaponSystem {
 
     const trigger = input.buttons[0];
     const triggerEdge = trigger && !this._prevTrigger;
+    // 手榴弾は離した瞬間に投げる（課題.md #1）。_prevTriggerは下で今の値へ
+    // 上書きしてしまうので、離した合図はここで先に取っておく
+    const triggerRelease = !trigger && this._prevTrigger;
     this._prevTrigger = trigger;
     // 指を離したら反動パターンを最初に戻す。押しっぱなしの間だけ積み上がる
     if (!trigger) this.shotIndexInMag = 0;
@@ -3027,12 +3044,27 @@ export class WeaponSystem {
     // 投擲物は撃つのではなく投げる。ここでreturnしてはいけない。
     // この下には揺れ・手の姿勢・ビューモデルの変形が続いていて、
     // 抜けると手榴弾だけ画面に貼り付いたまま動かなくなる
+    //
+    // 押した瞬間ではなく、離した瞬間に投げる（課題.md #1。以前は押した瞬間に
+    // 飛んでいた）。軌道の線は持っている間ずっと出ているので（_updateNadeArc）、
+    // 押している間はそれを見ながら狙いを決められる。
+    //
+    // 押している間に死んだ・武器を替えた・一時停止したせいで「離した扱い」が
+    // 漏れないよう、実際に投げるのは離した瞬間にcanFireをもう一度見てから。
+    // ここがfalseなら投げずに構えを解くだけ（例: 死んだ・スプリントを始めた）。
+    // 一時停止はmain.js側で_throwChargingを明示的に折っている
+    // （pointerlockが外れるとinput.buttonsが黙って全部falseになり、そのままだと
+    // 再開した1フレーム目が「離した」と誤認して勝手に投げてしまうため）
     if (d.thrown) {
-      if (triggerEdge && canFire) {
-        player.cancelHeal?.();
-        this.swing = SWING_TIME;
-        this.onThrow?.();
-        this.fireTimer = 60 / d.rpm;
+      if (triggerEdge && canFire) this._throwCharging = true;
+      if (this._throwCharging && triggerRelease) {
+        this._throwCharging = false;
+        if (canFire) {
+          player.cancelHeal?.();
+          this.swing = SWING_TIME;
+          this.onThrow?.();
+          this.fireTimer = 60 / d.rpm;
+        }
       }
     } else if (wantFire && canFire) {
       if (w.ammo > 0) {
@@ -3668,6 +3700,8 @@ export class WeaponSystem {
     this.adsHeld = false;
     this.wantAds = false;
     this.burstLeft = 0;
+    // 手榴弾を構えたまま(離さずに)死ぬと、湧き直した所でも構えたままになっていた
+    this._throwCharging = false;
     this.shotIndexInMag = 0;
     this.boltCycle = 0;
     this.magWob = 0; this.magWobV = 0;

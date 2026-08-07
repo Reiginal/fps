@@ -48,15 +48,6 @@ export const SETTINGS = [
     apply: (v, t) => { if (t.input) t.input.sensitivity = SENS_BASE * v; },
   },
   {
-    key: 'invY',
-    store: 'blackout.invertY',
-    name: '上下を反転',
-    kind: 'check',
-    def: false,
-    hint: 'マウスを手前に引くと上を向くようになります',
-    apply: (v, t) => { if (t.input) t.input.invertY = v; },
-  },
-  {
     key: 'vol',
     store: 'blackout.volume',
     name: '音量',

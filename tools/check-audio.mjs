@@ -99,5 +99,40 @@ ok('lobbyJoin（入室音）', () => a.lobbyJoin());
 ok('playerDown（自分が倒れた）', () => a.playerDown());
 ok('setEnvironment', () => a.setEnvironment(0.4));
 
+console.log('\n[3] 遠く・開けた場所の銃声の尾が、途中でオシレータごと止まって切れないか');
+{
+  // stopAt(音源を止める時刻)は距離と開けた場所ほど伸びる尾(tailLen)に
+  // 合わせて計算されるが、以前はtailDecayの生値しか見ておらず、
+  // 遠景では尾がまだ2割前後の音量が残っている所でプツンと切れていた
+  const b = new AudioEngine();
+  b.init();
+  b.setEnvironment(1.0);   // 一番開けた場所
+
+  const stops = [];
+  const wrap = (name) => {
+    const orig = b.ctx[name].bind(b.ctx);
+    b.ctx[name] = () => {
+      const n = orig();
+      const origStop = n.stop.bind(n);
+      n.stop = (time) => { stops.push(time); return origStop(time); };
+      return n;
+    };
+  };
+  wrap('createOscillator');
+  wrap('createBufferSource');
+
+  b.gunshot({
+    volume: 0.5, bodyFreq: 300, crackFreq: 3000, bodyDecay: 0.2, tailDecay: 1.1,
+    thumpFrom: 105, thumpTo: 42,
+  }, { x: 200, y: 1, z: 0 }, { position: { x: 0, y: 1, z: 0 }, rotation: { y: 0 } });
+
+  const maxStop = Math.max(...stops);
+  // 直す前の式(tailDecay*2.4+0.6 ≈ 3.24秒)だと、この距離・開けた場所の尾は
+  // まだ音量が2割近く残ったまま止まっていた。直した後はほぼ聞こえなくなる
+  // 6秒以上まで伸びているはず
+  ok(`音源を止めるまでの長さが3.24秒(直す前の値)より十分長い（今 ${maxStop.toFixed(2)}秒）`,
+    () => { if (maxStop < 6) throw new Error(`${maxStop.toFixed(2)}秒しかない`); });
+}
+
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);
 process.exit(bad === 0 ? 0 : 1);

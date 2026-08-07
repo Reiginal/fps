@@ -1167,16 +1167,20 @@ export function buildLevel(mats) {
     const midY = yBottom + rise / 2;
 
     // 踏面と蹴込み。斜めのスラブは衝突用にそのまま残す（段でカプセルが引っかからない）。
-    // 見えるほうを段に刻まないと、縞模様を貼った1枚板にしか見えない
+    // 見えるほうを段に刻まないと、縞模様を貼った1枚板にしか見えない。
+    // ここはboxD（衝突なし）で刻む。boxで刻むとコメントの意図に反して段自体も
+    // 衝突判定に入り、スラブと段の二重の当たり判定ができてしまう
+    // （段差は0.18m前後なのでプレイヤー側の段差乗り越えで実害は出ないが、
+    // 上るたびに乗り越えの処理が段の数だけ余分に走り、Octreeも無駄に太る）
     const n = clamp(Math.round(rise / 0.18), 3, 48);
     const stepRun = run / n, stepRise = rise / n;
     for (let i = 0; i < n; i++) {
       const hu = -run / 2 + (i + 0.5) * stepRun;
       const ys = yBottom + 0.17 + (i + 0.5) * stepRise;    // 踏面の高さ
-      box(w, 0.055, stepRun + 0.05, mat,
+      boxD(w, 0.055, stepRun + 0.05, mat,
         x + fwd.x * hu, ys - 0.055, z + fwd.z * hu, ry, 0.9);
       const hb = -run / 2 + (i + 1) * stepRun;
-      box(w, stepRise, 0.045, mat,
+      boxD(w, stepRise, 0.045, mat,
         x + fwd.x * hb, ys - 0.055, z + fwd.z * hb, ry, 0.9);
     }
 

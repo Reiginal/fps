@@ -464,6 +464,63 @@ ws.switchTo(0);
 ok(ws.swing === 0, '銃へ持ち替えたら振りの状態が消える');
 ok(ws.burstLeft === 0 && ws.adsHeld === false, '覗きとバーストの残りも消える');
 
+/* ------------------------------------------ 手榴弾は離した時に投げる（課題.md #1） */
+
+console.log('\n[5.5] 手榴弾は押した瞬間ではなく離した瞬間に投げる');
+{
+  const nadeIdx = ws.weapons.findIndex((w) => w.def.thrown);
+  ok(nadeIdx >= 0, '手榴弾がある');
+  const thrown = [];
+  ws.onThrow = () => thrown.push(1);
+
+  const armThrow = () => {
+    thrown.length = 0;
+    ws.switchTo(nadeIdx);
+    ws.switching = 0;
+    ws.index = nadeIdx;
+    ws.fireTimer = 0;
+    ws.update(0.016, idle, player, {});   // 前回分のtriggerを必ず離した状態から始める
+  };
+
+  armThrow();
+  ws.update(0.016, held, player, {});
+  ok(thrown.length === 0, '押した瞬間には飛ばない');
+  for (let i = 0; i < 30; i++) ws.update(0.016, held, player, {});
+  ok(thrown.length === 0, '持ち続けている間も飛ばない（30刻み）');
+  ws.update(0.016, idle, player, {});
+  ok(thrown.length === 1, '離した瞬間に1つ飛ぶ');
+  ws.update(0.016, idle, player, {});
+  ok(thrown.length === 1, '離したままでは増えない');
+
+  // 死んだまま離しても投げない。倒れている間は投げても仕方が無いし、
+  // 死体が手榴弾を投げるのはもっとおかしい
+  armThrow();
+  ws.update(0.016, held, player, {});
+  player.alive = false;
+  ws.update(0.016, idle, player, {});
+  ok(thrown.length === 0, '死んで離しても投げない');
+  player.alive = true;
+
+  // 構えている途中に一時停止(cancelThrowHold)すると、離しても投げない。
+  // 無いと、pointerlockが外れてinput.buttonsが黙ってfalseになった時、
+  // 再開した1フレーム目が「離した」と誤認して押してもいないのに飛ぶ
+  armThrow();
+  ws.update(0.016, held, player, {});
+  ws.cancelThrowHold();
+  ws.update(0.016, idle, player, {});
+  ok(thrown.length === 0, '一時停止で断ち切った後は、離しても投げない');
+
+  // 構えている途中に(離さずに)持ち替えると、構えの印が消える。
+  // 消さないと、また手榴弾へ持ち替えて指を離しただけの時にまで
+  // 前に構えていた分が「離した」と誤認されて飛ぶ
+  armThrow();
+  ws.update(0.016, held, player, {});
+  ok(ws._throwCharging === true, '構えている（内部の印）');
+  ws.switching = 0;   // 直前の持ち替えの余韻を消してから、離さずに別の武器へ
+  ws.switchTo(0);
+  ok(ws._throwCharging === false, '持ち替えると構えの印が消える');
+}
+
 /* -------------------------------------- サーバーの退避表が本物とずれていないか */
 
 console.log('\n[6] server/sim.js の退避武器表');

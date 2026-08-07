@@ -23,7 +23,20 @@ window.AudioContext = class {
   createBuffer(c,l){return {length:l,numberOfChannels:c,getChannelData:()=>new Float32Array(l)};}
 };
 const { AudioEngine } = await import('../src/core/audio.js');
-const a = new AudioEngine(); a.init();
+const a = new AudioEngine();
+
+/* _startAmbience（init内から呼ばれる）は、環境音の「軋み」と「遠景の撃ち合い」を
+   setTimeoutで自分自身に予約する形で鳴らす。実時間で待つと軋みだけで最短4秒かかるので、
+   init()を呼んでいる間だけsetTimeoutを横取りして、予約された関数を実行せずに集めておく。
+   遅延の長さで見分ける: 軋みは4000〜9000ms、遠景の撃ち合いは固定3000ms
+   （撃ち合いは連射をさらにsetTimeoutで組むので、そちらは触らずに済ませたい） */
+let creakFn = null;
+{
+  const realSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (fn, ms) => { if (ms >= 4000) creakFn = fn; return 0; };
+  a.init();
+  globalThis.setTimeout = realSetTimeout;
+}
 const dest = a.ctx.destination;
 // destinationへ到達できるノードを数える
 const reach = () => {
@@ -41,6 +54,34 @@ const reach = () => {
   return n;
 };
 const base = reach();
+
+console.log('\n[1] 環境音の「軋み」も、鳴らした分がちゃんと片付く（22ebdfc）');
+let creakOk;
+{
+  const realSetTimeout = globalThis.setTimeout;
+  const realRandom = Math.random;
+  const captured = !!creakFn;
+  console.log(`  ${captured ? '○' : '× 失敗:'} 軋みの予約が捕まえられている`);
+  Math.random = () => 0;   // 0.55未満に倒して、必ず鳴る側を通す
+  // creak自身も次の分をsetTimeoutで自分に予約するが、ここは実時間のsetTimeoutの
+  // ままでよい（このテストが終わるまでに実際には来ない遅延なので、何も起きない）
+  creakFn?.();
+  Math.random = realRandom;
+
+  const afterCreak = reach();
+  const rang = afterCreak > base;
+  console.log(`  ${rang ? '○' : '× 失敗:'} 軋みが繋がった（${afterCreak}）`);
+
+  a.ctx.currentTime += 10;   // stopAt(2.0秒)・_reap(2.4秒)を余裕を持って超える
+  // ctx.currentTimeは進めても、_reapの回収自体は実時間のsetIntervalが
+  // 実際に1回走らないと動かない。下の本編と同じ1.4秒の待ちを使う
+  await new Promise((r) => realSetTimeout(r, 1400));
+  const afterReap = reach();
+  console.log(`  ${afterReap <= base ? '○' : '× 失敗:'} 片付いた後は起動時と同じ（${afterReap}）`);
+  creakOk = captured && rang && afterReap <= base;
+}
+
+console.log('\n[2] 1試合ぶん鳴らした音が、片っ端から出力へ繋がりっぱなしにならない');
 const cam = { position:{x:0,y:1.6,z:0}, rotation:{y:0} }, at = { x:1, y:1, z:-1 };
 for (let i=0;i<1200;i++){ a.ctx.currentTime=i*0.1;
   a.gunshot({volume:0.7,bodyFreq:300,crackFreq:3600,bodyDecay:0.2,tailDecay:0.6,thumpFrom:110,thumpTo:44}, at, cam);
@@ -56,8 +97,8 @@ setTimeout(() => {
   console.log(`  回収が走った後: ${after}`);
   // 起動時の固定分より増えていたら、鳴らすたびに溜まり続けている。
   // 溜まるとブラウザのノード上限に当たって、そこから先は何も鳴らなくなる
-  const ok = after <= base;
-  console.log(`\n  ${ok ? '○' : '× 失敗:'} 鳴らし終わった音が出力から切り離されている`);
-  console.log(ok ? '\n全部通った' : '\n1件 失敗');
+  const ok = after <= base && creakOk;
+  console.log(`\n  ${after <= base ? '○' : '× 失敗:'} 鳴らし終わった音が出力から切り離されている`);
+  console.log(ok ? '\n全部通った' : '\n1件以上 失敗');
   process.exit(ok ? 0 : 1);
 }, 1400);

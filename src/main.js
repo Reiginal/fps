@@ -1,6 +1,6 @@
 // 全部を繋ぐ本体。読み込み → 生成 → ゲームループ。
 import * as THREE from 'three';
-import { buildMaterials, createSky, skyFogColor } from './world/textures.js';
+import { buildMaterials, createSky, skyFogColor, installAerialPerspective } from './world/textures.js';
 import { currentTimeOfDay } from './world/sun.js';
 import { buildLevel } from './world/level.js';
 import { Effects } from './world/effects.js';
@@ -81,6 +81,11 @@ const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
 // 途中で変えるとそこを作り直す話になる
 const TOD = currentTimeOfDay();
 const SUN_DIR = new THREE.Vector3(...TOD.dir).normalize();
+// フォグの向き依存もここで決めた太陽の向きに合わせる。材質のコンパイルより
+// 前ならいつでもよいので、SUN_DIRが決まった直後のここでやる
+// （以前はtextures.js側が別に持つ固定値のままで、朝・昼に遊んでも
+// 霧の暖色側が夕方の方角を向いたままだった）
+installAerialPerspective(SUN_DIR);
 
 // ビューモデルのキーライトが必ず確保する向き（カメラ空間・右上手前）。
 // 太陽追従だけにすると背を向けた時に銃が真っ黒になるので、これへ寄せて下限を作る
@@ -478,6 +483,9 @@ class Game {
     this._ray = new THREE.Ray();
     this._evPos = new THREE.Vector3();
     this._evNormal = new THREE.Vector3();
+    // ソロの着弾解決(_resolveShot)専用。散弾は1発で複数ペレットぶん
+    // 呼ばれるので、その回数ぶんnew Vector3()を積まないための使い回し
+    this._hitNormal = new THREE.Vector3();
     // 誰がいつ撃ったか。散弾を1発の銃声にまとめるのに使う
     this._lastFireAt = new Map();
     // 死んでいる間の入力を止める受け皿。Inputと同じ形をしていればよい
@@ -1198,6 +1206,11 @@ class Game {
       } else if (this.state === 'playing') {
         this.state = 'paused';
         this._showPause();
+        // 手榴弾を構えたまま(離さずに)一時停止すると、pointerlockが外れて
+        // input.buttonsが黙って全部falseになる。断ち切らずにいると、
+        // 再開した1フレーム目が「離した」と誤認して押してもいないのに
+        // 手榴弾が飛ぶ（課題.md #1）
+        this.weapons?.cancelThrowHold();
       }
     });
 
@@ -1506,7 +1519,10 @@ class Game {
     this.raycaster.set(this._probe, this._down);
     this.raycaster.far = 1.4;
     const hits = this.raycaster.intersectObjects(this.solidMeshes, false);
-    if (!hits.length) return 'dirt';
+    // 何も拾えなかった時(段差の隙間など)と、材質は拾えたがsurfaceOfに
+    // 載っていない時(コンクリ・舗装など大半の地面)は、どちらも
+    // 「詳しくは分からない地面」という同じ状況。既定は揃えておく
+    if (!hits.length) return 'asphalt';
     return this.surfaceOf.get(hits[0].object.material) ?? 'asphalt';
   }
 
@@ -1564,7 +1580,7 @@ class Game {
       const killed = enemyHit.enemy.hit(dmg, enemyHit.part);
       if (pellet === 0) { this.shotsHit++; this._tally('hits'); }
 
-      this.effects.impact(enemyHit.point, dir.clone().negate(), 'flesh');
+      this.effects.impact(enemyHit.point, this._hitNormal.copy(dir).negate(), 'flesh');
       // 近接は刃が入る音を足す。弾が当たった時と同じ音だと、
       // 撃ったのか斬ったのかが耳から判別できない
       if (def.melee) this.audio.stab(enemyHit.point, this.camera, 'flesh');
@@ -1577,8 +1593,8 @@ class Game {
       if (drawTracer) this.effects.tracer(muzzle, enemyHit.point, 0.03);
     } else if (worldHit) {
       const normal = worldHit.face
-        ? worldHit.face.normal.clone().transformDirection(worldHit.object.matrixWorld)
-        : dir.clone().negate();
+        ? this._hitNormal.copy(worldHit.face.normal).transformDirection(worldHit.object.matrixWorld)
+        : this._hitNormal.copy(dir).negate();
       const kind = this.kindOf.get(worldHit.object.material) ?? 'concrete';
       // 近接は弾ではない。壁を刃で擦っても火花は散らないし着弾痕も残らない。
       // ここを素通ししていたせいで、ナイフを振るたびに銃の着弾と同じ
@@ -1594,7 +1610,7 @@ class Game {
       }
       if (drawTracer) this.effects.tracer(muzzle, worldHit.point, 0.03);
     } else if (drawTracer) {
-      const far = origin.clone().addScaledVector(dir, def.range);
+      const far = this._hitNormal.copy(origin).addScaledVector(dir, def.range);
       this.effects.tracer(muzzle, far, 0.025);
     }
   }
@@ -2612,6 +2628,32 @@ class Game {
     this.hud.zoneWarn(true, left > 0 ? `${Math.ceil(left)}秒で削られる` : '中央へ戻れ');
   }
 
+  /**
+   * 今の画面をクリップボードへコピーする（課題.md #7）。
+   *
+   * ファイルには保存しない。「クリップボードに入っていればいい、貼るだけで送れる」
+   * という要望なので、それ以上は持たない。
+   *
+   * preserveDrawingBufferは立てない（常時遅くなる）。代わりに、composer.render()の
+   * 直後・ブラウザに制御を返す前にtoBlob()を呼ぶことで、描いた直後の中身を読む。
+   *
+   * clipboard.write()の呼び出し自体はキー入力の流れの中（同じタスク）で行う必要が
+   * あるので、ここは同期的に呼ぶ。実際に読む画素（toBlob）はその後で非同期に確定して
+   * よい ── ClipboardItemはBlobの代わりにPromise<Blob>を受け付けるので、
+   * 「コピー先を確保する」と「中身が揃う」を分けられる
+   */
+  _screenshot() {
+    if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+      this._shotMsg = 'このブラウザはスクショのコピーに対応していません';
+      this._shotMsgT = 3;
+      return;
+    }
+    const blob = new Promise((resolve) => this.renderer.domElement.toBlob(resolve, 'image/png'));
+    navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      .then(() => { this._shotMsg = 'スクショをコピーしました'; this._shotMsgT = 2; })
+      .catch(() => { this._shotMsg = 'コピーできませんでした'; this._shotMsgT = 3; });
+  }
+
   /* ------------------------------------------------------- ループ */
 
   _loop() {
@@ -2649,9 +2691,24 @@ class Game {
       // 掴んだままでも、文字を打つ場所に入力先があれば文字は打てる
       const typing = !!this.chat?.typing;
       // Enterで打つ場所を開く。対戦している時だけ
-      if (!typing && this.mode === 'versus' && this.input.pressed('Enter')) {
-        this.chat.open();
+      if (!typing && this.input.pressed('Enter')) {
+        if (this.mode === 'versus') {
+          this.chat.open();
+        } else {
+          // 1人プレイでは発言そのものが無い（対戦専用）。押しても何も
+          // 起きないと、遊ぶ側からは壊れているのかキーが違うのか分からない
+          // （課題.md #3）。一言だけ出して、放っておけば消える
+          this._chatHintT = 2.5;
+        }
       }
+      this._chatHintT = Math.max(0, (this._chatHintT || 0) - dt);
+      this.diag?.setState('chatHint', this._chatHintT > 0 ? '発言は対戦でだけ使えます' : '');
+      // Pでスクショをクリップボードへ（課題.md #7）。全画面＋マウス固定なので
+      // OSのスクショが撮りにくく、見た目の不具合を言葉だけで詰めることになっていた。
+      // typing中はchat.js側がstopPropagationしているのでPはここまで届かない
+      if (!typing && this.input.pressed('KeyP')) this._screenshot();
+      this._shotMsgT = Math.max(0, (this._shotMsgT || 0) - dt);
+      this.diag?.setState('shot', this._shotMsgT > 0 ? (this._shotMsg || '') : '');
       const input = typing ? this._noInput : this.input;
       // 打っている間も、押した印とマウスの移動量は毎フレーム捨てる。
       // 溜めたままにすると、打ち終わった瞬間に溜まっていた分が一度に効く。
