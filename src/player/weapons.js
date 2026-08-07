@@ -3528,8 +3528,16 @@ export class WeaponSystem {
     if (P.dust) P.dust.rotation.z = -boltOff * 1.45;
 
     /* ---- 弾倉。反動では遅れて揺れ、装填では抜けて落ちて差し変わる */
-    this.magWobV += (-this.magWob * 260 - this.magWobV * 16) * dt;
-    this.magWob += this.magWobV * dt;
+    /* 反動のばね(上のkick系)と同じで、dtをそのまま使うと重い画面(低fps)で
+       発散する。dt=0.1が続く端末で弾倉が回り続けた(実際に「弾倉がめっちゃ
+       ぐるぐる回ってる」と言われた)。kick系は刻みを分割して直してあったのに、
+       このばねだけ対策から漏れていた。同じ刻み方で分割する */
+    const wobSteps = Math.max(1, Math.ceil(dt / 0.02));
+    const wobH = dt / wobSteps;
+    for (let i = 0; i < wobSteps; i++) {
+      this.magWobV += (-this.magWob * 260 - this.magWobV * 16) * wobH;
+      this.magWob += this.magWobV * wobH;
+    }
     if (P.mag && w.magRest) {
       const R = w.magRest;
       if (reloading && d.reloadKind === 'mag') {

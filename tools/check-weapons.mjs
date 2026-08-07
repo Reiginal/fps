@@ -521,6 +521,30 @@ console.log('\n[5.5] 手榴弾は押した瞬間ではなく離した瞬間に�
   ok(ws._throwCharging === false, '持ち替えると構えの印が消える');
 }
 
+/* ------------------------------------------ 重い画面でもばねが発散しない */
+
+console.log('\n[5.6] 重い画面(dt=0.1)でも弾倉のばねが発散しない');
+/* 重い端末では1フレームが0.1秒まで膨らむ(main.jsがそこで頭を押さえる)。
+   ばねをその大きなdtのまま積分すると、減衰の掛け算が符号を跨いで
+   エネルギーを注ぎ込む側に化けて発散する。実際に、重い端末で
+   「弾倉がめっちゃぐるぐる回ってる」と言われた。
+   反動のばね(kick系)は刻みの分割で対策済みだったが、弾倉だけ漏れていた */
+{
+  ws.switching = 0;
+  ws.switchTo(0);        // 弾倉を持つライフルで見る
+  ws.switching = 0;
+  ws.magWob = 0;
+  ws.magWobV = 6;        // 撃った直後の揺れより大きい衝撃を入れる
+  let peak = 0;
+  for (let i = 0; i < 60; i++) {          // 10fpsで6秒ぶん
+    ws.update(0.1, idle, player, {});
+    peak = Math.max(peak, Math.abs(ws.magWob));
+  }
+  ok(Number.isFinite(ws.magWob), `値が壊れていない（${ws.magWob.toExponential(2)}）`);
+  ok(Math.abs(ws.magWob) < 0.01, `6秒後には収まっている（残り${Math.abs(ws.magWob).toExponential(2)}）`);
+  ok(peak < 1.0, `途中でも回りきらない（最大${peak.toFixed(3)}rad。1周=6.28）`);
+}
+
 /* -------------------------------------- サーバーの退避表が本物とずれていないか */
 
 console.log('\n[6] server/sim.js の退避武器表');
