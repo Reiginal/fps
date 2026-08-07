@@ -147,7 +147,6 @@ async function handleReport(req, res) {
   // 送り元は「誰か」ではなく「連投を止める鍵」としてだけ使う。
   // Fly経由だと本当の送り元はヘッダに入るが、無くても困らない
   const from = String(req.headers['fly-client-ip'] || req.socket.remoteAddress || '?');
-  if (!reportLimit.allow(from, Date.now())) { res.writeHead(429).end('too fast'); return; }
 
   let body = '';
   for await (const chunk of req) {
@@ -158,6 +157,13 @@ async function handleReport(req, res) {
 
   const rec = reportRecord(body);
   if (!rec) { res.writeHead(400).end('bad'); return; }
+  /* 連投止めの鍵は「送り元」だけでなく「送り元＋種類」。
+     1人プレイで力尽きた瞬間、クライアントは「力尽きた(solo)」と
+     「描画の重さ(perf)」を続けて2発送る。鍵が送り元だけだと2発目が
+     毎回429で捨てられて、**重さの実測が1本も届かなかった**
+     （「めっちゃ重い」と言われた日に、数字が何も無かったのはこれ）。
+     種類ごとに分ければ、毎フレーム出る例外の洪水は今まで通り止まる */
+  if (!reportLimit.allow(`${from}|${rec.kind}`, Date.now())) { res.writeHead(429).end('too fast'); return; }
   // 流れる方と、後から読める方の両方へ出す。
   // console.warnは`flyctl logs`で今しか見られないので、表にも積む
   console.warn(reportLine(body));

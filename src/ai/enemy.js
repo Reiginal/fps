@@ -1571,6 +1571,8 @@ export class Enemy {
     v.root.visible = true;
     v.mixer.timeScale = 1;
     v.mix(0, 0);
+    // 死体で切った影を戻す(コード製のspawnと同じ理屈)
+    for (const m of v.meshes) m.castShadow = true;
     this._glbFall = 0;
   }
 
@@ -2398,6 +2400,10 @@ export class Enemy {
     // 残らないということで、AAAとの距離が一番出る挙動。数はDirectorが抑える
     if (t > 3.0) {
       this.deathSettled = true;
+      /* 外部モデルの死体は、寝たら影を切る。スキンメッシュは影の描画でも
+         骨の変形をもう1回払うので、**消さない死体が波ごとに積み上がる**この
+         ゲームでは、寝た後まで影を落とし続けると重さだけが積み上がる */
+      if (this._glbVis) for (const m of this._glbVis.meshes) m.castShadow = false;
       if (!this.gunRest && this.gunDropped) {
         const g = p.gun;
         g.position.y = this.gunGround + 0.05;

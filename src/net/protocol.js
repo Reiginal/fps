@@ -502,9 +502,10 @@ export const TEAM_COLORS = ['#63d2ff', '#ffab5e'];
    読み込みが届くまで・失敗した時はseedのコード製の姿で出る(だからseedも残す)。
    見た目にしか効かない。当たり判定も足の速さも全員同じ(HITBOX/サーバー側)。
 
-   2026-08-07に外部モデル5体の品評会をここへ並べたが、遊んだ人から
-   「めっちゃ重い」と言われて**その日のうちにコード製へ戻した**。
-   素材はassets/models/chars/に残っていて、model:'soldier'等を付ければまた出せる。
+   2026-08-07の経緯: 外部モデル5体の品評会を並べた→「めっちゃ重い」で一度全部
+   コード製へ→「最初に出してた形に戻して」で、**この並び(コード製5+試験1枠)へ落ち着いた**。
+   1人プレイの敵は外部モデルの銃持ち(glbchar.jsのSOLO_MODEL)。
+   品評会の素材はassets/models/chars/に残っていて、model欄を付ければまた出せる。
    本人の反応: ダンサー(michelle)はまだ興味あり */
 export const CHARACTERS = [
   { seed: 1, name: 'オリーブ／キャップ', color: '#5f6a4a' },
@@ -512,7 +513,7 @@ export const CHARACTERS = [
   { seed: 3, name: 'グレー／ヘルメット', color: '#5e626b' },
   { seed: 2, name: 'グレー／素頭', color: '#5e626b' },
   { seed: 14, name: 'タン／ブーニー', color: '#7a6949' },
-  { seed: 8, name: 'タン／素頭', color: '#7a6949' },
+  { seed: 8, name: '外部モデル（試験）', color: '#4a5568', model: 'soldier' },
 ];
 
 /** 番号から兵士を引く。範囲の外は0番へ寄せる（知らない番号が来ても姿が消えない） */
