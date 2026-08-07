@@ -81,6 +81,31 @@ let creakOk;
   creakOk = captured && rang && afterReap <= base;
 }
 
+console.log('\n[混雑] 撃ち合いが混んでも、音のグラフを作る数に上限がある');
+/* 敵14体が撃ち合うと発砲は瞬間で毎秒30〜60発。1発でノード十数個を作るので、
+   上限が無いと乱戦のたびに音の組み立てだけでCPUを食う。
+   混んでいる時は遠い発砲から丸ごと打ち切る。自分の銃だけは絶対に鳴る */
+let capOk;
+{
+  a.ctx.currentTime = 100;   // 負荷カウンタを一度空にする（時間が経てば減る作り）
+  const cam2 = { position: { x: 0, y: 1.6, z: 0 }, rotation: { y: 0 } };
+  const before = all.length;
+  // 30m先から同じ瞬間に50連発（敵の乱戦がこの形になる）
+  for (let i = 0; i < 50; i++) a.gunshot({ mech: false }, { x: 30, y: 1, z: 0 }, cam2);
+  const made = all.length - before;
+  console.log(`  ${made < 200 ? '○' : '× 失敗:'} 50連発で作るノードは${made}個（打ち切り無しなら500個超）`);
+  const b2 = all.length;
+  a.gunshot({});   // 自分の銃（距離0）
+  const own = all.length - b2;
+  console.log(`  ${own > 0 ? '○' : '× 失敗:'} 混んでいても自分の銃は鳴る（+${own}ノード）`);
+  capOk = made < 200 && own > 0;
+  // 次の検査は時刻0から数え直すので、負荷の持ち越しを消しておく
+  // （時刻が巻き戻ると、減るはずの負荷が逆に増える作りのため）
+  a._load = 0;
+  a._loadAt = 0;
+  a.ctx.currentTime = 0;
+}
+
 console.log('\n[2] 1試合ぶん鳴らした音が、片っ端から出力へ繋がりっぱなしにならない');
 const cam = { position:{x:0,y:1.6,z:0}, rotation:{y:0} }, at = { x:1, y:1, z:-1 };
 for (let i=0;i<1200;i++){ a.ctx.currentTime=i*0.1;
@@ -97,7 +122,7 @@ setTimeout(() => {
   console.log(`  回収が走った後: ${after}`);
   // 起動時の固定分より増えていたら、鳴らすたびに溜まり続けている。
   // 溜まるとブラウザのノード上限に当たって、そこから先は何も鳴らなくなる
-  const ok = after <= base && creakOk;
+  const ok = after <= base && creakOk && capOk;
   console.log(`\n  ${after <= base ? '○' : '× 失敗:'} 鳴らし終わった音が出力から切り離されている`);
   console.log(ok ? '\n全部通った' : '\n1件以上 失敗');
   process.exit(ok ? 0 : 1);
