@@ -504,7 +504,10 @@ export const CHARACTERS = [
   { seed: 3, name: 'グレー／ヘルメット', color: '#5e626b' },
   { seed: 2, name: 'グレー／素頭', color: '#5e626b' },
   { seed: 14, name: 'タン／ブーニー', color: '#7a6949' },
-  { seed: 8, name: 'タン／素頭', color: '#7a6949' },
+  /* modelが付いた枠は、見た目だけ外部の3Dモデル(assets/models/chars/<model>.glb)で出す試験枠。
+     読み込みが届くまで・失敗した時はseedのコード製の姿で出る(だからseedも残す)。
+     見た目にしか効かない。当たり判定も足の速さも全員同じ(HITBOX/サーバー側) */
+  { seed: 8, name: '外部モデル（試験）', color: '#4a5568', model: 'soldier' },
 ];
 
 /** 番号から兵士を引く。範囲の外は0番へ寄せる（知らない番号が来ても姿が消えない） */

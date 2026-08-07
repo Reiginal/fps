@@ -11,9 +11,10 @@
    スナップショットの状態ビットから同じ形を作る。 */
 
 import * as THREE from 'three';
-import { S, characterAt, HITBOX } from './protocol.js';
+import { S, characterAt, CHARACTERS, HITBOX } from './protocol.js';
 import { Enemy } from '../ai/enemy.js';
 import { WEAPONS } from '../player/weapons.js';
+import { preloadCharModel, charModelReady, spawnCharModel } from '../ai/glbchar.js';
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -76,8 +77,13 @@ export class RemotePlayers {
     this.slots = new Map();     // id -> slot
     this._pool = [];            // 使い終わった兵士。湧き直しで作り直さない
     this._all = [];             // dispose()で始末する全部
+    this._glbPool = [];         // 外部モデル版の使い回し
+    this._glbAll = [];
     this._last = 0;
     this._seen = new Set();     // sync()の中だけで使う。毎フレーム作り直さず使い回す
+    // 外部モデルの枠があれば、対戦に入った時点で読み込みを始めておく。
+    // 相手が現れた瞬間に読み始めると、届くまでコード製の代役で立つことになる
+    for (const c of CHARACTERS) if (c.model) preloadCharModel(c.model);
   }
 
   /* net.stateAt()の結果をそのまま渡す。dtは持たないので自前で測る
@@ -123,6 +129,9 @@ export class RemotePlayers {
   _applyWeapon(slot, index) {
     if (slot.weapon === index) return;
     slot.weapon = index;
+    // 外部モデルの試験枠は丸腰のまま。手の骨へ武器をぶら下げるのは
+    // 本採用の時にやる（丸腰で撃つのは嘘だが、試験の割り切りとして明記しておく）
+    if (slot.glb) return;
     const p = slot.enemy.parts;
     if (!p.gun) return;
     // 出るのは常に1つだけ。全部消してから1つ出す形にすると、
@@ -153,6 +162,11 @@ export class RemotePlayers {
     const slot = this.slots.get(id);
     if (!slot) return;
     this.slots.delete(id);
+    if (slot.glb) {
+      slot.obj.root.visible = false;
+      this._glbPool.push(slot.obj);
+      return;
+    }
     slot.enemy.root.visible = false;
     slot.enemy.blob.visible = false;
     this._pool.push(slot.enemy);
@@ -177,6 +191,12 @@ export class RemotePlayers {
     }
     this._all.length = 0;
     this._pool.length = 0;
+    /* 外部モデルは場面から外すだけで、ジオメトリと材質は捨てない。
+       複製(SkeletonUtils.clone)が雛形と共有しているので、ここで捨てると
+       次の試合で組む複製が壊れる（顔テクスチャを捨てない上の理屈と同じ） */
+    for (const o of this._glbAll) this.scene.remove(o.root);
+    this._glbAll.length = 0;
+    this._glbPool.length = 0;
     this.slots.clear();
   }
 
@@ -188,7 +208,12 @@ export class RemotePlayers {
      同じ番号の物だけを探し、無ければ新しく組む。
      人数は最大8人で選べる姿も数種類なので、作られる数はたかが知れている */
   _spawn(st, chr = 0) {
-    const seed = characterAt(chr).seed;
+    const def = characterAt(chr);
+    /* 外部モデルの試験枠。読み込みが届いていればそちらで出す。
+       まだ(または失敗)ならコード製の代役で出し、その相手が居る間はそのまま
+       （途中で差し替えると、目の前で人が入れ替わって見える） */
+    if (def.model && charModelReady(def.model)) return this._spawnGlb(st, def);
+    const seed = def.seed;
     const at = this._pool.findIndex((x) => x.variant?.seed === seed);
     let e = at >= 0 ? this._pool.splice(at, 1)[0] : null;
     if (!e) {
@@ -250,7 +275,108 @@ export class RemotePlayers {
     };
   }
 
+  /* 外部モデル版の1体を組む。姿はGLBの複製、身長は判定(HITBOX.STAND_H)へ揃える */
+  _spawnGlb(st, def) {
+    const at = this._glbPool.findIndex((o) => o.modelName === def.model);
+    let obj = at >= 0 ? this._glbPool.splice(at, 1)[0] : null;
+    if (!obj) {
+      obj = spawnCharModel(def.model, HITBOX.STAND_H);
+      obj.modelName = def.model;
+      this.scene.add(obj.root);
+      this._glbAll.push(obj);
+    }
+    obj.root.visible = true;
+    obj.root.rotation.set(0, 0, 0);
+    obj.mixer.timeScale = 1;
+    obj.mix(0, 0);
+    for (const m of obj.meshes) m.castShadow = true;
+    return {
+      glb: true,
+      obj,
+      handle: { root: obj.root, headPos: new THREE.Vector3() },
+      x: st.x, y: st.y, z: st.z,
+      speed: 0,
+      weapon: -1,
+      dead: false,
+      deadT: 0,
+      fallDir: 1,
+      shadowOn: true,
+    };
+  }
+
+  /* 外部モデル版の毎フレーム。コード製(_apply)は骨を1本ずつ手で回すが、
+     こちらはクリップの再生に任せて、混ぜる重みだけを速度から決める。
+     捻り(下半身は進行方向・上半身は狙い)はクリップと手回しの混在になるので
+     試験ではやらない。体ごと狙いの方を向く */
+  _applyGlb(slot, st, dt) {
+    const o = slot.obj;
+    const root = o.root;
+
+    const dx = st.x - slot.x, dz = st.z - slot.z;
+    slot.x = st.x; slot.y = st.y; slot.z = st.z;
+    const raw = dt > 1e-4 ? Math.hypot(dx, dz) / dt : 0;
+    slot.speed += (raw - slot.speed) * Math.min(1, dt * 12);
+
+    const dead = (st.state & S.DEAD) !== 0;
+    // 沈み切って見えなくなった死体は何もしない（コード製と同じ理屈）
+    if (dead && slot.dead && !root.visible) { slot.deadT += dt; return; }
+
+    root.position.set(st.x, st.y, st.z);
+    root.rotation.y = st.yaw;
+
+    // 歩様。止まっていれば待機、歩けば歩き、それ以上は走りへ寄せる
+    const move = clamp(slot.speed / SPEED_WALK, 0, 1);
+    const runK = clamp((slot.speed - 1.8) / 2.4, 0, 1);
+    o.mix(move, runK);
+    o.mixer.update(dt);
+
+    /* 死亡。このモデルに倒れるクリップは無いので、コード製と同じく体ごと倒す。
+       倒れた後はアニメを止める（待機のまま倒すと、死体が呼吸して見える） */
+    if (dead && !slot.dead) {
+      slot.dead = true;
+      slot.deadT = 0;
+      slot.fallDir = Math.random() < 0.5 ? 1 : -1;
+      o.mixer.timeScale = 0;
+    } else if (!dead && slot.dead) {
+      slot.dead = false;
+      slot.deadT = 0;
+      root.visible = true;
+      o.mixer.timeScale = 1;
+    }
+
+    if (slot.dead) {
+      slot.deadT += dt;
+      const k = clamp(slot.deadT / FALL_S, 0, 1);
+      const fall = (1 - Math.pow(1 - k, 3)) * slot.fallDir * Math.PI * 0.5;
+      root.rotation.x = fall;
+      // 足元を軸に倒すので、胴の太さのぶん持ち上げないと床にめり込む
+      root.position.y = st.y + Math.abs(Math.sin(fall)) * 0.24;
+      const gone = slot.deadT - CORPSE_HOLD_S;
+      if (gone > 0) {
+        const sinkK = clamp(gone / CORPSE_SINK_S, 0, 1);
+        root.position.y -= sinkK * 1.2;
+        if (sinkK >= 1) root.visible = false;
+      }
+    } else if (root.rotation.x !== 0) {
+      root.rotation.x = 0;
+    }
+
+    // 影カメラの外では影の描画だけが無駄になる（コード製と同じ理屈）
+    const wantShadow = Math.abs(st.x) <= SHADOW_BOUND && Math.abs(st.z) <= SHADOW_BOUND
+      && !(slot.dead && slot.deadT > CORPSE_HOLD_S);
+    if (wantShadow !== slot.shadowOn) {
+      slot.shadowOn = wantShadow;
+      for (const m of o.meshes) m.castShadow = wantShadow;
+    }
+
+    // 名札・銃声・ミニマップが同じフレームの頭の位置を読めるようにする
+    root.updateMatrixWorld(true);
+    if (o.head) o.head.getWorldPosition(slot.handle.headPos);
+    else slot.handle.headPos.set(st.x, st.y + HITBOX.STAND_H - 0.12, st.z);
+  }
+
   _apply(slot, st, dt, viewPos) {
+    if (slot.glb) return this._applyGlb(slot, st, dt);
     const e = slot.enemy;
     const p = e.parts;
 

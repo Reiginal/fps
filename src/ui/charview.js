@@ -10,8 +10,9 @@
 // 兵士そのものは対戦で使っているのと同じ物を組む。
 // 見せるためだけの別モデルを作ると、選んだ姿と実際に出る姿がずれる。
 import * as THREE from 'three';
-import { characterAt } from '../net/protocol.js';
+import { characterAt, HITBOX } from '../net/protocol.js';
 import { Enemy } from '../ai/enemy.js';
+import { preloadCharModel, charModelReady, spawnCharModel } from '../ai/glbchar.js';
 
 // 地形は要らないが、Enemyがlevelを見に来るので最小限の物を渡す。
 // 当たり判定も経路も使わないので、空の返事で足りる
@@ -80,20 +81,38 @@ export class CharView {
     const i = index | 0;
     if (i === this._index) return;
     this._index = i;
+    this._show(i);
+  }
 
+  /* 実際に出す。selectと分けてあるのは、外部モデルの枠は読み込みが後から届くので、
+     届いた時にupdate()からもう一度呼び直すため */
+  _show(i) {
     for (const m of this._models.values()) m.root.visible = false;
 
-    let e = this._models.get(i);
+    const def = characterAt(i);
+    // 外部モデルの枠。まだ届いていなければコード製で出して、届いたら差し替わる
+    if (def.model) preloadCharModel(def.model);
+    const useGlb = def.model && charModelReady(def.model);
+    const key = useGlb ? `glb:${i}` : i;
+
+    let e = this._models.get(key);
     if (!e) {
-      e = new Enemy(NO_LEVEL, { seed: characterAt(i).seed });
-      // 足元の暗がりは要らない。床が無いので浮いた影になる
-      e.blob.visible = false;
-      this.scene.add(e.root);
-      this._models.set(i, e);
+      if (useGlb) {
+        // プレビューも本番(remote.js)と同じ身長に合わせる。ここだけ大きいと詐欺になる
+        e = spawnCharModel(def.model, HITBOX.STAND_H);
+        this.scene.add(e.root);
+      } else {
+        e = new Enemy(NO_LEVEL, { seed: def.seed });
+        // 足元の暗がりは要らない。床が無いので浮いた影になる
+        e.blob.visible = false;
+        this.scene.add(e.root);
+      }
+      this._models.set(key, e);
     }
     e.root.visible = true;
     e.root.position.set(0, 0, 0);
     this._model = e;
+    this._modelIsGlb = !!useGlb;
   }
 
   start() { this.running = true; }
@@ -103,9 +122,16 @@ export class CharView {
   /** ロビーが開いている間だけ呼ばれる */
   update(dt) {
     if (!this.running || !this.ready || !this._model) return;
+    // 外部モデルの枠をコード製の代役で出している間に読み込みが届いたら、本物へ替える
+    if (!this._modelIsGlb && characterAt(this._index).model
+      && charModelReady(characterAt(this._index).model)) {
+      this._show(this._index);
+    }
     // ゆっくり回す。止まった絵だと、選んでいる物が模型に見える
     this._spin += dt * 0.5;
     this._model.root.rotation.y = this._spin;
+    // 外部モデルは待機のアニメを再生する(コード製は組んだ姿勢のまま)
+    this._model.mixer?.update(dt);
     this.renderer.render(this.scene, this.camera);
   }
 }
