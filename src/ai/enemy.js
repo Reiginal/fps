@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { Capsule } from 'three/addons/math/Capsule.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { charModelReady, spawnCharModel, SOLO_MODEL } from './glbchar.js';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -1532,6 +1533,38 @@ export class Enemy {
     // 湧いた直後、まだ一度もupdate()（→_animate()→_syncHitboxesFromBones()）が
     // 回っていない一瞬だけの仮の値。骨から作る本物に次のフレームで上書きされる
     this._syncHitboxes();
+    this._syncGlbVisual();
+  }
+
+  /**
+   * 見た目だけ外部モデル(スキン+クリップ入りGLB)へ差し替える試験。
+   *
+   * **判定と銃口は一切変えない。** コード製の骨は隠したまま今まで通り動き続けて、
+   * 当たり判定(_syncHitboxesFromBones)も発砲の位置(parts.muzzle)もそこから取る。
+   * 差し替わるのは目に見える面だけ。だから見えている歩き姿(クリップ)と
+   * 判定の姿勢(見えない骨)は少しずれる——歩幅ぶん程度で、試験の割り切り。
+   *
+   * モデルが未読込・失敗ならコード製のまま出る(glbview.jsと同じ決まり)。
+   * 読み込みは湧くたびに見るので、後から届いた波から順に切り替わる
+   */
+  _syncGlbVisual() {
+    if (!this._glbVis) {
+      if (!SOLO_MODEL || !charModelReady(SOLO_MODEL)) return;
+      // rootには個体差の縮尺が掛かっている。見た目の身長を判定の身長(this.height)へ
+      // 合わせるには、その縮尺で割った高さを渡す(remote.jsの「見た目を判定へ寄せる」と同じ理屈)
+      const v = spawnCharModel(SOLO_MODEL, this.height / (this.root.scale.x || 1));
+      this.root.add(v.root);
+      this._glbVis = v;
+      // コード製の体を隠す。骨は動き続けるが、面は描かない
+      for (const m of this.meshes) m.visible = false;
+    }
+    const v = this._glbVis;
+    v.root.rotation.set(0, 0, 0);
+    v.root.position.set(0, 0, 0);
+    v.root.visible = true;
+    v.mixer.timeScale = 1;
+    v.mix(0, 0);
+    this._glbFall = 0;
   }
 
   /** 落とした銃を構えに戻す。使い回す時にここを忘れると武器なしで湧く */
@@ -2198,6 +2231,22 @@ export class Enemy {
     const t = this.deathTime;
     const p = this.parts;
 
+    /* 外部モデルの見た目(試験)。倒れるクリップが無いので体ごと倒す。
+       見えない骨の死に方(下のdeathKind)はそのまま進み、rootへ掛かる
+       持ち上げ・傾き(_conformToGround)はこちらの見た目にもそのまま乗る */
+    if (this._glbVis) {
+      const v = this._glbVis;
+      if (!this._glbFall) {
+        this._glbFall = Math.random() < 0.5 ? 1 : -1;
+        v.mixer.timeScale = 0;   // 待機のまま倒すと、死体が呼吸して見える
+      }
+      const k = clamp(t / 0.75, 0, 1);
+      const fall = (1 - Math.pow(1 - k, 3)) * this._glbFall * Math.PI * 0.5;
+      v.root.rotation.x = fall;
+      // 足元を軸に倒すので、胴の太さのぶん持ち上げないと床にめり込む
+      v.root.position.y = Math.abs(Math.sin(fall)) * 0.24;
+    }
+
     // 空中で撃たれた個体がその場で固まると一気に嘘くさい。倒れる間は落ちる
     if (t < 1.8) {
       this.velocity.y -= 22 * dt;
@@ -2548,6 +2597,15 @@ export class Enemy {
     // 判定は描いた後の骨から作り直す。見た目と判定がずれないのはここが要
     this._syncHitboxesFromBones();
     this._updateContact();
+
+    // 外部モデルの見た目(試験)。歩様はクリップ再生に任せて、混ぜる重みだけ速度から決める
+    if (this._glbVis) {
+      const spd = Math.hypot(this.velocity.x, this.velocity.z);
+      const move = clamp(spd / Math.max(this.speed, 0.5), 0, 1);
+      const runK = clamp((spd - 1.8) / 2.4, 0, 1);
+      this._glbVis.mix(move, runK);
+      this._glbVis.mixer.update(dt);
+    }
   }
 
   /* 足元の接地の暗がり。太陽の影とは独立に効くので逆光でも足が地面に接する */
