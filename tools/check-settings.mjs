@@ -102,9 +102,17 @@ const mkTargets = () => ({
     setEnabled(v) { this.enabled = v; },
     setVolume(v) { this.volume = v; },
   },
+  // 画質の層（main.jsが組むgfxと同じ口）
+  gfx: {
+    scale: null, ao: null, bloom: null,
+    setRenderScale(v) { this.scale = v; },
+    setAo(v) { this.ao = v; },
+    setBloom(v) { this.bloom = v; },
+  },
 });
 const snap = (t) => JSON.stringify({
   input: t.input, vol: t.audio.volume, voice: t.voice.enabled, vvol: t.voice.volume,
+  gfx: t.gfx,
 });
 
 console.log('\n[1] 表の作り');
@@ -147,6 +155,12 @@ console.log('\n[2] 既定のままなら、今までと同じ手触り');
   applySettings({ sens: 2 }, t2);
   ok(Math.abs(t2.input.sensitivity - 0.0044) < 1e-9,
     `×2で倍になる（${t2.input.sensitivity}）`);
+
+  // 画質の既定も「今までと同じ絵」。設定を足した副作用で
+  // 何も触っていない人の画面がぼやけたり陰影が消えたりしてはいけない
+  ok(t.gfx.scale === 1, `描画のきめ細かさの既定は100%（今 ${t.gfx.scale}）`);
+  ok(t.gfx.ao === true, '接地の陰影の既定は入り');
+  ok(t.gfx.bloom === true, '光のにじみの既定は入り');
 }
 
 console.log('\n[3] 壊れた値を正す');

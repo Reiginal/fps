@@ -89,6 +89,37 @@ export const SETTINGS = [
       + 'そのかわりWindowsでは、しゃがみながらWを押すとタブが閉じることがあります',
     apply: (v, t) => { if (t.input) t.input.wantFullscreen = v; },
   },
+  /* ---- ここから画質。効かせ先は t.gfx（main.jsが組んで渡す） ----
+     友達のPCでカクついた時に、こちらが直すまで遊べないのでは遅い。
+     本人がその場で軽くできる逃げ道を置く。既定は全部「今までと同じ絵」 */
+  {
+    key: 'gfxScale',
+    store: 'blackout.gfx.scale',
+    name: '描画のきめ細かさ',
+    kind: 'range',
+    min: 0.5, max: 1, step: 0.05, def: 1,
+    fmt: (v) => `${Math.round(v * 100)}%`,
+    hint: '下げると少しぼやける代わりに軽くなります。カクつく時はまずここから',
+    apply: (v, t) => { t.gfx?.setRenderScale?.(v); },
+  },
+  {
+    key: 'gfxAo',
+    store: 'blackout.gfx.ao',
+    name: '接地の陰影',
+    kind: 'check',
+    def: true,
+    hint: '物と床の接点に入る細い影です。切ると画面を2回描く工程が1回になり、大きく軽くなります',
+    apply: (v, t) => { t.gfx?.setAo?.(v); },
+  },
+  {
+    key: 'gfxBloom',
+    store: 'blackout.gfx.bloom',
+    name: '光のにじみ',
+    kind: 'check',
+    def: true,
+    hint: '太陽や発砲の光がふわっと広がる効果です。切ると少し軽くなります',
+    apply: (v, t) => { t.gfx?.setBloom?.(v); },
+  },
 ];
 
 export const defOf = (key) => SETTINGS.find((s) => s.key === key) || null;

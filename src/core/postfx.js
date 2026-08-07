@@ -80,6 +80,11 @@ const AoComposeShader = {
     tAo: { value: null },
     tDepth: { value: null },
     tNormal: { value: null },
+    /* 設定「接地の陰影」を切った時に1になる。このパス自体は消せない
+       （MSAAのrtWorldを合成器の鎖へ写す繋ぎ目を兼ねている）ので、
+       AOと接触影の計算だけ素通しにする。AO側のパス(GTAOPass)は止まっていて
+       バッファが古いままなので、読んでしまうと前のフレームの陰が貼り付く */
+    uAoOff: { value: 0 },
     uAoTexel: { value: new THREE.Vector2(1 / 960, 1 / 540) },
     uIntensity: { value: 0.62 },
     // 直射が当たっている面にどれだけAOを残すか。0.55まで絞ると
@@ -149,6 +154,7 @@ const AoComposeShader = {
   fragmentShader: /* glsl */`
     uniform sampler2D tWorld, tAo, tDepth, tNormal;
     uniform vec2 uAoTexel;
+    uniform float uAoOff;
     uniform float uIntensity, uDirectKeep, uLumaLo, uLumaHi, uSunLo, uSunHi;
     uniform float uNarrow, uWide, uContactGain, uDeepLo, uDeepHi, uContactBoost;
     uniform mat4 uProj, uProjInv;
@@ -186,6 +192,8 @@ const AoComposeShader = {
 
     void main() {
       vec3 col = texture2D(tWorld, vUv).rgb;
+      // 接地の陰影を切っている間は、世界の絵をそのまま次のパスへ渡すだけ
+      if (uAoOff > 0.5) { gl_FragColor = vec4(col, 1.0); return; }
       float ao = texture2D(tAo, vUv).r;
 
       float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));

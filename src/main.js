@@ -509,6 +509,8 @@ class Game {
        その時に_resize()が入れ直す */
     this._vw = innerWidth;
     this._vh = innerHeight;
+    // 描画のきめ細かさ（設定gfxScale）。drawScale()の結果に掛ける
+    this._userScale = 1;
     this._toRemote = new THREE.Vector3();
     this._plateV = new THREE.Vector3();
     this._ray = new THREE.Ray();
@@ -855,7 +857,36 @@ class Game {
     this.voice = new VoiceChat((to, d) => this.net?.sendVoice(to, d));
     this.voice.onChange = () => this._updateVoiceHud();
 
-    this.settings = new SettingsMenu({ input: this.input, audio: this.audio, voice: this.voice });
+    /* 画質の効かせ先。設定の表(settings.js)のgfx系はここへ届く。
+       3つともその場で効く（描き直しの口が元からあるので、それを呼ぶだけ） */
+    const gfx = {
+      // 描画のきめ細かさ。drawScale()（窓の大きさから決まる上限）に掛ける係数。
+      // _resize()が倍率を取り直して合成器まで配り直すので、それをそのまま使う
+      setRenderScale: (v) => {
+        const s = clamp(v || 1, 0.5, 1);
+        if (s === this._userScale) return;
+        this._userScale = s;
+        this._resize();
+      },
+      /* 接地の陰影。パス(ao.enabled)を切ると法線パスごと飛ぶ＝
+         シーンの2回目の描画がまるごと消える。ここが画質項目で一番大きい削り。
+         合成側(aoCompose)は鎖の繋ぎ目なので消せない。uAoOffで素通しにする
+         （前のフレームの古いAOバッファを読み続けないように） */
+      setAo: (v) => {
+        if (!this.fx) return;
+        this.fx.ao.enabled = !!v;
+        this.fx.aoCompose.uniforms.uAoOff.value = v ? 0 : 1;
+      },
+      // 光のにじみ。ブルームと太陽のグレアはどちらも「光が広がる」係なので一緒に切る
+      setBloom: (v) => {
+        if (!this.fx) return;
+        this.fx.bloom.enabled = !!v;
+        this.fx.glare.enabled = !!v;
+      },
+    };
+    this.settings = new SettingsMenu({
+      input: this.input, audio: this.audio, voice: this.voice, gfx,
+    });
     this.settings.onChange = (key, value) => {
       // 遊んでいる最中に全画面を切られたら、その場で窓へ戻す。
       // 次に遊び始めるまで効かないと、切ったのに何も起きないように見える
@@ -1549,8 +1580,9 @@ class Game {
     this.viewCamera.aspect = w / h;
     this.viewCamera.updateProjectionMatrix();
     // 倍率は窓の大きさで決まるので、寸法を入れる前に取り直す。
-    // 順番が逆だと合成器のバッファだけ古い倍率で作られて画がずれる
-    this.renderer.setPixelRatio(drawScale(w, h));
+    // 順番が逆だと合成器のバッファだけ古い倍率で作られて画がずれる。
+    // _userScaleは設定「描画のきめ細かさ」（既定1＝今まで通り）
+    this.renderer.setPixelRatio(drawScale(w, h) * this._userScale);
     this.renderer.setSize(w, h);
     this.fx.setSize(w, h);
     this.effects.setPixelScale(this.renderer.getDrawingBufferSize(new THREE.Vector2()).y);
