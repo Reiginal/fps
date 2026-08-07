@@ -20,9 +20,20 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
    という決まりを見張っているので、キャラを直下へ置くとそこで落ちる */
 export const CHAR_DIR = 'assets/models/chars';
 
+/* 1人プレイの敵の見た目に使うモデル(試験)。
+   ここを空文字にすれば、敵は全部コード製の見た目へ戻る */
+export const SOLO_MODEL = 'soldier';
+
 /* 読み込んだ雛形の置き場。name -> {scene, clips} 。
    'loading'/'failed' も入れて、失敗した物を何度も読みに行かない */
 const CACHE = new Map();
+
+/**
+ * 雛形を直接流し込む口。**検査用。**
+ * ブラウザの外(Node)ではURLの読み込みができないので、検査は
+ * ファイルを自分で読んで、ここから流し込んでから実物の動きを確かめる
+ */
+export function primeCharModel(name, tpl) { CACHE.set(name, tpl); }
 
 /** 読み込みを始める。何度呼んでも1回しか読まない */
 export function preloadCharModel(name) {

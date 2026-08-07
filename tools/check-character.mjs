@@ -246,5 +246,66 @@ console.log('\n[8] 外部モデルの枠（model欄が付いた物）');
   }
 }
 
+console.log('\n[9] 1人プレイの敵も外部モデルの見た目で出る（試験）');
+/* 見た目だけGLBへ差し替えて、判定と銃口はコード製の骨(隠したまま動く)から取る作り。
+   壊れると黙ってコード製に落ちるので、ここで実物を流し込んで確かめる。
+   ブラウザの外ではURLを読めないため、ファイルを自分で読んでprimeで流し込む */
+{
+  const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
+  const { primeCharModel, charModelReady, SOLO_MODEL } = await import('../src/ai/glbchar.js');
+  ok(!!SOLO_MODEL, `1人プレイ用のモデル名がある（${SOLO_MODEL}）`);
+
+  // 流し込む前はコード製のまま（読み込みが失敗した時と同じ道）
+  const before = new Enemy(level, { seed: 1 });
+  before.spawn(level.enemySpawns[0]);
+  ok(before.meshes.some((m) => m.visible), '届いていない間はコード製の見た目のまま');
+  ok(!before._glbVis, '外部モデルは付いていない');
+
+  const buf = readFileSync(new URL(`../assets/models/chars/${SOLO_MODEL}.glb`, import.meta.url));
+  const gltf = await new Promise((res, rej) => new GLTFLoader().parse(
+    buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength), '', res, rej,
+  ));
+  primeCharModel(SOLO_MODEL, { scene: gltf.scene, clips: gltf.animations });
+  ok(charModelReady(SOLO_MODEL), '流し込んだら使える扱いになる');
+
+  const e = new Enemy(level, { seed: 1 });
+  e.spawn(level.enemySpawns[0]);
+  ok(!!e._glbVis, '外部モデルが付いた');
+  ok(e._glbVis.root.parent === e.root, '体(root)へぶら下がっている＝位置と向きが一緒に動く');
+  ok(e.meshes.every((m) => !m.visible), 'コード製の体の面は全部隠れた');
+
+  // 判定は今まで通り、見えない骨から取れること
+  e.root.updateMatrixWorld(true);
+  e._syncHitboxesFromBones();
+  const headY = e._headPos.y - level.enemySpawns[0].y;
+  ok(headY > 1.2 && headY < 2.1, `頭の判定が今まで通りの高さにある（足元から${headY.toFixed(2)}m）`);
+
+  // クリップが実際に骨を動かすこと（腰の骨の位置がアニメで変わる）
+  const hips = e._glbVis.root.getObjectByName('mixamorigHips')
+    || (() => { let b = null; e._glbVis.root.traverse((o) => { if (o.isBone && /Hips/.test(o.name) && !b) b = o; }); return b; })();
+  ok(!!hips, '腰の骨が複製の中にもある');
+  const v0 = new THREE.Vector3();
+  const v1 = new THREE.Vector3();
+  e._glbVis.mix(1, 1);          // 走りに全振り
+  e._glbVis.mixer.update(0.01);
+  e.root.updateMatrixWorld(true);
+  hips.getWorldPosition(v0);
+  e._glbVis.mixer.update(0.3);  // 走りの周期の半分近く進める
+  e.root.updateMatrixWorld(true);
+  hips.getWorldPosition(v1);
+  ok(v0.distanceTo(v1) > 0.001, `クリップで骨が動く（${(v0.distanceTo(v1) * 1000).toFixed(1)}mm動いた）`);
+
+  // 倒すと体ごと倒れて、待機の再生が止まる（死体が呼吸しない）
+  e.hit(9999, 'chest', new THREE.Vector3(0, 0, -1));
+  ok(!e.alive, '倒れた');
+  for (let i = 0; i < 90; i++) e._updateDeath(1 / 60);
+  ok(Math.abs(e._glbVis.root.rotation.x) > 1.2, `体ごと倒れている（${e._glbVis.root.rotation.x.toFixed(2)}rad）`);
+  ok(e._glbVis.mixer.timeScale === 0, '倒れた後はアニメが止まっている');
+
+  // 湧き直したら立ち姿へ戻る
+  e.spawn(level.enemySpawns[0]);
+  ok(e._glbVis.root.rotation.x === 0 && e._glbVis.mixer.timeScale === 1, '湧き直すと立ち姿へ戻る');
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);

@@ -24,6 +24,7 @@ import { Diag } from './ui/diag.js';
 import { CharView } from './ui/charview.js';
 import { NetClient } from './net/client.js';
 import { RemotePlayers } from './net/remote.js';
+import { preloadCharModel, SOLO_MODEL } from './ai/glbchar.js';
 import {
   K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, outsideZone, CHARACTERS,
   TEAM_NAMES,
@@ -86,6 +87,10 @@ const SUN_DIR = new THREE.Vector3(...TOD.dir).normalize();
 // （以前はtextures.js側が別に持つ固定値のままで、朝・昼に遊んでも
 // 霧の暖色側が夕方の方角を向いたままだった）
 installAerialPerspective(SUN_DIR);
+
+// 1人プレイの敵の見た目に使う外部モデル(試験)を、起動した時点で読み始める。
+// 敵が湧く時にまだ届いていなければコード製で出て、届いた波から切り替わる
+preloadCharModel(SOLO_MODEL);
 
 // ビューモデルのキーライトが必ず確保する向き（カメラ空間・右上手前）。
 // 太陽追従だけにすると背を向けた時に銃が真っ黒になるので、これへ寄せて下限を作る
