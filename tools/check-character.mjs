@@ -196,7 +196,9 @@ console.log('\n[8] 外部モデルの枠（model欄が付いた物）');
 {
   const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
   const withModel = CHARACTERS.filter((c) => c.model);
-  ok(withModel.length > 0, `外部モデルの枠が ${withModel.length} 個ある`);
+  // 0個でもよい(2026-08-07に「重い」と言われて品評会を畳んだ)。
+  // 枠がある時だけ、その実物を確かめる
+  ok(true, `外部モデルの枠は ${withModel.length} 個`);
   for (const c of withModel) {
     const path = new URL(`../assets/models/chars/${c.model}.glb`, import.meta.url);
     let buf = null;
@@ -264,13 +266,19 @@ console.log('\n[9] 1人プレイの敵も外部モデルの見た目で出る（
 {
   const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
   const { primeCharModel, charModelReady, SOLO_MODEL } = await import('../src/ai/glbchar.js');
-  ok(!!SOLO_MODEL, `1人プレイ用のモデル名がある（${SOLO_MODEL}）`);
+  /* 空なら「切ってある」が正しい状態(2026-08-07に「重い」と言われて切った)。
+     切ってある時は、敵がコード製のままなことだけ確かめる。
+     名前がある時は、下で実物を流し込んで差し替えの動きを確かめる */
+  ok(true, `1人プレイ用のモデル: ${SOLO_MODEL || '無し(コード製)'}`);
 
-  // 流し込む前はコード製のまま（読み込みが失敗した時と同じ道）
+  // 流し込む前(または切ってある間)はコード製のまま
   const before = new Enemy(level, { seed: 1 });
   before.spawn(level.enemySpawns[0]);
   ok(before.meshes.some((m) => m.visible), '届いていない間はコード製の見た目のまま');
   ok(!before._glbVis, '外部モデルは付いていない');
+  if (!SOLO_MODEL) {
+    console.log('  （切ってあるので、差し替えの動きの検査はここまで）');
+  } else {
 
   const buf = readFileSync(new URL(`../assets/models/chars/${SOLO_MODEL}.glb`, import.meta.url));
   const gltf = await new Promise((res, rej) => new GLTFLoader().parse(
@@ -330,6 +338,7 @@ console.log('\n[9] 1人プレイの敵も外部モデルの見た目で出る（
   // 湧き直したら立ち姿へ戻る
   e.spawn(level.enemySpawns[0]);
   ok(e._glbVis.root.rotation.x === 0 && e._glbVis.mixer.timeScale === 1, '湧き直すと立ち姿へ戻る');
+  }
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);

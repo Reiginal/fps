@@ -21,8 +21,11 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 export const CHAR_DIR = 'assets/models/chars';
 
 /* 1人プレイの敵の見た目に使うモデル(試験)。
-   ここを空文字にすれば、敵は全部コード製の見た目へ戻る */
-export const SOLO_MODEL = 'soldier';
+   ここを空文字にすれば、敵は全部コード製の見た目へ戻る。
+   2026-08-07: 'soldier'で試したが「めっちゃ重い」と言われて空へ戻した。
+   スキンメッシュは骨の計算が毎フレーム1体ずつ掛かるうえ、このゲームは
+   **死体を消さない**ので、波が進むほど骨付きの死体が積み上がっていた疑いが濃い */
+export const SOLO_MODEL = '';
 
 /* モデルごとの調整表。
    rotY: 前を-zへ向けるための回転。作った人によって前の向きがばらばらで、
