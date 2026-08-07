@@ -46,6 +46,16 @@ const REJOIN_WAITS = [1000, 2000, 3000, 5000, 8000];
    「今どうだったか」が薄まる */
 const FRAME_SAMPLES = 2000;
 
+/* 描く速さの上限(毎秒)。
+   requestAnimationFrameは画面のリフレッシュレートで呼ばれるので、
+   120Hzの画面(ProMotionのMacBook Pro等)では何もしないと全部の仕事が
+   毎秒120回走る＝60Hzの機械のちょうど2倍の熱になる。
+   このゲームは物理が60Hz固定・対戦の受信が毎秒20回なので、
+   60より速く描いても買える手触りがほとんど無い。上限で止める。
+   60Hzの画面では毎回升目に乗るので、何も変わらない */
+const FRAME_CAP_HZ = 60;
+const FRAME_MS = 1000 / FRAME_CAP_HZ;
+
 /* 描画命令(draw call)と三角形の数を覚えておく枚数。毎秒1回しか取らないので40秒ぶん。
    フレーム時間と違って毎フレーム取らないのは、この2つは1秒の中では
    ほとんど動かない数字だから（敵の数と画面に入っている物で決まる） */
@@ -490,6 +500,8 @@ class Game {
     this.perfMeter = null;
     // メニューの間、既に1枚描いてあるか。描いてあれば描き直さない（_loop末尾を参照）
     this._idleDrawn = false;
+    // fpsの上限の升目。次に描いてよい時刻（_loopの頭を参照）
+    this._nextFrameAt = 0;
     this._lastTime = 0;
     this._invQ = new THREE.Quaternion();
     // 倒れている間の見回し。生きている間はnullで、倒れた瞬間に
@@ -829,6 +841,10 @@ class Game {
     this._dropMeshes = new Map();
     // ソロで飛んでいる手榴弾。サーバーがいないので手元で持つ
     this._soloNades = [];
+    /* ソロで投げられる手榴弾の残り。対戦はサーバーがNADE.PER_ROUNDで数えているのに、
+       ソロは数える人がいなくて投げ放題だった（「2発ぐらいにしておいて」）。
+       出撃ごとにPER_ROUNDへ戻る。両モードで同じ数になる */
+    this._soloNadeLeft = NADE.PER_ROUND;
     this._soloNadeId = 1;
     // 毎フレーム作り直さないための入れ物
     this._mapMe = { x: 0, z: 0, yaw: 0 };
@@ -1623,6 +1639,7 @@ class Game {
     this.player.refill();
     this.player.yaw = 0; this.player.pitch = 0;
     this.player.teleport(this.level.playerSpawn);
+    this._soloNadeLeft = NADE.PER_ROUND;
     this.weapons.resetAll();
     this.director.reset();
     this.effects.clear();
@@ -2517,7 +2534,12 @@ class Game {
     // 画面の札に印を付ける位置は「持ち物の何番目か」。武器の番号そのものだと、
     // 持って出ない武器のぶんずれて、別の札が光る
     const slotAt = this.weapons.carry.indexOf(this.weapons.index);
-    this.hud.ammo(w.ammo, w.reserve, w.def.name, slotAt, this.weapons.reloading, !!w.def.melee);
+    this.hud.ammo(
+      w.ammo, w.reserve, w.def.name, slotAt, this.weapons.reloading, !!w.def.melee,
+      // ソロの手榴弾だけ残りの数を出す。対戦は数をサーバーが持っていて
+      // 手元に写しが無いので、今まで通り横線のまま
+      w.def.thrown && this.mode !== 'versus' ? this._soloNadeLeft : null,
+    );
     this.hud.bandage(
       this.player.bandages, this.player.healing, HEAL.TIME_S,
       this.weapons.bandageOut, HEAL.PER_ROUND,
@@ -2632,6 +2654,13 @@ class Game {
 
   /** ソロの手榴弾。判定を持つ相手がいないので、飛翔も爆発もここで完結させる */
   _throwNadeSolo() {
+    // 残りが無ければ投げない。対戦のサーバーが黙って捨てるのと同じ扱いだが、
+    // ソロは手元なので空撃ちのカチッだけ返す（押したのに無反応、を作らない）
+    if (this._soloNadeLeft <= 0) {
+      this.audio.click(2800, 0.3, 0.03);
+      return;
+    }
+    this._soloNadeLeft--;
     const cam = this.camera;
     _throwOrigin.setFromMatrixPosition(cam.matrixWorld);
     _throwDir.set(0, 0, -1).applyQuaternion(cam.quaternion);
@@ -2961,6 +2990,17 @@ class Game {
   /* ------------------------------------------------------- ループ */
 
   _loop() {
+    /* fpsの上限（FRAME_CAP_HZのコメント参照）。
+       16.67msの升目に乗った回だけ描き、乗らない回は何もせずに返す。
+       120Hzならちょうど1回おきになって60fpsで安定する。
+       時刻を進めない（_lastTimeを触らない）ので、次に描く回のdtには
+       飛ばした時間がそのまま入り、動きの速さは変わらない */
+    const tNow = performance.now();
+    if (tNow < this._nextFrameAt) return;
+    this._nextFrameAt += FRAME_MS;
+    // タブ復帰などで升目に大きく置いていかれたら、今へ引き直す
+    if (tNow - this._nextFrameAt > FRAME_MS * 3) this._nextFrameAt = tNow;
+
     // 描画命令の数を0へ戻す。ここから次のrender全部（影・AO・ポスト）を数える。
     // autoResetを切ってある理由はboot()のrenderer設定を参照
     this.renderer.info.reset();

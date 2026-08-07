@@ -208,17 +208,18 @@ export class HUD {
     }
   }
 
-  ammo(cur, reserve, name, slotIndex, reloadT, melee = false) {
+  ammo(cur, reserve, name, slotIndex, reloadT, melee = false, thrownLeft = null) {
     // 近接武器は弾を持たない。数字を出すと「9999発の銃」に見える。
-    // 欄ごと消さずに横線を置くのは、消すと下段の並びが動いて目が泳ぐため
-    const shown = melee ? '—' : cur;
+    // 欄ごと消さずに横線を置くのは、消すと下段の並びが動いて目が泳ぐため。
+    // 投げ物で残りが分かる時（ソロの手榴弾）はその数を出す
+    const shown = thrownLeft != null ? thrownLeft : (melee ? '—' : cur);
     if (shown !== this._lastAmmo) {
       this._lastAmmo = shown;
       this.el.ammo.textContent = shown;
-      this.el.ammoWrap.classList.toggle('empty', !melee && cur === 0);
+      this.el.ammoWrap.classList.toggle('empty', thrownLeft === 0 || (!melee && cur === 0));
     }
     // 予備弾も毎フレーム書いていた。文字を作って書き込むぶんの仕事が毎回乗る
-    const rest = melee ? '' : `/ ${reserve}`;
+    const rest = melee || thrownLeft != null ? '' : `/ ${reserve}`;
     if (rest !== this._lastReserve) {
       this._lastReserve = rest;
       this.el.reserve.textContent = rest;
