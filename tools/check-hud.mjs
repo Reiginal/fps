@@ -19,7 +19,7 @@ const mkEl = (id) => {
   return {
     id,
     textContent: '',
-    innerHTML: '',
+    _html: '',
     style: {},
     offsetWidth: 100,
     children: [],
@@ -31,7 +31,23 @@ const mkEl = (id) => {
     },
     _classes: classes,
     appendChild(c) { this.children.push(c); c._parent = this; },
+    get firstChild() { return this.children[0] || null; },
     get lastChild() { return this.children[this.children.length - 1] || null; },
+    /* 名札(nameplates)はinnerHTMLで部品を組んでfirstChild/lastChildで掴むので、
+       divの入れ子だけ読める最小の解釈を持つ。本物のDOMの代わりではなく、
+       この検査で使う形が通るだけの物 */
+    set innerHTML(v) {
+      this._html = String(v || '');
+      this.children.length = 0;
+      const stack = [this];
+      for (const m of this._html.matchAll(/<div class="([^"]+)">|<\/div>/g)) {
+        if (m[0] === '</div>') { if (stack.length > 1) stack.pop(); continue; }
+        const el = mkEl(m[1]);
+        stack[stack.length - 1].appendChild(el);
+        stack.push(el);
+      }
+    },
+    get innerHTML() { return this._html; },
     remove() {
       const p = this._parent;
       if (p) p.children.splice(p.children.indexOf(this), 1);
@@ -205,6 +221,35 @@ console.log('\n[軽さ] 毎フレームの無駄をしていない');
     ok(/_mapAcc[\s\S]{0,120}?1 \/ MAP_HZ/.test(main), 'その回数で間引いている');
     ok(/_mapAcc[\s\S]{0,200}?hud\.minimap/.test(main), '間引いた後で塗っている');
   }
+}
+
+console.log('\n[軽さ・名札] 相手の頭上の名札も、変わった時だけ書く');
+/* 対戦で一番数が多いHUD。前は1人につき毎フレーム10個のstyleを無条件に書き、
+   位置がleft/topだったので書くたびに配置のやり直し(reflow)まで走っていた。
+   位置はtransformへ移し、全部を前回値と比べてから書く */
+{
+  const h2 = new HUD();
+  const mk = (hp) => [{ id: 7, x: 320, y: 180, name: 'nana', hp, dist: 20, fade: 1, mate: false }];
+  h2.nameplates(mk(100));
+  const root = document.getElementById('plates').lastChild;
+  ok(!!root && root.children.length === 2, '札が組み上がる（名前とバー）');
+  ok(typeof root.style.transform === 'string' && root.style.transform.includes('320px'),
+    `位置がtransformで入る（${root.style.transform}）`);
+  ok(!('left' in root.style) && !('top' in root.style),
+    '配置のやり直しが走るleft/topを使っていない');
+
+  // ここからstyleへの書き込みを数える
+  const count = { n: 0 };
+  const watch = (el) => {
+    el.style = new Proxy(el.style, {
+      set(o, k, v) { count.n++; o[k] = v; return true; },
+    });
+  };
+  watch(root); watch(root.lastChild); watch(root.lastChild.firstChild);
+  for (let i = 0; i < 10; i++) h2.nameplates(mk(100));
+  ok(count.n === 0, `同じ状態なら10回呼んでも書かない（${count.n}回）`);
+  h2.nameplates(mk(50));
+  ok(count.n > 0, `体力が動いたら書く（${count.n}回）`);
 }
 
 console.log('\n[計測窓] ?debugの数字窓が、測る側なのに重さを増やしていない');

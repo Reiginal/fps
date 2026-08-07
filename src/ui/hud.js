@@ -280,6 +280,10 @@ export class HUD {
   }
 
   wave(n, remaining) {
+    // 毎フレーム呼ばれる。数字が動くのは湧きと撃破の瞬間だけなので、その時だけ書く
+    const key = n * 1000 + remaining;
+    if (key === this._lastWave) return;
+    this._lastWave = key;
     this.el.wave.textContent = `第${n}波`;
     this.el.remain.textContent = `残敵 ${remaining}名`;
   }
@@ -548,27 +552,42 @@ export class HUD {
       // ただし縮めきると字がつぶれて誰か分からなくなるので、下限で止める
       const k = clamp(1 - (d - 6) / 90, 0.55, 1);
       const hp = clamp(p.hp ?? 100, 0, 100);
-      e.root.style.left = `${Math.round(p.x)}px`;
-      e.root.style.top = `${Math.round(p.y)}px`;
-      e.root.style.fontSize = `${(15 * k).toFixed(1)}px`;
+      /* ここから下は、他のHUDと同じ「変わった時だけ書く」。
+         前は毎フレーム10個の style を無条件で書いていて、しかも位置が
+         left/top だったので、書くたびに配置のやり直し(reflow)まで走っていた。
+         位置はtransformへ移す。transformは配置に効かないので、
+         動いても合成し直すだけで済む。
+         末尾のtranslate(-50%,-100%)は、CSSが持っていた「足元でなく頭上に
+         中央揃えで置く」ための錨をこちらへ引き取った物 */
+      const tf = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px) translate(-50%, -100%)`;
+      if (e.tf !== tf) { e.tf = tf; e.root.style.transform = tf; }
+      const fs = `${(15 * k).toFixed(1)}px`;
+      if (e.fs !== fs) { e.fs = fs; e.root.style.fontSize = fs; }
       // 距離のぶんの薄さに、発砲からの経過ぶんを掛ける。
       // fadeが0へ落ちる＝撃ってから時間が経ったということなので、札もそのまま消える。
       // ぱっと消すのではなく薄れさせるのは、消えた瞬間を「今そこから離れた」と
       // 誤読させないため
       const fade = p.fade == null ? 1 : clamp(p.fade * 1.6, 0, 1);
-      e.root.style.opacity = (clamp(1 - (d - 12) / 90, 0.45, 1) * fade).toFixed(2);
+      const op = (clamp(1 - (d - 12) / 90, 0.45, 1) * fade).toFixed(2);
+      if (e.op !== op) { e.op = op; e.root.style.opacity = op; }
       // 重なった時は近いほうを手前に。奥の名前が手前に来ると両方読めなくなる
-      e.root.style.zIndex = Math.max(0, 999 - Math.round(d));
+      const z = Math.max(0, 999 - Math.round(d));
+      if (e.z !== z) { e.z = z; e.root.style.zIndex = z; }
       // 満タンの相手にまでバーを出すと、居るだけで画面が線だらけになる
-      e.bar.style.display = hp >= 100 ? 'none' : 'block';
-      e.bar.style.width = `${Math.round(46 * k)}px`;
-      e.fill.style.width = `${hp}%`;
-      e.root.classList.toggle('hurt', hp < 34);
+      const barOn = hp < 100;
+      if (e.barOn !== barOn) { e.barOn = barOn; e.bar.style.display = barOn ? 'block' : 'none'; }
+      const barW = `${Math.round(46 * k)}px`;
+      if (e.barW !== barW) { e.barW = barW; e.bar.style.width = barW; }
+      const fill = `${hp}%`;
+      if (e.fill2 !== fill) { e.fill2 = fill; e.fill.style.width = fill; }
+      const hurt = hp < 34;
+      if (e.hurt !== hurt) { e.hurt = hurt; e.root.classList.toggle('hurt', hurt); }
       /* 味方の札は色を変える。**2対2で一番困るのは味方を撃つこと。**
          味方には弾が当たらない作りにしてあるが、撃っている本人は
          「当たらない」ことに気づけない（外したのと見分けが付かない）ので、
          狙う前に色で分かる必要がある */
-      e.root.classList.toggle('mate', !!p.mate);
+      const mate = !!p.mate;
+      if (e.mate !== mate) { e.mate = mate; e.root.classList.toggle('mate', mate); }
     }
     // 見えなくなった相手・抜けた相手の札を片付ける
     for (const [id, e] of this.plateEls) {
@@ -579,6 +598,8 @@ export class HUD {
   /** 回線の具合。空文字で消える */
   netStatus(text) {
     const t = text || '';
+    if (t === this._lastNet) return;   // 毎フレーム呼ばれる。変わった時だけ触る
+    this._lastNet = t;
     this.el.netstat.textContent = t;
     this.el.netstat.classList.toggle('hidden', t === '');
   }
@@ -643,12 +664,21 @@ export class HUD {
   roster(rows) {
     const el = this.el.rosterRows;
     if (!el) return;
-    const list = (rows || []).slice()
-      .sort((a, b) => ((b.rounds | 0) - (a.rounds | 0)) || (a.id - b.id));
-    // 毎フレーム呼ばれるので、中身が変わった時だけDOMを触る
-    const key = list.map((r) => `${r.id}:${r.name}:${r.rounds | 0}:${r.me ? 1 : 0}`).join('|');
+    /* 毎フレーム呼ばれるので、中身が変わった時だけDOMを触る。
+       前は変わったかを調べるためにslice→sort→map→joinを毎フレームやっていて、
+       「触らない」ためだけに配列2本と文字列を毎回作って捨てていた。
+       数字1個に畳んで比べれば、変わっていないフレームでは何も作らない */
+    let key = ((rows?.length || 0) * 31) | 0;
+    for (const r of (rows || [])) {
+      key = ((key * 33) + (r.id | 0) * 7 + (r.rounds | 0) * 131 + (r.me ? 1 : 0)) | 0;
+      // 名前の変わり目も拾う（入り直しで同じidに別の名前が付くことがある）
+      const n = r.name || '';
+      for (let i = 0; i < n.length; i++) key = ((key * 33) + n.charCodeAt(i)) | 0;
+    }
     if (key === this._lastRoster) return;
     this._lastRoster = key;
+    const list = (rows || []).slice()
+      .sort((a, b) => ((b.rounds | 0) - (a.rounds | 0)) || (a.id - b.id));
     // 先頭に印を付ける。3人4人と増えると、並び順だけでは
     // 「今は誰が一番なのか」が一瞬で読めなくなる。
     // 全員0本の時は誰も先頭ではない（開始直後に1人だけ光ると誤解する）

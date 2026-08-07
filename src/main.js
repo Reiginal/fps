@@ -503,6 +503,12 @@ class Game {
     // 到達位置がサーバーと食い違い、補正が常時走ることになる
     this._acc = 0;
     this._plates = [];
+    /* 窓の大きさ。毎フレームinnerWidth/innerHeightを読まないための控え。
+       あの2つは読むだけでブラウザが配置の計算を挟むことがある（特に名札の
+       ループの中で1人ごとに読んでいた）。変わるのはリサイズの時だけなので、
+       その時に_resize()が入れ直す */
+    this._vw = innerWidth;
+    this._vh = innerHeight;
     this._toRemote = new THREE.Vector3();
     this._plateV = new THREE.Vector3();
     this._ray = new THREE.Ray();
@@ -1536,6 +1542,8 @@ class Game {
 
   _resize() {
     const w = innerWidth, h = innerHeight;
+    this._vw = w;
+    this._vh = h;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.viewCamera.aspect = w / h;
@@ -2168,8 +2176,8 @@ class Game {
       if (this._plateV.z > 1) continue;
       list.push({
         id: st.id,
-        x: (this._plateV.x * 0.5 + 0.5) * innerWidth,
-        y: (-this._plateV.y * 0.5 + 0.5) * innerHeight,
+        x: (this._plateV.x * 0.5 + 0.5) * this._vw,
+        y: (-this._plateV.y * 0.5 + 0.5) * this._vh,
         name: this.net.nameOf(st.id),
         hp: st.hp,
         dist,
@@ -2344,7 +2352,7 @@ class Game {
     this.hud.sprinting(this.player.sprinting);
 
     const spread = this.weapons._currentSpread(this.player);
-    const px = Math.tan(spread) / Math.tan((this.camera.fov * Math.PI) / 360) * (innerHeight / 2);
+    const px = Math.tan(spread) / Math.tan((this.camera.fov * Math.PI) / 360) * (this._vh / 2);
     this.hud.crosshair(clamp(px, 2, 190), this.weapons.adsFactor > 0.8);
 
     const w = this.weapons.current;
