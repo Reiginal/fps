@@ -68,6 +68,25 @@ export class SettingsMenu {
 
   _build() {
     this.el.rows.textContent = '';
+    /* 表のgroupごとに列を作って左右に並べる（CSSの.stcols）。
+       項目が増えて1列だと縦に長く、スクロールしないと画質まで辿り着けなかった。
+       列の順は表に出てきた順。groupの無い項目は「操作と音」へ */
+    const wrap = document.createElement('div');
+    wrap.className = 'stcols';
+    const cols = new Map();
+    const colOf = (name) => {
+      let col = cols.get(name);
+      if (!col) {
+        col = document.createElement('div');
+        const head = document.createElement('div');
+        head.className = 'stgroup';
+        head.textContent = name;
+        col.append(head);
+        cols.set(name, col);
+        wrap.append(col);
+      }
+      return col;
+    };
     for (const s of SETTINGS) {
       const row = document.createElement('div');
       row.className = 'strow';
@@ -115,9 +134,10 @@ export class SettingsMenu {
       hint.textContent = s.hint || '';
 
       row.append(head, input, hint);
-      this.el.rows.append(row);
+      colOf(s.group || '操作と音').append(row);
       this._rows.set(s.key, { input, val });
     }
+    this.el.rows.append(wrap);
     this._refresh();
   }
 

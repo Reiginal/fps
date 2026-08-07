@@ -482,7 +482,15 @@
     background: rgba(3, 5, 8, .9);
   }
   #settings.hidden { display: none; }
-  .stpanel { width: min(420px, 86vw); text-align: center; }
+  /* 2列で並べる（左=操作と音、右=画質）。項目が増えて1列だと縦に長く、
+     スクロールしないと画質まで辿り着けなかった。狭い画面では1列へ畳む */
+  .stpanel { width: min(880px, 92vw); text-align: center; }
+  .stcols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 44px; text-align: left; }
+  @media (max-width: 720px) { .stcols { grid-template-columns: 1fr; } }
+  .stgroup {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .22em; color: var(--dim);
+    border-bottom: 1px solid rgba(255,255,255,.14); padding-bottom: 6px; margin: 0 0 16px;
+  }
   .stpanel .title { font-size: 26px; }
   .stpanel .subtitle { margin-bottom: 22px; }
 

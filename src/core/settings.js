@@ -91,9 +91,17 @@ export const SETTINGS = [
   },
   /* ---- ここから画質。効かせ先は t.gfx（main.jsが組んで渡す） ----
      友達のPCでカクついた時に、こちらが直すまで遊べないのでは遅い。
-     本人がその場で軽くできる逃げ道を置く。既定は全部「今までと同じ絵」 */
+     本人がその場で軽くできる逃げ道を置く。
+
+     **既定は軽め（2026-08-07に方針変更）。**
+     最初は「既定＝今までと同じ絵（全部盛り）」にしていたが、
+     M1のMacBookで1人プレイを少し遊んだだけで熱くなった。
+     このゲームの決めごとは「軽さは機能より優先」なので、既定は
+     きめ細かさ85%・接地の陰影切り・影は中、に倒す。
+     絵を盛りたい人が設定で上げる向きにする（groupは設定画面の列分け） */
   {
     key: 'gfxAuto',
+    group: '画質',
     // **表の中で画質の先頭に置くこと。** 自動を切った時の巻き戻し(_applyRung(0))が
     // 先に走ってから、下の各項目が覚えている値を上書きで効かせる順になっている
     store: 'blackout.gfx.auto',
@@ -106,25 +114,29 @@ export const SETTINGS = [
   },
   {
     key: 'gfxScale',
+    group: '画質',
     store: 'blackout.gfx.scale',
     name: '描画のきめ細かさ',
     kind: 'range',
-    min: 0.5, max: 1, step: 0.05, def: 1,
+    min: 0.5, max: 1, step: 0.05, def: 0.85,
     fmt: (v) => `${Math.round(v * 100)}%`,
     hint: '下げると少しぼやける代わりに軽くなります。カクつく時はまずここから',
     apply: (v, t) => { t.gfx?.setRenderScale?.(v); },
   },
   {
     key: 'gfxAo',
+    group: '画質',
     store: 'blackout.gfx.ao',
     name: '接地の陰影',
     kind: 'check',
-    def: true,
-    hint: '物と床の接点に入る細い影です。切ると画面を2回描く工程が1回になり、大きく軽くなります',
+    def: false,
+    hint: '物と床の接点に入る細い影です。入れると絵は締まりますが、'
+      + '画面を2回描くことになるので大きく重くなります',
     apply: (v, t) => { t.gfx?.setAo?.(v); },
   },
   {
     key: 'gfxBloom',
+    group: '画質',
     store: 'blackout.gfx.bloom',
     name: '光のにじみ',
     kind: 'check',
@@ -134,17 +146,19 @@ export const SETTINGS = [
   },
   {
     key: 'gfxShadow',
+    group: '画質',
     store: 'blackout.gfx.shadow',
     name: '影のこまやかさ',
     kind: 'select',
     options: ['高', '中', '低'],
-    def: '高',
+    def: '中',
     hint: '中は影が少し粗く、低はさらに遠く(16mの外)の動く影の更新がゆっくりになり、'
       + '屋内のランプも消えます。ぼかしの細かさとランプは開き直してから効きます',
     apply: (v, t) => { t.gfx?.setShadowQuality?.(v); },
   },
   {
     key: 'gfxMsaa',
+    group: '画質',
     store: 'blackout.gfx.msaa',
     name: 'ふちのギザギザ消し',
     kind: 'check',

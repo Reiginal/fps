@@ -163,11 +163,14 @@ console.log('\n[2] 既定のままなら、今までと同じ手触り');
   ok(Math.abs(t2.input.sensitivity - 0.0044) < 1e-9,
     `×2で倍になる（${t2.input.sensitivity}）`);
 
-  // 画質の既定も「今までと同じ絵」。設定を足した副作用で
-  // 何も触っていない人の画面がぼやけたり陰影が消えたりしてはいけない
-  ok(t.gfx.scale === 1, `描画のきめ細かさの既定は100%（今 ${t.gfx.scale}）`);
-  ok(t.gfx.ao === true, '接地の陰影の既定は入り');
+  /* 画質の既定は「軽め」（2026-08-07に方針変更）。
+     全部盛りの既定にしていたら、M1のMacBookで1人プレイを少し遊んだだけで
+     熱くなった。このゲームは軽さが機能より優先なので、既定は
+     きめ細かさ85%・接地の陰影切り・影は中に倒し、盛りたい人が上げる向きにする */
+  ok(t.gfx.scale === 0.85, `描画のきめ細かさの既定は85%（今 ${t.gfx.scale}）`);
+  ok(t.gfx.ao === false, '接地の陰影の既定は切り（入れると画面を2回描く）');
   ok(t.gfx.bloom === true, '光のにじみの既定は入り');
+  ok(t.gfx.shadow === '中', `影のこまやかさの既定は中（今 ${t.gfx.shadow}）`);
 }
 
 console.log('\n[3] 壊れた値を正す');
@@ -327,12 +330,22 @@ console.log('\n[8] 設定の画面');
   ok(!menu.isOpen, '起動した時は閉じている');
   ok(t.input.sensitivity === 0.0022, '作った時点で設定が効いている（写し忘れが無い）');
 
-  const rows = document.getElementById('stRows');
-  ok(rows.children.length === SETTINGS.length,
-    `表の数だけ行が並ぶ（${rows.children.length}行 / 設定${SETTINGS.length}個）`);
+  /* 行は2列（操作と音／画質）に分かれて入る。表の順に列へ振られるので、
+     列を順に舐めれば表の順で全行が拾える（groupは表の中で連続している前提） */
+  const rowsEl = document.getElementById('stRows');
+  const wrap = rowsEl.children[0];
+  ok(wrap.children.length === 2, `列が2本ある（${wrap.children.length}本）`);
+  const rows = [];
+  for (const col of wrap.children) {
+    for (const c of col.children) if (c.className === 'strow') rows.push(c);
+  }
+  ok(rows.length === SETTINGS.length,
+    `表の数だけ行が並ぶ（${rows.length}行 / 設定${SETTINGS.length}個）`);
+  ok(wrap.children.every((col) => col.children[0].className === 'stgroup'),
+    '各列の頭に見出しがある');
 
   // つまみを動かす → 覚える → 効く、が1本で繋がっているか
-  const sensRow = rows.children[SETTINGS.findIndex((s) => s.key === 'sens')];
+  const sensRow = rows[SETTINGS.findIndex((s) => s.key === 'sens')];
   const input = sensRow.children.find((c) => c.tag === 'input');
   ok(!!input && input.type === 'range', '感度はつまみで出ている');
   input.value = '2';
@@ -344,7 +357,7 @@ console.log('\n[8] 設定の画面');
   ok(!!head, '今の値が画面にも出ている');
 
   // 入り切りのほう
-  const fullRow = rows.children[SETTINGS.findIndex((s) => s.key === 'full')];
+  const fullRow = rows[SETTINGS.findIndex((s) => s.key === 'full')];
   const box = fullRow.children.find((c) => c.tag === 'input');
   ok(box.type === 'checkbox', '全画面は入り切りで出ている');
   box.checked = false;
