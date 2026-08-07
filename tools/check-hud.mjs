@@ -207,5 +207,34 @@ console.log('\n[軽さ] 毎フレームの無駄をしていない');
   }
 }
 
+console.log('\n[計測窓] ?debugの数字窓が、測る側なのに重さを増やしていない');
+/* 重さを測るための窓が毎フレームDOMへ書いたら本末転倒
+   （「測る仕掛けが測られる物を重くしていた」を過去に実際に踏んでいる）。
+   更新は毎秒4回まで、しかも文字が変わった時だけ書くこと */
+{
+  const { PerfMeter } = await import('../src/ui/perfmeter.js');
+  const el = mkEl('perfMeter');
+  let writes = 0;
+  let text = '';
+  Object.defineProperty(el, 'textContent', {
+    get() { return text; },
+    set(v) { writes++; text = v; },
+  });
+  const meter = new PerfMeter(el);
+  // 60fps相当で10フレーム（0.17秒）。まだ更新間隔(0.25秒)に届かない
+  for (let i = 0; i < 10; i++) meter.frame(1 / 60, 544, 198000, 1);
+  ok(writes === 0, `間隔が来るまで書かない（10フレームで${writes}回）`);
+  // さらに10フレームで0.33秒。1回だけ書く
+  for (let i = 0; i < 10; i++) meter.frame(1 / 60, 544, 198000, 1);
+  ok(writes === 1, `間隔が来たら書く（${writes}回）`);
+  ok(text.includes('fps') && text.includes('544'), `fpsと描画命令が読める（${text}）`);
+  // 同じ数字が続く限り、間隔が何度来てももう書かない
+  for (let i = 0; i < 120; i++) meter.frame(1 / 60, 544, 198000, 1);
+  ok(writes === 1, `同じ数字なら書き直さない（2秒回して${writes}回のまま）`);
+  // 数字が動いたら書く
+  for (let i = 0; i < 20; i++) meter.frame(1 / 60, 300, 100000, 1);
+  ok(writes === 2, `数字が動いたら書く（${writes}回）`);
+}
+
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);
 process.exit(bad === 0 ? 0 : 1);

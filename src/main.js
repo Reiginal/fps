@@ -21,6 +21,7 @@ import { emptyTally, mergeTally, loadStats, saveStats, newlyUnlocked } from './c
 import { Lobby } from './ui/lobby.js';
 import { Chat } from './ui/chat.js';
 import { Diag } from './ui/diag.js';
+import { PerfMeter } from './ui/perfmeter.js';
 import { CharView } from './ui/charview.js';
 import { NetClient } from './net/client.js';
 import { RemotePlayers } from './net/remote.js';
@@ -42,6 +43,11 @@ const REJOIN_WAITS = [1000, 2000, 3000, 5000, 8000];
    全部覚えると長く遊ぶほど記憶を食い続けるし、古い所まで混ぜると
    「今どうだったか」が薄まる */
 const FRAME_SAMPLES = 2000;
+
+/* 描画命令(draw call)と三角形の数を覚えておく枚数。毎秒1回しか取らないので40秒ぶん。
+   フレーム時間と違って毎フレーム取らないのは、この2つは1秒の中では
+   ほとんど動かない数字だから（敵の数と画面に入っている物で決まる） */
+const PERF_INFO_SAMPLES = 40;
 
 /* 地図を塗り直す回数（毎秒）。**他人の位置が届くのと同じ速さ。**
    これより速く塗っても、他人の点は1つも動かない */
@@ -464,6 +470,15 @@ class Game {
     this._frames = new Float64Array(FRAME_SAMPLES);
     this._frameAt = 0;    // 次に書く場所
     this._frameN = 0;     // 溜まった数（上限はFRAME_SAMPLES）
+    /* 描画命令(draw call)と三角形の数。fpsだけだと「重い」は分かっても
+       「何を減らせば軽くなるか」が分からない。命令の数が多いのか、
+       三角形が多いのか、数は普通で塗りが重いのか、を切り分ける入口 */
+    this._infoCalls = new Int32Array(PERF_INFO_SAMPLES);
+    this._infoTris = new Int32Array(PERF_INFO_SAMPLES);
+    this._infoAt = 0;
+    this._infoN = 0;
+    this._infoAcc = 0;    // 1秒に1回だけ取るための積み
+    this.perfMeter = null;
     this._lastTime = 0;
     this._invQ = new THREE.Quaternion();
     // 倒れている間の見回し。生きている間はnullで、倒れた瞬間に
@@ -530,6 +545,12 @@ class Game {
     // 実測で空が飛んでいたのでさらに絞る（中間調を上限側から救う）
     renderer.toneMappingExposure = 1.0;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    /* 描画命令の数は自動では数えさせない。自動(autoReset)だと render() の
+       たびに0へ戻るが、このゲームは1フレームに何度も render() が走る
+       （影の焼き込み・AOの法線・ポストの各パス）。自動のままだと最後のパス
+       （仕上げの板1枚）しか見えず、「描画命令2回」という嘘の数字になる。
+       ループの頭で自分で0へ戻し、フレーム全部を数える（_loopの先頭を参照） */
+    renderer.info.autoReset = false;
     this.renderer = renderer;
 
     setLoad(8, '素材を生成中');
@@ -855,6 +876,19 @@ class Game {
     // 何かがおかしい時だけ手掛かりを出す入れ物。
     // 遠くの人に遊んでもらった時、こちらに情報が返ってこないのを直すためにある
     this.diag = new Diag();
+
+    /* URLに ?debug を付けた時だけ、左下に fps・描画命令・三角形の数を出す。
+       軽量化の作業中に「この変更で何が減ったか」をその場で読むための窓。
+       普段は作らないので、遊ぶ人の画面にも重さにも影響しない */
+    if (new URLSearchParams(location.search).has('debug')) {
+      const el = document.createElement('div');
+      el.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99;'
+        + 'font:11px/1.6 ui-monospace,Menlo,monospace;color:#7ddb8a;'
+        + 'background:rgba(0,0,0,.55);padding:2px 8px;border-radius:4px;'
+        + 'pointer-events:none;white-space:nowrap';
+      document.body.appendChild(el);
+      this.perfMeter = new PerfMeter(el);
+    }
 
     // 発言。ロビーでも試合中でも同じ物を使う
     const chat = new Chat();
@@ -1359,6 +1393,10 @@ class Game {
     this._frames = new Float64Array(FRAME_SAMPLES);
     this._frameAt = 0;    // 次に書く場所
     this._frameN = 0;     // 溜まった数（上限はFRAME_SAMPLES）
+    // 描画命令・三角形の数も同じ区切りで捨てる。前の試合の数字を混ぜない
+    this._infoAt = 0;
+    this._infoN = 0;
+    this._infoAcc = 0;
   }
 
   /* 自分が倒れた。撃たれた・爆風・落下の3経路から同じ形で入る。
@@ -2482,15 +2520,32 @@ class Game {
     const sorted = Array.from(this._frames.subarray(0, n)).sort((a, b) => a - b);
     const at = (q) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))];
     const fps = (dt) => (dt > 0 ? Math.round(1 / dt) : 0);
+    // 描画命令・三角形は中央値で1つに潰す。敵の数で上下するので、
+    // 最大を取ると波の瞬間だけの数字になり、最小だと誰もいない時の数字になる
+    const mid = (buf, m) => {
+      if (!m) return null;
+      const s = Array.from(buf.subarray(0, m)).sort((a, b) => a - b);
+      return s[m >> 1];
+    };
     this.diag?.perf({
       fps: fps(at(0.5)),
       // 遅かった5%＝引っかかりの目安。並びの後ろから5%の所
       low: fps(at(0.95)),
       players: this.mode === 'versus' ? (this.net?.players.size | 0) : 1,
       wave: this.mode === 'solo' ? this.director.wave : null,
+      /* 何を減らせば軽くなるかの切り分け用。
+         calls=描画命令、tris=三角形、scale=描画倍率(%)。
+         倍率を%にするのは、受け口(server/report.js)が数字を丸めるため
+         （1.5をそのまま送ると2になる） */
+      calls: mid(this._infoCalls, this._infoN),
+      tris: mid(this._infoTris, this._infoN),
+      scale: Math.round((this.renderer?.getPixelRatio() || 0) * 100),
     });
     this._frameN = 0;
     this._frameAt = 0;
+    this._infoAt = 0;
+    this._infoN = 0;
+    this._infoAcc = 0;
   }
 
   /**
@@ -2662,6 +2717,10 @@ class Game {
   /* ------------------------------------------------------- ループ */
 
   _loop() {
+    // 描画命令の数を0へ戻す。ここから次のrender全部（影・AO・ポスト）を数える。
+    // autoResetを切ってある理由はboot()のrenderer設定を参照
+    this.renderer.info.reset();
+
     const now = performance.now();
     let dt = (now - this._lastTime) / 1000;
     this._lastTime = now;
@@ -2839,6 +2898,22 @@ class Game {
     this._updateSunCascades();
 
     this.fx.composer.render();
+
+    /* 描画命令と三角形は描き終わった後に読む（ここまでの合計がこのフレームの数）。
+       毎フレームは取らない。1秒の中ではほぼ動かない数字なので、1秒に1回で足りる */
+    const rinfo = this.renderer.info.render;
+    if (this.state === 'playing') {
+      this._infoAcc += dt;
+      if (this._infoAcc >= 1) {
+        this._infoAcc = 0;
+        this._infoCalls[this._infoAt] = rinfo.calls;
+        this._infoTris[this._infoAt] = rinfo.triangles;
+        this._infoAt = (this._infoAt + 1) % PERF_INFO_SAMPLES;
+        if (this._infoN < PERF_INFO_SAMPLES) this._infoN++;
+      }
+    }
+    // ?debugの数字窓。作っていない時（普段）はnullで何もしない
+    this.perfMeter?.frame(dt, rinfo.calls, rinfo.triangles, this.renderer.getPixelRatio());
 
     // Pの押した印はここで拾う。preserveDrawingBufferを立てていないので、
     // 描いた直後・ブラウザに制御を返す前でないと中身が読めない
