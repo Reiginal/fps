@@ -1119,9 +1119,13 @@ export function buildLevel(mats) {
             emit(new THREE.PlaneGeometry(ow - 0.12, oh - 0.12), glassMat,
               px, yc, pz, ry, 0, 0, false);
           } else if (hv < 0.86) {
-            // 板打ち。斜めに2枚打ってあるだけで「閉めた」物語が出る
-            boxT(ow * 1.12, 0.19, 0.05, M.wood, px, yc + oh * 0.16, pz, ry, 0, 0.30, 0.8, false);
-            boxT(ow * 1.12, 0.17, 0.05, M.wood, px, yc - oh * 0.18, pz, ry, 0, -0.24, 0.8, false);
+            // 板打ち。斜めに2枚打ってあるだけで「閉めた」物語が出る。
+            // 衝突あり(solid=true)。窓枠(boxD)やガラス(emit...false)は
+            // 「割れて中が見える」「反射するガラス」という絵なのですり抜けても
+            // 矛盾しないが、板打ちだけは「閉じている」という絵と実際の挙動が
+            // 食い違っていた（issue #57）
+            boxT(ow * 1.12, 0.19, 0.05, M.wood, px, yc + oh * 0.16, pz, ry, 0, 0.30, 0.8, true);
+            boxT(ow * 1.12, 0.17, 0.05, M.wood, px, yc - oh * 0.18, pz, ry, 0, -0.24, 0.8, true);
           }
           // 残りは割れて抜けたまま。全部を同じ建具にしないのが効く
         }
