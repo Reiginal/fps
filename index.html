@@ -500,6 +500,12 @@
      accent-colorだけは3社とも効くので、そこだけ合わせる */
   .strange { width: 100%; accent-color: var(--accent); cursor: pointer; }
   .stcheck { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+  /* 多択（影のこまやかさ等）。枠の色は他のつまみと揃える */
+  .stselect {
+    background: rgba(255,255,255,.06); color: var(--hud);
+    border: 1px solid rgba(255,255,255,.25); border-radius: 4px;
+    font: inherit; padding: 4px 10px; cursor: pointer;
+  }
 
   .stbtns { display: flex; gap: 10px; margin-top: 22px; }
 

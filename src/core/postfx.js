@@ -1293,7 +1293,7 @@ export const FinishShader = {
 
 /* ---------------------------------------------------------------- 組み立て */
 
-export function createComposer(renderer, scene, camera, viewScene, viewCamera) {
+export function createComposer(renderer, scene, camera, viewScene, viewCamera, { msaa = true } = {}) {
   // 実際の描画バッファ寸法で作る。CSS寸法で作ると高DPI画面でぼやける
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
 
@@ -1317,7 +1317,9 @@ export function createComposer(renderer, scene, camera, viewScene, viewCamera) {
   // ここだけで半分になる。上の実測どおり買えるのは輪郭の階調だけなので、
   // 2本でも中間の被覆率は拾えるし、この後にFXAAも通る。
   // 金網や手すりの線が硬く感じたら、まずここを4へ戻すのが一番効く
-  const samples = Math.min(2, renderer.capabilities.maxSamples || 0);
+  // 設定「ふちのギザギザ消し」を切っている端末では0本＝MSAAなし。
+  // バッファの確保時に決まる物なので、切り替えは開き直した時（main.jsのboot参照）
+  const samples = msaa ? Math.min(2, renderer.capabilities.maxSamples || 0) : 0;
 
   // 世界を描く先。MSAAを効かせるのはここと武器のrtViewだけにする。
   // EffectComposerは渡したターゲットを複製してping-pongの2枚にするので、

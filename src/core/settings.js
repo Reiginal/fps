@@ -120,6 +120,27 @@ export const SETTINGS = [
     hint: '太陽や発砲の光がふわっと広がる効果です。切ると少し軽くなります',
     apply: (v, t) => { t.gfx?.setBloom?.(v); },
   },
+  {
+    key: 'gfxShadow',
+    store: 'blackout.gfx.shadow',
+    name: '影のこまやかさ',
+    kind: 'select',
+    options: ['高', '中', '低'],
+    def: '高',
+    hint: '中は影が少し粗く、低はさらに遠く(16mの外)の動く影の更新がゆっくりになります。'
+      + '縁のぼかしの細かさだけは、開き直してから効きます',
+    apply: (v, t) => { t.gfx?.setShadowQuality?.(v); },
+  },
+  {
+    key: 'gfxMsaa',
+    store: 'blackout.gfx.msaa',
+    name: 'ふちのギザギザ消し',
+    kind: 'check',
+    def: true,
+    hint: '物のふちをなめらかにする処理(MSAA)です。切ると軽くなりますが、'
+      + '開き直してから効きます',
+    apply: (v, t) => { t.gfx?.setMsaa?.(v); },
+  },
 ];
 
 export const defOf = (key) => SETTINGS.find((s) => s.key === key) || null;
@@ -137,6 +158,10 @@ export function coerce(def, raw) {
   if (def.kind === 'check') {
     if (raw === null || raw === undefined || raw === '') return def.def;
     return raw === true || raw === '1' || raw === 'true';
+  }
+  // 選択式は、選択肢に無い物（壊れた値・昔の値）を全部既定へ落とす
+  if (def.kind === 'select') {
+    return def.options.includes(raw) ? raw : def.def;
   }
   const n = typeof raw === 'number' ? raw : parseFloat(raw);
   if (!Number.isFinite(n)) return def.def;

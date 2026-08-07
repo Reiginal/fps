@@ -15,6 +15,7 @@ import { Director } from './ai/enemy.js';
 import { HUD } from './ui/hud.js';
 import { NetMenu, NET_MSG } from './ui/netmenu.js';
 import { SettingsMenu } from './ui/settings.js';
+import { loadSettings } from './core/settings.js';
 import { StatsMenu } from './ui/statsmenu.js';
 import { VoiceChat, PTT_CODE } from './net/voice.js';
 import { emptyTally, mergeTally, loadStats, saveStats, newlyUnlocked } from './core/stats.js';
@@ -204,7 +205,12 @@ const CASCADES = [
  * ShaderChunkを丸ごと差し替えれば材質を1つも触らずに全材質へ同じ計算が乗るので、
  * 「後から作られた材質だけカスケードに乗り遅れて太陽が3重に当たる」事故も起きない。
  */
-function installCascadedSoftShadow() {
+/**
+ * @param blockerTaps/pcfTaps ぼかしのタップ数。設定「影のこまやかさ」で
+ *   中・低を選ぶと減らして起動する。GLSLへ数として焼き込むので、
+ *   起動後に変えるには全材質の作り直しが要る＝ここは起動時の1回だけ
+ */
+function installCascadedSoftShadow({ blockerTaps = SHADOW_BLOCKER_TAPS, pcfTaps = SHADOW_PCF_TAPS } = {}) {
   const C = THREE.ShaderChunk;
   const N = CASCADES.length;
   // カーネルが枚の外へはみ出すと縁が切れるので、端はカーネル1個ぶん使わない
@@ -256,12 +262,12 @@ function installCascadedSoftShadow() {
 		float z = sc.z + bias;
 
 		// 遮蔽物探し。日向の平らな面はここで1本も当たらないので、
-		// 画面の大半はこの${SHADOW_BLOCKER_TAPS}タップだけで抜けられる
+		// 画面の大半はこの${blockerTaps}タップだけで抜けられる
 		float sum = 0.0;
 		float hits = 0.0;
-		for ( int i = 0; i < ${SHADOW_BLOCKER_TAPS}; i ++ ) {
+		for ( int i = 0; i < ${blockerTaps}; i ++ ) {
 
-			float d = texture2D( map, sc.xy + sunDisk( i, ${SHADOW_BLOCKER_TAPS}, phi ) * wide * texel ).r;
+			float d = texture2D( map, sc.xy + sunDisk( i, ${blockerTaps}, phi ) * wide * texel ).r;
 			if ( d < z ) { sum += d; hits += 1.0; }
 
 		}
@@ -272,13 +278,13 @@ function installCascadedSoftShadow() {
 		// 離れた桁や屋根の縁だけがぼける
 		float radius = clamp( ( z - sum / hits ) * penumbraScale, 1.0, wide );
 		float lit = 0.0;
-		for ( int i = 0; i < ${SHADOW_PCF_TAPS}; i ++ ) {
+		for ( int i = 0; i < ${pcfTaps}; i ++ ) {
 
-			lit += step( z, texture2D( map, sc.xy + sunDisk( i, ${SHADOW_PCF_TAPS}, phi + 2.4 ) * radius * texel ).r );
+			lit += step( z, texture2D( map, sc.xy + sunDisk( i, ${pcfTaps}, phi + 2.4 ) * radius * texel ).r );
 
 		}
 
-		return lit / ${SHADOW_PCF_TAPS.toFixed(1)};
+		return lit / ${pcfTaps.toFixed(1)};
 
 	}
 
@@ -552,7 +558,14 @@ class Game {
     // 生の深度値が要る。ちなみにこのthreeではPCFSoftShadowMapは廃止済みで、
     // 指定しても警告を出してPCFへ落ちるだけなので、あれは元々効いていなかった
     renderer.shadowMap.type = THREE.BasicShadowMap;
-    installCascadedSoftShadow();
+    /* 影のぼかしタップとMSAAは、覚えている設定をここで読む。
+       この2つはシェーダ・バッファへ焼き込む種類で、後から変えるには
+       全材質や合成器の作り直しが要るので、起動時の1回だけ効かせる
+       （設定画面のhintにも「開き直してから」と書いてある） */
+    const savedGfx = loadSettings();
+    installCascadedSoftShadow(
+      savedGfx.gfxShadow === '高' ? {} : { blockerTaps: 8, pcfTaps: 8 },
+    );
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     // 空を明るく作り直したぶん、露出を下げないと全体が白飛びする。
     // 実測で空が飛んでいたのでさらに絞る（中間調を上限側から救う）
@@ -686,7 +699,8 @@ class Game {
       }
       scene.add(light);
       scene.add(light.target);
-      return { light, height, texel, ...c };
+      // rangeは影マップの粗さを変える時（_applyShadowSize）に半影の換算で使う
+      return { light, height, texel, range, ...c };
     });
     this._updateSunCascades();
 
@@ -820,7 +834,9 @@ class Game {
     await frame();
 
     // 初回描画の引っ掛かりを消すため、事前にシェーダーを通しておく
-    this.fx = createComposer(renderer, scene, camera, viewScene, viewCamera);
+    this.fx = createComposer(renderer, scene, camera, viewScene, viewCamera, {
+      msaa: savedGfx.gfxMsaa,
+    });
     renderer.compile(scene, camera);
     renderer.compile(viewScene, viewCamera);
     this.fx.composer.render();
@@ -883,6 +899,18 @@ class Game {
         this.fx.bloom.enabled = !!v;
         this.fx.glare.enabled = !!v;
       },
+      /* 影のこまやかさ。マップの粗さと遠い枚の焼く頻度はその場で効く。
+         ぼかしのタップ数だけはシェーダに焼いてあるので、開き直した時に
+         boot()が読む（このhintは設定の表に書いてある） */
+      setShadowQuality: (v) => {
+        if (!this.cascades) return;
+        this._applyShadowSize(v === '高' ? SHADOW_MAP_SIZE : 1024);
+        // 低は遠い枚の焼き直しを1/4の頻度へ。遠くの動く物の影が0.2秒刻みになる
+        for (const c of this.cascades) if (c.interval > 1) c.interval = v === '低' ? 12 : 3;
+      },
+      // ふちのギザギザ消し(MSAA)は描き先のバッファに焼き込むので起動時にしか効かない。
+      // 表の作法（表に足した物は必ず効かせ先を持つ）を保つための空受け
+      setMsaa: () => {},
     };
     this.settings = new SettingsMenu({
       input: this.input, audio: this.audio, voice: this.voice, gfx,
@@ -1569,6 +1597,25 @@ class Game {
     this._soloNades.length = 0;
     this.hud.score(0);
     this.state = 'menu';
+  }
+
+  /**
+   * 影マップの粗さを変える。テクセルの実寸が変わるので、テクセルから
+   * 決めている物（normalBias・半影の換算・升目の吸着）も一緒に取り直す。
+   * どれかを置き忘れると、粗くした瞬間に接地影が浮くか縁の幅が狂う
+   */
+  _applyShadowSize(size) {
+    for (const c of this.cascades) {
+      if (c.light.shadow.mapSize.x === size) continue;
+      c.light.shadow.mapSize.set(size, Math.round(size * SUN_DIR.y));
+      c.texel = (c.radius * 2) / size;
+      c.light.shadow.normalBias = SHADOW_NORMAL_BIAS_TEXELS * c.texel;
+      c.light.shadow.radius = (c.range * SUN_ANGULAR_TAN) / c.texel;
+      // 前の大きさで確保済みのマップは捨てて作り直させる
+      c.light.shadow.map?.dispose();
+      c.light.shadow.map = null;
+      c.light.shadow.needsUpdate = true;
+    }
   }
 
   _resize() {
