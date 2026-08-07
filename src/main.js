@@ -479,6 +479,8 @@ class Game {
     this._infoN = 0;
     this._infoAcc = 0;    // 1秒に1回だけ取るための積み
     this.perfMeter = null;
+    // メニューの間、既に1枚描いてあるか。描いてあれば描き直さない（_loop末尾を参照）
+    this._idleDrawn = false;
     this._lastTime = 0;
     this._invQ = new THREE.Quaternion();
     // 倒れている間の見回し。生きている間はnullで、倒れた瞬間に
@@ -1528,6 +1530,8 @@ class Game {
     this.renderer.setSize(w, h);
     this.fx.setSize(w, h);
     this.effects.setPixelScale(this.renderer.getDrawingBufferSize(new THREE.Vector2()).y);
+    // 寸法が変わるとキャンバスの中身が消えるので、メニューで止めていた絵を描き直す
+    this._idleDrawn = false;
   }
 
   /* 太陽の2枚を置き直す。近い1枚はカメラに付いていくので毎フレーム動かす */
@@ -2892,12 +2896,24 @@ class Game {
 
     // 体力を音側へ渡す。低体力の心音と呼吸が鳴る
     this.audio.setVitals(this.player.health / this.player.maxHealth, this.player.alive);
+    // 試合の中かどうかも渡す。遠景の撃ち合いを試合の外で鳴らさないため。
+    // 一時停止と死亡画面は試合の続きなので鳴らしたままにする
+    this.audio.battle = this.state === 'playing' || this.state === 'paused' || this.state === 'dead';
     this._updateEnvironment(dt);
 
     // 影の箱はカメラの位置が決まった後でないと置けない
     this._updateSunCascades();
 
-    this.fx.composer.render();
+    /* メニュー・ロビーの間は毎フレーム描かない。
+       ホームもロビーもDOMの画面で、後ろの3Dはほぼ塗り潰されて見えないのに、
+       影・AO・ブルームまで全部の行程が毎フレーム回っていた
+       （閉じずに置いているだけでファンが回る、の原因の1つ）。
+       1枚だけ描いて止める。キャンバスは最後に描いた絵を出し続けるので、
+       止めても画面は変わらない。窓の大きさが変わった時だけ描き直す（_resize参照）。
+       一時停止(paused)と死亡画面(dead)は後ろで試合が見えているので今まで通り描く */
+    const idle = this.state === 'menu';
+    if (!idle || !this._idleDrawn) this.fx.composer.render();
+    this._idleDrawn = idle;
 
     /* 描画命令と三角形は描き終わった後に読む（ここまでの合計がこのフレームの数）。
        毎フレームは取らない。1秒の中ではほぼ動かない数字なので、1秒に1回で足りる */

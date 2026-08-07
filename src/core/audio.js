@@ -83,6 +83,12 @@ export class AudioEngine {
     this.volume = VOLUME_DEF;
     // 空間の開け具合(0=壁が近い 1=開けている)。init前に呼ばれても値だけ覚えておく
     this.openness = 0.65;
+    /* 試合の中にいるか。main.jsのループが毎フレーム入れる。
+       遠景の撃ち合い(_startAmbienceのdistant)は試合の外では鳴らさない。
+       メニューに置いたまま席を外しても、数秒おきに銃声のノード一式
+       （1発で十数個）を作っては捨て続けていた。風の層は流しっぱなしでよい
+       （起動時に作った物が回り続けるだけで、新しい物を作らない） */
+    this.battle = false;
     this._lowHp = 0;
     this._heartTimer = null;
     // 同時発音が増えすぎた時に層を間引くための負荷カウンタ
@@ -1893,7 +1899,8 @@ export class AudioEngine {
     // 単発と連射を混ぜると「別の場所で戦闘が続いている」ように聞こえる
     const distant = () => {
       if (!this.ctx) return;
-      if (this.enabled && Math.random() < 0.7) {
+      // 試合の外(メニュー・ロビー)では鳴らさない。battleの説明はconstructor参照
+      if (this.enabled && this.battle && Math.random() < 0.7) {
         const d = rnd(90, 220);
         const burst = Math.random() < 0.45 ? Math.floor(rnd(2, 5)) : 1;
         for (let i = 0; i < burst; i++) {
