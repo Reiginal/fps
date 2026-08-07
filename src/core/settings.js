@@ -198,6 +198,7 @@ export function coerce(def, raw) {
    設定を覚えられないだけで遊べなくなるのは割に合わない（netmenu.jsと同じ作法） */
 const read = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
 const write = (key, value) => { try { localStorage.setItem(key, value); } catch { /* 覚えられないだけ */ } };
+const remove = (key) => { try { localStorage.removeItem(key); } catch { /* 消せないだけ */ } };
 
 /** 端末に覚えさせる形。入り切りは前からある '1' / '0' を使う */
 const encode = (def, v) => (def.kind === 'check' ? (v ? '1' : '0') : String(v));
@@ -218,9 +219,17 @@ export function saveSetting(key, raw) {
   return v;
 }
 
-/** 覚えた物を全部消す（設定画面の「既定に戻す」） */
+/**
+ * 覚えた物を全部消す（設定画面の「既定に戻す」）。
+ *
+ * **既定値を書き込むのではなく、覚えた値を消す。**
+ * 前は既定値を書き込んでいたが、それだと一度押した端末に「その時点の既定」が
+ * 固定されて、こちらが既定を変えても（画質の既定を軽めへ倒した等）追従しない。
+ * 実際、既定を軽めへ変えた後も前の全部盛りのまま始まる端末があった。
+ * 消しておけば、次に読む時はその時々の既定に落ちる
+ */
 export function resetSettings() {
-  for (const s of SETTINGS) write(s.store, encode(s, s.def));
+  for (const s of SETTINGS) remove(s.store);
   return Object.fromEntries(SETTINGS.map((s) => [s.key, s.def]));
 }
 

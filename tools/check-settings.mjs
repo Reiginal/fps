@@ -231,6 +231,11 @@ console.log('\n[4] 端末に覚えて、次に開いた時に戻ってくる');
   const back = resetSettings();
   ok(back.sens === defOf('sens').def && loadSettings().sens === defOf('sens').def,
     '既定に戻すと全部戻る');
+  /* 戻す＝**覚えた値を消す**であること。既定値を書き込む実装だと、
+     一度押した端末に「その時点の既定」が固定されて、後からこちらが
+     既定を変えても追従しない（画質の既定を軽めへ倒した時に実際に起きた） */
+  ok(localStorage.getItem('blackout.sens') === null,
+    '戻した後は端末に何も残らない（以後はその時々の既定に追従する）');
 }
 
 console.log('\n[5] localStorageが使えなくても遊べる');
