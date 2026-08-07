@@ -66,30 +66,21 @@ test('開いてホーム画面まで来て、画面でエラーが出ていな�
   expect(draw.w, '描く場所の幅が0').toBeGreaterThan(0);
 
   /* ------------------------------------------- 中身をJSが並べる画面 */
-  // 設定と戦績は**中身をJSが表から並べる。** 行が1つも無ければ、
+  // 設定は**中身をJSが表から並べる。** 行が1つも無ければ、
   // 表が届いていないか並べる所で落ちている。
-  // マウスで押さずにDOM側から呼ぶ（本体が詰まっていて合図の往復が返らない）
+  // マウスで押さずにDOM側から呼ぶ（本体が詰まっていて合図の往復が返らない）。
+  // 戦績の画面もここで見ていたが、画面ごと消した（2026-08-07、「誰も見ない」）
   const rows = await page.evaluate(() => {
     document.getElementById('nmSettings').click();
     const settings = document.querySelectorAll('#stRows .strow').length;
     document.getElementById('stClose').click();
-    document.getElementById('nmStats').click();
-    const ach = document.querySelectorAll('#sxList .sxach').length;
-    const tally = document.querySelectorAll('#sxTallies .sxtally').length;
-    document.getElementById('sxClose').click();
     return {
       settings,
-      ach,
-      tally,
       settingsHidden: document.getElementById('settings').classList.contains('hidden'),
-      statsHidden: document.getElementById('stats').classList.contains('hidden'),
     };
   });
   expect(rows.settings, '設定の行が並んでいない').toBeGreaterThan(2);
-  expect(rows.ach, '実績が並んでいない').toBeGreaterThan(2);
-  expect(rows.tally, '通算の数字が並んでいない').toBeGreaterThan(2);
   expect(rows.settingsHidden, '設定が閉じない').toBe(true);
-  expect(rows.statsHidden, '戦績が閉じない').toBe(true);
 
   /* ------------------------------------------------------ エラー */
   // 最後にまとめて見る。**先に見ると、後で出た物を見逃す**

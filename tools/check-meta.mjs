@@ -93,6 +93,10 @@ console.log('\n[7] ブラウザ検査が見るidが、画面に実在する');
   const html = rf(new URL('../index.html', import.meta.url), 'utf8');
   const ids = new Set();
   for (const m of spec.matchAll(/locator\(['"`]#([A-Za-z][\w-]*)['"`]\)/g)) ids.add(m[1]);
+  /* page.evaluateの中のgetElementByIdも拾う。最初locator()と一覧リテラルだけ見ていて、
+     evaluate内に残っていた戦績のgetElementByIdを取りこぼし、デプロイがもう1回止まった */
+  for (const m of spec.matchAll(/getElementById\(['"`]([A-Za-z][\w-]*)['"`]\)/g)) ids.add(m[1]);
+  for (const m of spec.matchAll(/querySelectorAll\(['"`]#([A-Za-z][\w-]*)[\s'"`]/g)) ids.add(m[1]);
   for (const m of spec.matchAll(/\[((?:'[A-Za-z]\w*',?\s*)+)\]/g)) {
     for (const q of m[1].matchAll(/'([A-Za-z]\w*)'/g)) {
       // id一覧のリテラルだけを拾いたいので、index.htmlのid規約(nm〜等)に限る
