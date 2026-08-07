@@ -1616,13 +1616,17 @@ export function buildLevel(mats) {
     emit(dish, M.metal, x, yBottom + h * 0.62, z, 0, 1.15, 0, false);
   };
 
-  // 壁付けの梯子。実際の動線は階段と段差で確保してあるので、こちらは見た目だけ
+  // 壁付けの梯子。実際の動線は階段と段差で確保してあるので、登れはしない。
+  // ただし縦の2本のレールだけは衝突ありにする（box）。以前は見た目ごと
+  // 非衝突(boxD)で、登れないだけでなく体がそのまま突き抜けられた。
+  // 段(踏みざん)は非衝突のまま（0.46m間隔で全部当たり判定に入れると、
+  // 外階段の踏面と同じ形で乗り越え処理が段の数だけ余分に走る）
   const ladder = (x, yBottom, z, h, ry) => {
     const dx = Math.cos(ry);
     const dz = -Math.sin(ry);
     for (const s of [-0.24, 0.24]) {
-      boxD(0.07, h, 0.07, M.metal, x + dx * s, yBottom, z + dz * s, ry, 0.6);
-      boxD(0.07, 1.1, 0.07, M.metal, x + dx * s, yBottom + h, z + dz * s, ry, 0.6);
+      box(0.07, h, 0.07, M.metal, x + dx * s, yBottom, z + dz * s, ry, 0.6);
+      box(0.07, 1.1, 0.07, M.metal, x + dx * s, yBottom + h, z + dz * s, ry, 0.6);
     }
     for (let i = 0; i * 0.46 < h; i++) {
       boxD(0.55, 0.05, 0.05, M.metal, x, yBottom + 0.2 + i * 0.46, z, ry, 0.5);
