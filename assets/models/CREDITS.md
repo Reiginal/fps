@@ -1,13 +1,21 @@
 # ここに置いてあるモデルの出どころ
 
-| ファイル | 元 | ライセンス |
-|---|---|---|
-| soldier.glb | three.jsのexamples（mrdoob/three.js）のSoldier.glb | Mixamo(Adobe)由来。ゲームへの利用は規約上OK。**素材単体の再配布は本来グレー**なので、キャラの外部モデル化を本採用する時はCC0の物へ差し替える前提の試験用 |
+## chars/ … キャラの外部モデル（品評会中）
 
-soldier.glbは**キャラの外部モデル化(C案)の試験**に使っている。
-リグ(骨49本)と待機・歩き・走りのクリップが入っていて、
-CHARACTERSの「外部モデル（試験）」の枠だけがこれで出る。
-仕組みは `src/ai/glbchar.js`、何が難しいかの整理は issue #56。
+どれを本採用するか選ぶために、取れた素材を全部ロビーのプレビューへ出している
+（CHARACTERSの並び）。仕組みは `src/ai/glbchar.js`、難しさの整理は issue #56。
+
+| ファイル | 元 | クリップ | ライセンス |
+|---|---|---|---|
+| chars/soldier.glb | three.jsのexamplesのSoldier | 待機・歩き・走り | Mixamo(Adobe)由来。ゲームへの利用は規約上OK。**素材単体の再配布は本来グレー**（three.js自身が公開配布している物ではある） |
+| chars/xbot.glb | three.jsのexamplesのXbot | 待機・歩き・走り | 同上（Mixamo由来） |
+| chars/robot.glb | three.jsのexamplesのRobotExpressive | 待機・歩き・走り（他に死亡・ジャンプ等も入っている） | CC0（Tomás Laulhé作、three.jsが配布） |
+| chars/cesium.glb | glTF-Sample-AssetsのCesiumMan | **歩きの1本だけ**（止まっていても歩く） | CC-BY 4.0 © Cesium（この行が表示義務の表示。ベルトのロゴは商標） |
+| chars/michelle.glb | three.jsのexamplesのMichelle | **サンバの1本だけ**（常に踊る） | Mixamo由来（同上） |
+
+- 本採用を決めたら、この品評会の並びは畳んで、採用した物だけ残す
+- Mixamo由来の物を残すなら、その時にCC0の同等品へ差し替えるか判断する
+- 試してやめた: BrainStem（glTF-Sample-Assets）… ライセンスがPoserのEULAで、publicなrepoに置けない
 
 ## 銃で試して外した物（記録）
 

@@ -210,37 +210,48 @@ console.log('\n[8] 外部モデルの枠（model欄が付いた物）');
     ok(!!gltf, `${c.model}.glb … GLBとして読める`);
     if (!gltf) continue;
 
-    // glbchar.jsが名前で引くクリップ。1本でも欠けると歩様が混ざらない
-    const names = gltf.animations.map((a) => a.name);
-    for (const need of ['Idle', 'Walk', 'Run']) {
-      ok(names.includes(need), `${c.model} … クリップ ${need} がある（${names.join('、')}）`);
-    }
+    /* クリップは名前の揺れごとglbchar.jsのpickClips()が吸収する。
+       検査も同じ関数で引く（別の引き方で検査すると、直した時に片方だけ残る） */
+    const { pickClips, modelRotY } = await import('../src/ai/glbchar.js');
+    const picked = pickClips(gltf.animations);
+    const uniq = [...new Set([picked.idle, picked.walk, picked.run])].filter(Boolean);
+    ok(uniq.length > 0,
+      `${c.model} … 待機/歩き/走りが引ける（${uniq.map((a) => a.name).join('、')}${uniq.length < 3 ? '＝足りない分はこれへ倒す' : ''}）`);
 
     let skinned = null;
     let head = null;
     gltf.scene.traverse((o) => {
       if (o.isSkinnedMesh && !skinned) skinned = o;
-      if (o.isBone && /Head$/.test(o.name)) head = o;
+      if (o.isBone && /Head$/i.test(o.name)) head = o;
     });
     ok(!!skinned, `${c.model} … スキンメッシュがある（無いと骨で動かない）`);
-    ok(!!head, `${c.model} … 頭の骨がある（名札と銃声の位置に使う）`);
+    // 頭の骨は無くてもよい(名札と銃声は身長から出す)。何で出しているかだけ残す
+    ok(true, `${c.model} … 名札と銃声の位置: ${head ? `頭の骨(${head.name})` : '骨が無いので身長から'}`);
 
     gltf.scene.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(gltf.scene);
     const h = box.max.y - box.min.y;
-    ok(h > 1.4 && h < 2.2, `${c.model} … 人の背丈の範囲（${h.toFixed(2)}m）`);
+    // 素の高さはばらばらでよい(表示時に身長へ揃える)。0や巨大だけ弾く
+    ok(h > 0.5 && h < 8, `${c.model} … 高さが測れる（素で${h.toFixed(2)}m。表示時に揃える）`);
 
-    /* 前が-zを向いていること。つま先の骨が腰よりも-z側に出ているかで測る。
-       裏返っていると、全員が後ろ歩きで詰めてくる画になる */
+    /* **前の向きと調整表(glbchar.jsのMODELS)が合っていること。**
+       素の前は骨で測れる: つま先(ToeBase)か、膝のIKの目印(PoleTarget)は
+       必ず体の前に出る。素が+zならrotY=180度が要る。
+       ここがずれると、全員が後ろ歩きで詰めてくる画になる */
     if (skinned) {
       const v = new THREE.Vector3();
       const bone = (re) => skinned.skeleton.bones.find((b) => re.test(b.name));
-      const toe = bone(/ToeBase/);
-      const hips = bone(/Hips/);
-      if (toe && hips) {
-        toe.getWorldPosition(v); const toeZ = v.z;
-        hips.getWorldPosition(v); const hipsZ = v.z;
-        ok(toeZ < hipsZ, `${c.model} … 前が-zを向いている（つま先z=${toeZ.toFixed(2)} 腰z=${hipsZ.toFixed(2)}）`);
+      const front = bone(/ToeBase/i) || bone(/PoleTarget/i);
+      const hips = bone(/Hips$/i);
+      if (front && hips) {
+        front.getWorldPosition(v); const fz = v.z;
+        hips.getWorldPosition(v); const hz = v.z;
+        const rawPlusZ = fz > hz;                       // 素の前が+zか
+        const flipped = modelRotY(c.model) !== 0;
+        ok(rawPlusZ === flipped,
+          `${c.model} … 前の向きと調整表が合っている（素=${rawPlusZ ? '+z' : '-z'}、回転=${flipped ? '180度' : '無し'}）`);
+      } else {
+        ok(true, `${c.model} … 前を測る骨が無い（目で確かめる）`);
       }
     }
   }
