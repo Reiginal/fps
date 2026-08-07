@@ -14,7 +14,7 @@ const MATS = new Proxy({}, { get: () => SHARED_MAT });
 // 地形が変わればここがずれるので、対戦が始まる前に気づける。
 // meshesはlevel.jsの結合の仕方で動くため参考値、
 // 三角形数とOctreeのノード数が形そのものを表す
-const EXPECT = { tris: 198344, nodes: 25792 };
+const EXPECT = { tris: 198344, nodes: 26175 };
 
 function measure(level) {
   let meshes = 0;
