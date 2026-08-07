@@ -130,6 +130,9 @@ export function reportRecord(bodyText) {
     calls: num(m.calls),
     tris: num(m.tris),
     scale: num(m.scale),
+    // 自動画質がどこまで下げて落ち着いたか（0=全部入り、大きいほど軽い絵）。
+    // fpsが良く見えても、rungが深ければ「下げたから保てている」と読める
+    rung: num(m.rung),
   };
 }
 

@@ -93,6 +93,18 @@ export const SETTINGS = [
      友達のPCでカクついた時に、こちらが直すまで遊べないのでは遅い。
      本人がその場で軽くできる逃げ道を置く。既定は全部「今までと同じ絵」 */
   {
+    key: 'gfxAuto',
+    // **表の中で画質の先頭に置くこと。** 自動を切った時の巻き戻し(_applyRung(0))が
+    // 先に走ってから、下の各項目が覚えている値を上書きで効かせる順になっている
+    store: 'blackout.gfx.auto',
+    name: '画質を自動でまかせる',
+    kind: 'check',
+    def: true,
+    hint: 'カクつく端末では自動で1段ずつ画質を下げます（下げた時は画面に一言出ます）。'
+      + '下の項目を手で触ると自動は切れます',
+    apply: (v, t) => { t.gfx?.setAuto?.(v); },
+  },
+  {
     key: 'gfxScale',
     store: 'blackout.gfx.scale',
     name: '描画のきめ細かさ',

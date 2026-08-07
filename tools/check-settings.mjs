@@ -104,12 +104,13 @@ const mkTargets = () => ({
   },
   // 画質の層（main.jsが組むgfxと同じ口）
   gfx: {
-    scale: null, ao: null, bloom: null, shadow: null, msaa: null,
+    scale: null, ao: null, bloom: null, shadow: null, msaa: null, auto: null,
     setRenderScale(v) { this.scale = v; },
     setAo(v) { this.ao = v; },
     setBloom(v) { this.bloom = v; },
     setShadowQuality(v) { this.shadow = v; },
     setMsaa(v) { this.msaa = v; },
+    setAuto(v) { this.auto = v; },
   },
 });
 const snap = (t) => JSON.stringify({

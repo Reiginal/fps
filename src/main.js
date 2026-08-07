@@ -15,7 +15,8 @@ import { Director } from './ai/enemy.js';
 import { HUD } from './ui/hud.js';
 import { NetMenu, NET_MSG } from './ui/netmenu.js';
 import { SettingsMenu } from './ui/settings.js';
-import { loadSettings } from './core/settings.js';
+import { loadSettings, saveSetting } from './core/settings.js';
+import { AutoQuality } from './core/autoquality.js';
 import { StatsMenu } from './ui/statsmenu.js';
 import { VoiceChat, PTT_CODE } from './net/voice.js';
 import { emptyTally, mergeTally, loadStats, saveStats, newlyUnlocked } from './core/stats.js';
@@ -911,7 +912,32 @@ class Game {
       // ふちのギザギザ消し(MSAA)は描き先のバッファに焼き込むので起動時にしか効かない。
       // 表の作法（表に足した物は必ず効かせ先を持つ）を保つための空受け
       setMsaa: () => {},
+      // 自動画質の入り切り（設定gfxAuto）
+      setAuto: (v) => {
+        if (v) { this.autoQ.enable(); return; }
+        this.autoQ.disable();
+        // 自動で下げていた分は戻す。手で決めたい人の画面に下げ跡を残さない
+        if (this.autoQ.rung !== 0) {
+          this.autoQ.rung = 0;
+          this._applyRung(0);
+        }
+      },
     };
+    this._gfx = gfx;
+
+    /* 自動画質。重い端末では1段ずつ絵を軽くする（時機の判断はautoquality.js、
+       何を下げるかは_applyRung）。手で画質を触った人には手を出さない（下のonChange） */
+    this.autoQ = new AutoQuality();
+    this.autoQ.onChange = (from, to) => {
+      this._applyRung(to);
+      // 下げた時だけ一言出す。上げ直しは黙ってやる（良くなった報告は騒音）
+      if (to > from) {
+        this.diag?.setState('autoq', 'カクつくので画質を1段下げました（設定からも変えられます）');
+        clearTimeout(this._autoqTimer);
+        this._autoqTimer = setTimeout(() => this.diag?.setState('autoq', ''), 6000);
+      }
+    };
+
     this.settings = new SettingsMenu({
       input: this.input, audio: this.audio, voice: this.voice, gfx,
     });
@@ -919,6 +945,15 @@ class Game {
       // 遊んでいる最中に全画面を切られたら、その場で窓へ戻す。
       // 次に遊び始めるまで効かないと、切ったのに何も起きないように見える
       if (key === 'full' && !value) this.input.exitFullscreen();
+      /* 画質を手で触った人には自動を任せない。自動で下げた矢先に
+         手で上げ直されると、また下げて…の押し問答になる。
+         切ったことは設定にも書き戻して、開き直しても切れたままにする */
+      if (key.startsWith('gfx') && key !== 'gfxAuto' && this.autoQ.enabled) {
+        this.autoQ.disable();
+        this.autoQ.rung = 0;
+        this.settings.values.gfxAuto = saveSetting('gfxAuto', false);
+        this.settings._refresh();
+      }
     };
     menu.onSettings = () => this.settings.show();
 
@@ -1597,6 +1632,22 @@ class Game {
     this._soloNades.length = 0;
     this.hud.score(0);
     this.state = 'menu';
+  }
+
+  /**
+   * 自動画質の段を絵へ落とす。段の意味はここが持つ（autoquality.jsは時機だけ）。
+   *   0=全部入り → 1=描画85% → 2=描画70% → 3=接地の陰影オフ →
+   *   4=光のにじみオフ → 5=影ひかえめ
+   * 再コンパイルの要らない物（倍率・パスの入り切り）を先に並べてある。
+   * ユーザーが設定で下げている物より上へは戻さない（必ず低い方へ倒す）
+   */
+  _applyRung(r) {
+    const v = this.settings?.values || {};
+    const gfx = this._gfx;
+    gfx.setRenderScale(Math.min(v.gfxScale ?? 1, r >= 2 ? 0.7 : r >= 1 ? 0.85 : 1));
+    gfx.setAo((v.gfxAo ?? true) && r < 3);
+    gfx.setBloom((v.gfxBloom ?? true) && r < 4);
+    gfx.setShadowQuality(r >= 5 ? '低' : (v.gfxShadow ?? '高'));
   }
 
   /**
@@ -2704,6 +2755,8 @@ class Game {
       calls: mid(this._infoCalls, this._infoN),
       tris: mid(this._infoTris, this._infoN),
       scale: Math.round((this.renderer?.getPixelRatio() || 0) * 100),
+      // 自動画質がどこまで下げて落ち着いたか。0=全部入り。自動を切っている人はnull
+      rung: this.autoQ?.enabled ? this.autoQ.rung : null,
     });
     this._frameN = 0;
     this._frameAt = 0;
@@ -2900,6 +2953,8 @@ class Game {
       this._frameAt = (this._frameAt + 1) % FRAME_SAMPLES;
       if (this._frameN < FRAME_SAMPLES) this._frameN++;
     }
+    // 自動画質。重ければ1段ずつ絵を軽くする（遊んでいる間だけ数える）
+    this.autoQ?.frame(dt, this.state === 'playing');
 
     const playing = this.state === 'playing';
 
