@@ -272,7 +272,17 @@ console.log('\n[9] 1人プレイの敵も外部モデルの見た目で出る（
   e.spawn(level.enemySpawns[0]);
   ok(!!e._glbVis, '外部モデルが付いた');
   ok(e._glbVis.root.parent === e.root, '体(root)へぶら下がっている＝位置と向きが一緒に動く');
-  ok(e.meshes.every((m) => !m.visible), 'コード製の体の面は全部隠れた');
+
+  // 体は隠れるが、**銃だけは見えたまま残る**（丸腰で撃つ嘘を作らない）。
+  // 銃は隠れた骨に付いていて、狙い・跳ね・死んだら落とす、が全部生きている
+  const underGun = (m) => {
+    for (let o = m; o; o = o.parent) if (o === e.parts.gun) return true;
+    return false;
+  };
+  const body = e.meshes.filter((m) => !underGun(m));
+  const gunMeshes = e.meshes.filter(underGun);
+  ok(body.length > 0 && body.every((m) => !m.visible), `コード製の体の面は全部隠れた（${body.length}枚）`);
+  ok(gunMeshes.length > 0 && gunMeshes.every((m) => m.visible), `銃の面は見えている（${gunMeshes.length}枚）`);
 
   // 判定は今まで通り、見えない骨から取れること
   e.root.updateMatrixWorld(true);
@@ -295,11 +305,15 @@ console.log('\n[9] 1人プレイの敵も外部モデルの見た目で出る（
   hips.getWorldPosition(v1);
   ok(v0.distanceTo(v1) > 0.001, `クリップで骨が動く（${(v0.distanceTo(v1) * 1000).toFixed(1)}mm動いた）`);
 
-  // 倒すと体ごと倒れて、待機の再生が止まる（死体が呼吸しない）
+  // 倒すと体ごと倒れて、待機の再生が止まる（死体が呼吸しない）。
+  // コード製の死に方がrootを回すぶんと、見た目の入れ物が補うぶんの**合計**が
+  // 90度あたりに収まること（片方だけ見ると、二重に回って裏返っていても通ってしまう。
+  // 実際に裏返っていた）
   e.hit(9999, 'chest', new THREE.Vector3(0, 0, -1));
   ok(!e.alive, '倒れた');
   for (let i = 0; i < 90; i++) e._updateDeath(1 / 60);
-  ok(Math.abs(e._glbVis.root.rotation.x) > 1.2, `体ごと倒れている（${e._glbVis.root.rotation.x.toFixed(2)}rad）`);
+  const total = Math.abs(e.root.rotation.x + e._glbVis.root.rotation.x);
+  ok(total > 1.2 && total < 2.0, `合計でちょうど倒れている（root+見た目=${total.toFixed(2)}rad）`);
   ok(e._glbVis.mixer.timeScale === 0, '倒れた後はアニメが止まっている');
 
   // 湧き直したら立ち姿へ戻る
