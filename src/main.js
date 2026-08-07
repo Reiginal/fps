@@ -744,7 +744,9 @@ class Game {
     await frame();
 
     /* ---------------------------------------------------------- 地形 */
-    const level = buildLevel(mats);
+    // 影のこまやかさ「低」の端末は屋内ランプ(点光源3灯)も置かずに組む。
+    // 点光源は画面の全画素で評価されるので、消すと弱いGPUの塗りが軽くなる
+    const level = buildLevel(mats, { lamps: savedGfx.gfxShadow !== '低' });
     scene.add(level.root);
     this.level = level;
     // 射線判定用。当たり判定専用の見えない床は除き、見えている面だけを対象にする

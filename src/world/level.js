@@ -699,7 +699,12 @@ roughnessFactor = max( roughnessFactor, uGnd.z );
   return mat;
 }
 
-export function buildLevel(mats) {
+/**
+ * @param lamps 屋内のランプ(点光源3灯)を置くか。点光源は影を落とさなくても
+ *   画面の全フラグメントで評価されるので、設定「影のこまやかさ:低」の端末では
+ *   置かずに組む（シェーダの光の本数はコンパイル時に決まるため、起動時の1回だけ）
+ */
+export function buildLevel(mats, { lamps = true } = {}) {
   const root = new THREE.Group();
   const solids = new THREE.Group();   // 衝突に参加するもの
   const props = new THREE.Group();    // 衝突には入れない飾り（電線・アンテナ・路面の貼り分け）
@@ -2042,9 +2047,11 @@ export function buildLevel(mats) {
   // これ以上は増やさない
   // 到達距離は短く。点光源は影を落とさないので、遠くまで届かせると
   // 壁を突き抜けて外の路面まで暖色で照らしてしまう
-  const bunkerLamp = new THREE.PointLight(0xffb877, 7.0, 9, 2);
-  bunkerLamp.position.set(1.2, 3.05, -3.0);
-  root.add(bunkerLamp);
+  if (lamps) {
+    const bunkerLamp = new THREE.PointLight(0xffb877, 7.0, 9, 2);
+    bunkerLamp.position.set(1.2, 3.05, -3.0);
+    root.add(bunkerLamp);
+  }
 
   // 屋上の設備と土嚢
   const bunkerRoof = bunkerH + 0.5;
@@ -2269,9 +2276,11 @@ export function buildLevel(mats) {
     emit(new THREE.PlaneGeometry(0.6, 0.3), lampMat,
       cx - 6.4, 3.9, cz + 1.6, 0, Math.PI / 2, 0, false, false);
     boxD(0.74, 0.09, 0.44, M.rust, cx - 6.4, 3.96, cz + 1.6, 0, 0.4);
-    const shedLamp = new THREE.PointLight(0xffb877, 6.0, 9, 2);
-    shedLamp.position.set(cx - 6.2, 3.6, cz + 1.6);
-    root.add(shedLamp);
+    if (lamps) {
+      const shedLamp = new THREE.PointLight(0xffb877, 6.0, 9, 2);
+      shedLamp.position.set(cx - 6.2, 3.6, cz + 1.6);
+      root.add(shedLamp);
+    }
 
     // 玄関の庇と看板
     box(2.0, 0.26, 4.4, M.concreteDark, cx - w / 2 - 1.0, 2.95, cz, 0, 1.6);
@@ -2443,9 +2452,11 @@ export function buildLevel(mats) {
       boxD(1.05, 0.12, 1.05, M.rust, lx, h - 1.0, cz - 1.0, 0, 0.5);
     }
     // 灯具は2つでも点光源は1つ。全フラグメントで評価される物を増やしたくない
-    const warehouseLamp = new THREE.PointLight(0xffc089, 10.0, 13, 2);
-    warehouseLamp.position.set(cx - 1.2, h - 1.4, cz - 1.0);
-    root.add(warehouseLamp);
+    if (lamps) {
+      const warehouseLamp = new THREE.PointLight(0xffc089, 10.0, 13, 2);
+      warehouseLamp.position.set(cx - 1.2, h - 1.4, cz - 1.0);
+      root.add(warehouseLamp);
+    }
   }
 
   /* ------------------------------------------------- 海上コンテナ群 */

@@ -70,5 +70,20 @@ console.log('\n[4] 空は焼いた絵で、毎フレーム計算し直してい�
   ok(!/this\.sky\.position\.copy/.test(main), '毎フレームの空の追従が残っていない');
 }
 
+console.log('\n[5] 屋内ランプは3灯まで、低設定では0灯');
+/* 点光源は影を落とさなくても全フラグメントで評価される。
+   数がなし崩しに増えると、全材質の塗りがそのぶん重くなる。
+   （buildWorld()はサーバー用で光を持たないので、ここはソースで数える） */
+{
+  const { readFileSync } = await import('node:fs');
+  const level = readFileSync(new URL('../src/world/level.js', import.meta.url), 'utf8');
+  const lights = (level.match(/new THREE\.PointLight\(/g) || []).length;
+  ok(lights === 3, `地形の点光源は3灯（今${lights}灯。増やす時は塗りの重さと引き換え）`);
+  ok((level.match(/if \(lamps\) \{/g) || []).length === 3, '3灯とも入り切りの口を通っている');
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  ok(/buildLevel\(mats, \{ lamps: savedGfx\.gfxShadow !== '低' \}\)/.test(main),
+    '影のこまやかさ「低」でランプが消える繋ぎがある');
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);
