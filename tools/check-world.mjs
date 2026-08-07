@@ -55,5 +55,20 @@ console.log('\n[3] 地形の指紋が変わっていない');
 ok(w.stats.tris > 0, `三角形 ${w.stats.tris.toLocaleString()}`);
 ok(Array.isArray(w.arenaSpawns) && w.arenaSpawns.length >= 4, `対戦の湧き場所 ${w.arenaSpawns.length}箇所`);
 
+console.log('\n[4] 空は焼いた絵で、毎フレーム計算し直していない');
+/* 空のシェーダは雲のfbmで1ピクセル80回のハッシュを回す。
+   球のまま場面に置くと、renderOrder=-1000で一番先に描かれて、
+   ビルで隠れる画素まで毎フレーム全画面ぶん払う。
+   空は起動時に決めたきり動かないので、キューブマップへ1回焼いて貼る */
+{
+  const { readFileSync } = await import('node:fs');
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  ok(/WebGLCubeRenderTarget[\s\S]{0,120}?HalfFloatType/.test(main),
+    'キューブへHalfFloatで焼いている（8bitだと太陽の芯が頭打ちで夕日が死ぬ）');
+  ok(/scene\.background = skyRT\.texture/.test(main), '焼いた絵を背景に貼っている');
+  ok(!/scene\.add\(sky\)/.test(main), '空の球を場面に置いていない');
+  ok(!/this\.sky\.position\.copy/.test(main), '毎フレームの空の追従が残っていない');
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);

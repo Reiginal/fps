@@ -588,19 +588,29 @@ class Game {
     this.viewCamera = viewCamera;
 
     /* ------------------------------------------------------------ 空 */
+    /* 空は起動時に1回だけキューブマップ（箱の内側6面の絵）へ焼いて、
+       毎フレームは焼いた絵を貼るだけにする。
+       前は空のシェーダを球のまま場面に置いていたが、あれは雲の計算で
+       1ピクセル80回のハッシュを回すうえ、renderOrder=-1000で一番先に描くので、
+       ビルや地面で隠れる画素のぶんまで毎フレーム全画面で払っていた。
+       空は起動時に時間帯を決めたきり動かない（TODのコメント参照）ので、
+       動かない物を毎フレーム計算し直す理由が無い。
+       HalfFloatで焼くのは、太陽の芯がリニアで13を超えるため。8bitで焼くと
+       1.0で頭打ちになり、ブルームへ渡る強さが消えて夕日がただの白丸になる */
     const sky = createSky(SUN_DIR);
-    sky.scale.setScalar(600);
-    scene.add(sky);
-    this.sky = sky;
+    sky.scale.setScalar(10);
+    const skyScene = new THREE.Scene();
+    skyScene.add(sky);
+    const skyRT = new THREE.WebGLCubeRenderTarget(1024, { type: THREE.HalfFloatType });
+    const skyCam = new THREE.CubeCamera(0.1, 100, skyRT);
+    skyCam.update(renderer, skyScene);
+    scene.background = skyRT.texture;
 
-    // 空から環境光を焼く。これがあると金属や影の色が一気に馴染む
+    // 空から環境光を焼く。これがあると金属や影の色が一気に馴染む。
+    // 焼き元は上と同じ球をそのまま使う（前は同じ物をもう1回組んでいた）
     const pmrem = new THREE.PMREMGenerator(renderer);
     pmrem.compileEquirectangularShader();
-    const envScene = new THREE.Scene();
-    const skyClone = createSky(SUN_DIR);
-    skyClone.scale.setScalar(10);
-    envScene.add(skyClone);
-    const envRT = pmrem.fromScene(envScene, 0.04);
+    const envRT = pmrem.fromScene(skyScene, 0.04);
     scene.environment = envRT.texture;
     // 環境光を抑えて日向と日陰の差を開く。上げすぎると影が持ち上がって平坦になる。
     // 空を2.75倍で焼いてあるので下げる必要はあるが、下げすぎると日陰が黒く潰れる。
@@ -608,8 +618,9 @@ class Game {
     scene.environmentIntensity = 0.85;
     viewScene.environment = envRT.texture;
     viewScene.environmentIntensity = 0.45;   // 銃の環境反射も絞る（上面の白飛び対策）
-    skyClone.geometry.dispose();
-    skyClone.material.dispose();
+    // 2回の焼きが終わったら焼き元は用済み。以後、空のシェーダは一度も走らない
+    sky.geometry.dispose();
+    sky.material.dispose();
     pmrem.dispose();
 
     /* ---------------------------------------------------------- 照明 */
@@ -2869,8 +2880,8 @@ class Game {
     // ロビーの3D。start()されている間だけ描く
     this.charView?.update(dt);
 
-    // 空はカメラに追従させる（遠景として固定して見せる）
-    this.sky.position.copy(this.camera.position);
+    /* 空はscene.backgroundに焼いてあるので、ここでやることは無い。
+       前は球をカメラへ毎フレーム追従させていた（背景のキューブは勝手に付いてくる） */
 
     // 武器の主光源をワールドの太陽に合わせ直す。カメラ空間へ引き戻すことで、
     // 太陽の方を向けば銃も逆光になり、背にすれば順光になる
