@@ -15,16 +15,20 @@ import { Director } from './ai/enemy.js';
 import { HUD } from './ui/hud.js';
 import { NetMenu, NET_MSG } from './ui/netmenu.js';
 import { SettingsMenu } from './ui/settings.js';
+import { loadSettings, saveSetting } from './core/settings.js';
+import { AutoQuality } from './core/autoquality.js';
 import { StatsMenu } from './ui/statsmenu.js';
 import { VoiceChat, PTT_CODE } from './net/voice.js';
 import { emptyTally, mergeTally, loadStats, saveStats, newlyUnlocked } from './core/stats.js';
 import { Lobby } from './ui/lobby.js';
 import { Chat } from './ui/chat.js';
 import { Diag } from './ui/diag.js';
+import { PerfMeter } from './ui/perfmeter.js';
 import { CharView } from './ui/charview.js';
 import { NetClient } from './net/client.js';
 import { RemotePlayers } from './net/remote.js';
 import { preloadCharModel, SOLO_MODEL } from './ai/glbchar.js';
+import { FarShadowGate } from './world/shadowgate.js';
 import {
   K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, outsideZone, CHARACTERS,
   TEAM_NAMES,
@@ -42,6 +46,11 @@ const REJOIN_WAITS = [1000, 2000, 3000, 5000, 8000];
    全部覚えると長く遊ぶほど記憶を食い続けるし、古い所まで混ぜると
    「今どうだったか」が薄まる */
 const FRAME_SAMPLES = 2000;
+
+/* 描画命令(draw call)と三角形の数を覚えておく枚数。毎秒1回しか取らないので40秒ぶん。
+   フレーム時間と違って毎フレーム取らないのは、この2つは1秒の中では
+   ほとんど動かない数字だから（敵の数と画面に入っている物で決まる） */
+const PERF_INFO_SAMPLES = 40;
 
 /* 地図を塗り直す回数（毎秒）。**他人の位置が届くのと同じ速さ。**
    これより速く塗っても、他人の点は1つも動かない */
@@ -197,7 +206,12 @@ const CASCADES = [
  * ShaderChunkを丸ごと差し替えれば材質を1つも触らずに全材質へ同じ計算が乗るので、
  * 「後から作られた材質だけカスケードに乗り遅れて太陽が3重に当たる」事故も起きない。
  */
-function installCascadedSoftShadow() {
+/**
+ * @param blockerTaps/pcfTaps ぼかしのタップ数。設定「影のこまやかさ」で
+ *   中・低を選ぶと減らして起動する。GLSLへ数として焼き込むので、
+ *   起動後に変えるには全材質の作り直しが要る＝ここは起動時の1回だけ
+ */
+function installCascadedSoftShadow({ blockerTaps = SHADOW_BLOCKER_TAPS, pcfTaps = SHADOW_PCF_TAPS } = {}) {
   const C = THREE.ShaderChunk;
   const N = CASCADES.length;
   // カーネルが枚の外へはみ出すと縁が切れるので、端はカーネル1個ぶん使わない
@@ -249,12 +263,12 @@ function installCascadedSoftShadow() {
 		float z = sc.z + bias;
 
 		// 遮蔽物探し。日向の平らな面はここで1本も当たらないので、
-		// 画面の大半はこの${SHADOW_BLOCKER_TAPS}タップだけで抜けられる
+		// 画面の大半はこの${blockerTaps}タップだけで抜けられる
 		float sum = 0.0;
 		float hits = 0.0;
-		for ( int i = 0; i < ${SHADOW_BLOCKER_TAPS}; i ++ ) {
+		for ( int i = 0; i < ${blockerTaps}; i ++ ) {
 
-			float d = texture2D( map, sc.xy + sunDisk( i, ${SHADOW_BLOCKER_TAPS}, phi ) * wide * texel ).r;
+			float d = texture2D( map, sc.xy + sunDisk( i, ${blockerTaps}, phi ) * wide * texel ).r;
 			if ( d < z ) { sum += d; hits += 1.0; }
 
 		}
@@ -265,13 +279,13 @@ function installCascadedSoftShadow() {
 		// 離れた桁や屋根の縁だけがぼける
 		float radius = clamp( ( z - sum / hits ) * penumbraScale, 1.0, wide );
 		float lit = 0.0;
-		for ( int i = 0; i < ${SHADOW_PCF_TAPS}; i ++ ) {
+		for ( int i = 0; i < ${pcfTaps}; i ++ ) {
 
-			lit += step( z, texture2D( map, sc.xy + sunDisk( i, ${SHADOW_PCF_TAPS}, phi + 2.4 ) * radius * texel ).r );
+			lit += step( z, texture2D( map, sc.xy + sunDisk( i, ${pcfTaps}, phi + 2.4 ) * radius * texel ).r );
 
 		}
 
-		return lit / ${SHADOW_PCF_TAPS.toFixed(1)};
+		return lit / ${pcfTaps.toFixed(1)};
 
 	}
 
@@ -356,6 +370,8 @@ const _arcPos = new THREE.Vector3();
 const _arcVel = new THREE.Vector3();
 const _arcPrev = new THREE.Vector3();
 const _arcStep = new THREE.Vector3();
+// octreeの当たりから同じ面をメッシュ側で取り直す時の、短いレイの始点（_meshNear参照）
+const _meshFrom = new THREE.Vector3();
 
 /**
  * 地形を真上から1枚だけ焼いて、2Dキャンバスとして返す。
@@ -464,6 +480,17 @@ class Game {
     this._frames = new Float64Array(FRAME_SAMPLES);
     this._frameAt = 0;    // 次に書く場所
     this._frameN = 0;     // 溜まった数（上限はFRAME_SAMPLES）
+    /* 描画命令(draw call)と三角形の数。fpsだけだと「重い」は分かっても
+       「何を減らせば軽くなるか」が分からない。命令の数が多いのか、
+       三角形が多いのか、数は普通で塗りが重いのか、を切り分ける入口 */
+    this._infoCalls = new Int32Array(PERF_INFO_SAMPLES);
+    this._infoTris = new Int32Array(PERF_INFO_SAMPLES);
+    this._infoAt = 0;
+    this._infoN = 0;
+    this._infoAcc = 0;    // 1秒に1回だけ取るための積み
+    this.perfMeter = null;
+    // メニューの間、既に1枚描いてあるか。描いてあれば描き直さない（_loop末尾を参照）
+    this._idleDrawn = false;
     this._lastTime = 0;
     this._invQ = new THREE.Quaternion();
     // 倒れている間の見回し。生きている間はnullで、倒れた瞬間に
@@ -483,6 +510,14 @@ class Game {
     // 到達位置がサーバーと食い違い、補正が常時走ることになる
     this._acc = 0;
     this._plates = [];
+    /* 窓の大きさ。毎フレームinnerWidth/innerHeightを読まないための控え。
+       あの2つは読むだけでブラウザが配置の計算を挟むことがある（特に名札の
+       ループの中で1人ごとに読んでいた）。変わるのはリサイズの時だけなので、
+       その時に_resize()が入れ直す */
+    this._vw = innerWidth;
+    this._vh = innerHeight;
+    // 描画のきめ細かさ（設定gfxScale）。drawScale()の結果に掛ける
+    this._userScale = 1;
     this._toRemote = new THREE.Vector3();
     this._plateV = new THREE.Vector3();
     this._ray = new THREE.Ray();
@@ -524,12 +559,25 @@ class Game {
     // 生の深度値が要る。ちなみにこのthreeではPCFSoftShadowMapは廃止済みで、
     // 指定しても警告を出してPCFへ落ちるだけなので、あれは元々効いていなかった
     renderer.shadowMap.type = THREE.BasicShadowMap;
-    installCascadedSoftShadow();
+    /* 影のぼかしタップとMSAAは、覚えている設定をここで読む。
+       この2つはシェーダ・バッファへ焼き込む種類で、後から変えるには
+       全材質や合成器の作り直しが要るので、起動時の1回だけ効かせる
+       （設定画面のhintにも「開き直してから」と書いてある） */
+    const savedGfx = loadSettings();
+    installCascadedSoftShadow(
+      savedGfx.gfxShadow === '高' ? {} : { blockerTaps: 8, pcfTaps: 8 },
+    );
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     // 空を明るく作り直したぶん、露出を下げないと全体が白飛びする。
     // 実測で空が飛んでいたのでさらに絞る（中間調を上限側から救う）
     renderer.toneMappingExposure = 1.0;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    /* 描画命令の数は自動では数えさせない。自動(autoReset)だと render() の
+       たびに0へ戻るが、このゲームは1フレームに何度も render() が走る
+       （影の焼き込み・AOの法線・ポストの各パス）。自動のままだと最後のパス
+       （仕上げの板1枚）しか見えず、「描画命令2回」という嘘の数字になる。
+       ループの頭で自分で0へ戻し、フレーム全部を数える（_loopの先頭を参照） */
+    renderer.info.autoReset = false;
     this.renderer = renderer;
 
     setLoad(8, '素材を生成中');
@@ -565,19 +613,29 @@ class Game {
     this.viewCamera = viewCamera;
 
     /* ------------------------------------------------------------ 空 */
+    /* 空は起動時に1回だけキューブマップ（箱の内側6面の絵）へ焼いて、
+       毎フレームは焼いた絵を貼るだけにする。
+       前は空のシェーダを球のまま場面に置いていたが、あれは雲の計算で
+       1ピクセル80回のハッシュを回すうえ、renderOrder=-1000で一番先に描くので、
+       ビルや地面で隠れる画素のぶんまで毎フレーム全画面で払っていた。
+       空は起動時に時間帯を決めたきり動かない（TODのコメント参照）ので、
+       動かない物を毎フレーム計算し直す理由が無い。
+       HalfFloatで焼くのは、太陽の芯がリニアで13を超えるため。8bitで焼くと
+       1.0で頭打ちになり、ブルームへ渡る強さが消えて夕日がただの白丸になる */
     const sky = createSky(SUN_DIR);
-    sky.scale.setScalar(600);
-    scene.add(sky);
-    this.sky = sky;
+    sky.scale.setScalar(10);
+    const skyScene = new THREE.Scene();
+    skyScene.add(sky);
+    const skyRT = new THREE.WebGLCubeRenderTarget(1024, { type: THREE.HalfFloatType });
+    const skyCam = new THREE.CubeCamera(0.1, 100, skyRT);
+    skyCam.update(renderer, skyScene);
+    scene.background = skyRT.texture;
 
-    // 空から環境光を焼く。これがあると金属や影の色が一気に馴染む
+    // 空から環境光を焼く。これがあると金属や影の色が一気に馴染む。
+    // 焼き元は上と同じ球をそのまま使う（前は同じ物をもう1回組んでいた）
     const pmrem = new THREE.PMREMGenerator(renderer);
     pmrem.compileEquirectangularShader();
-    const envScene = new THREE.Scene();
-    const skyClone = createSky(SUN_DIR);
-    skyClone.scale.setScalar(10);
-    envScene.add(skyClone);
-    const envRT = pmrem.fromScene(envScene, 0.04);
+    const envRT = pmrem.fromScene(skyScene, 0.04);
     scene.environment = envRT.texture;
     // 環境光を抑えて日向と日陰の差を開く。上げすぎると影が持ち上がって平坦になる。
     // 空を2.75倍で焼いてあるので下げる必要はあるが、下げすぎると日陰が黒く潰れる。
@@ -585,8 +643,9 @@ class Game {
     scene.environmentIntensity = 0.85;
     viewScene.environment = envRT.texture;
     viewScene.environmentIntensity = 0.45;   // 銃の環境反射も絞る（上面の白飛び対策）
-    skyClone.geometry.dispose();
-    skyClone.material.dispose();
+    // 2回の焼きが終わったら焼き元は用済み。以後、空のシェーダは一度も走らない
+    sky.geometry.dispose();
+    sky.material.dispose();
     pmrem.dispose();
 
     /* ---------------------------------------------------------- 照明 */
@@ -606,6 +665,8 @@ class Game {
     this._sunQuatInv = this._sunQuat.clone().invert();
     this._sunCenter = new THREE.Vector3();
     this._shadowTick = 0;
+    // 遠い方の影マップを焼き直すべきかの門番（中身の説明はshadowgate.js）
+    this._farShadow = new FarShadowGate();
 
     this.cascades = CASCADES.map((c) => {
       // 日射しの色も時間帯で変える。向きだけだと「影が伸びた」で終わって、
@@ -639,7 +700,8 @@ class Game {
       }
       scene.add(light);
       scene.add(light.target);
-      return { light, height, texel, ...c };
+      // rangeは影マップの粗さを変える時（_applyShadowSize）に半影の換算で使う
+      return { light, height, texel, range, ...c };
     });
     this._updateSunCascades();
 
@@ -682,7 +744,9 @@ class Game {
     await frame();
 
     /* ---------------------------------------------------------- 地形 */
-    const level = buildLevel(mats);
+    // 影のこまやかさ「低」の端末は屋内ランプ(点光源3灯)も置かずに組む。
+    // 点光源は画面の全画素で評価されるので、消すと弱いGPUの塗りが軽くなる
+    const level = buildLevel(mats, { lamps: savedGfx.gfxShadow !== '低' });
     scene.add(level.root);
     this.level = level;
     // 射線判定用。当たり判定専用の見えない床は除き、見えている面だけを対象にする
@@ -773,7 +837,9 @@ class Game {
     await frame();
 
     // 初回描画の引っ掛かりを消すため、事前にシェーダーを通しておく
-    this.fx = createComposer(renderer, scene, camera, viewScene, viewCamera);
+    this.fx = createComposer(renderer, scene, camera, viewScene, viewCamera, {
+      msaa: savedGfx.gfxMsaa,
+    });
     renderer.compile(scene, camera);
     renderer.compile(viewScene, viewCamera);
     this.fx.composer.render();
@@ -810,11 +876,86 @@ class Game {
     this.voice = new VoiceChat((to, d) => this.net?.sendVoice(to, d));
     this.voice.onChange = () => this._updateVoiceHud();
 
-    this.settings = new SettingsMenu({ input: this.input, audio: this.audio, voice: this.voice });
+    /* 画質の効かせ先。設定の表(settings.js)のgfx系はここへ届く。
+       3つともその場で効く（描き直しの口が元からあるので、それを呼ぶだけ） */
+    const gfx = {
+      // 描画のきめ細かさ。drawScale()（窓の大きさから決まる上限）に掛ける係数。
+      // _resize()が倍率を取り直して合成器まで配り直すので、それをそのまま使う
+      setRenderScale: (v) => {
+        const s = clamp(v || 1, 0.5, 1);
+        if (s === this._userScale) return;
+        this._userScale = s;
+        this._resize();
+      },
+      /* 接地の陰影。パス(ao.enabled)を切ると法線パスごと飛ぶ＝
+         シーンの2回目の描画がまるごと消える。ここが画質項目で一番大きい削り。
+         合成側(aoCompose)は鎖の繋ぎ目なので消せない。uAoOffで素通しにする
+         （前のフレームの古いAOバッファを読み続けないように） */
+      setAo: (v) => {
+        if (!this.fx) return;
+        this.fx.ao.enabled = !!v;
+        this.fx.aoCompose.uniforms.uAoOff.value = v ? 0 : 1;
+      },
+      // 光のにじみ。ブルームと太陽のグレアはどちらも「光が広がる」係なので一緒に切る
+      setBloom: (v) => {
+        if (!this.fx) return;
+        this.fx.bloom.enabled = !!v;
+        this.fx.glare.enabled = !!v;
+      },
+      /* 影のこまやかさ。マップの粗さと遠い枚の焼く頻度はその場で効く。
+         ぼかしのタップ数だけはシェーダに焼いてあるので、開き直した時に
+         boot()が読む（このhintは設定の表に書いてある） */
+      setShadowQuality: (v) => {
+        if (!this.cascades) return;
+        this._applyShadowSize(v === '高' ? SHADOW_MAP_SIZE : 1024);
+        // 低は遠い枚の焼き直しを1/4の頻度へ。遠くの動く物の影が0.2秒刻みになる
+        for (const c of this.cascades) if (c.interval > 1) c.interval = v === '低' ? 12 : 3;
+      },
+      // ふちのギザギザ消し(MSAA)は描き先のバッファに焼き込むので起動時にしか効かない。
+      // 表の作法（表に足した物は必ず効かせ先を持つ）を保つための空受け
+      setMsaa: () => {},
+      // 自動画質の入り切り（設定gfxAuto）
+      setAuto: (v) => {
+        if (v) { this.autoQ.enable(); return; }
+        this.autoQ.disable();
+        // 自動で下げていた分は戻す。手で決めたい人の画面に下げ跡を残さない
+        if (this.autoQ.rung !== 0) {
+          this.autoQ.rung = 0;
+          this._applyRung(0);
+        }
+      },
+    };
+    this._gfx = gfx;
+
+    /* 自動画質。重い端末では1段ずつ絵を軽くする（時機の判断はautoquality.js、
+       何を下げるかは_applyRung）。手で画質を触った人には手を出さない（下のonChange） */
+    this.autoQ = new AutoQuality();
+    this.autoQ.onChange = (from, to) => {
+      this._applyRung(to);
+      // 下げた時だけ一言出す。上げ直しは黙ってやる（良くなった報告は騒音）
+      if (to > from) {
+        this.diag?.setState('autoq', 'カクつくので画質を1段下げました（設定からも変えられます）');
+        clearTimeout(this._autoqTimer);
+        this._autoqTimer = setTimeout(() => this.diag?.setState('autoq', ''), 6000);
+      }
+    };
+
+    this.settings = new SettingsMenu({
+      input: this.input, audio: this.audio, voice: this.voice, gfx,
+    });
     this.settings.onChange = (key, value) => {
       // 遊んでいる最中に全画面を切られたら、その場で窓へ戻す。
       // 次に遊び始めるまで効かないと、切ったのに何も起きないように見える
       if (key === 'full' && !value) this.input.exitFullscreen();
+      /* 画質を手で触った人には自動を任せない。自動で下げた矢先に
+         手で上げ直されると、また下げて…の押し問答になる。
+         切ったことは設定にも書き戻して、開き直しても切れたままにする */
+      if (key.startsWith('gfx') && key !== 'gfxAuto' && this.autoQ.enabled) {
+        this.autoQ.disable();
+        this.autoQ.rung = 0;
+        this.settings.values.gfxAuto = saveSetting('gfxAuto', false);
+        this.settings._refresh();
+      }
     };
     menu.onSettings = () => this.settings.show();
 
@@ -855,6 +996,19 @@ class Game {
     // 何かがおかしい時だけ手掛かりを出す入れ物。
     // 遠くの人に遊んでもらった時、こちらに情報が返ってこないのを直すためにある
     this.diag = new Diag();
+
+    /* URLに ?debug を付けた時だけ、左下に fps・描画命令・三角形の数を出す。
+       軽量化の作業中に「この変更で何が減ったか」をその場で読むための窓。
+       普段は作らないので、遊ぶ人の画面にも重さにも影響しない */
+    if (new URLSearchParams(location.search).has('debug')) {
+      const el = document.createElement('div');
+      el.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99;'
+        + 'font:11px/1.6 ui-monospace,Menlo,monospace;color:#7ddb8a;'
+        + 'background:rgba(0,0,0,.55);padding:2px 8px;border-radius:4px;'
+        + 'pointer-events:none;white-space:nowrap';
+      document.body.appendChild(el);
+      this.perfMeter = new PerfMeter(el);
+    }
 
     // 発言。ロビーでも試合中でも同じ物を使う
     const chat = new Chat();
@@ -1359,6 +1513,10 @@ class Game {
     this._frames = new Float64Array(FRAME_SAMPLES);
     this._frameAt = 0;    // 次に書く場所
     this._frameN = 0;     // 溜まった数（上限はFRAME_SAMPLES）
+    // 描画命令・三角形の数も同じ区切りで捨てる。前の試合の数字を混ぜない
+    this._infoAt = 0;
+    this._infoN = 0;
+    this._infoAcc = 0;
   }
 
   /* 自分が倒れた。撃たれた・爆風・落下の3経路から同じ形で入る。
@@ -1478,18 +1636,58 @@ class Game {
     this.state = 'menu';
   }
 
+  /**
+   * 自動画質の段を絵へ落とす。段の意味はここが持つ（autoquality.jsは時機だけ）。
+   *   0=全部入り → 1=描画85% → 2=描画70% → 3=接地の陰影オフ →
+   *   4=光のにじみオフ → 5=影ひかえめ
+   * 再コンパイルの要らない物（倍率・パスの入り切り）を先に並べてある。
+   * ユーザーが設定で下げている物より上へは戻さない（必ず低い方へ倒す）
+   */
+  _applyRung(r) {
+    const v = this.settings?.values || {};
+    const gfx = this._gfx;
+    gfx.setRenderScale(Math.min(v.gfxScale ?? 1, r >= 2 ? 0.7 : r >= 1 ? 0.85 : 1));
+    gfx.setAo((v.gfxAo ?? true) && r < 3);
+    gfx.setBloom((v.gfxBloom ?? true) && r < 4);
+    gfx.setShadowQuality(r >= 5 ? '低' : (v.gfxShadow ?? '高'));
+  }
+
+  /**
+   * 影マップの粗さを変える。テクセルの実寸が変わるので、テクセルから
+   * 決めている物（normalBias・半影の換算・升目の吸着）も一緒に取り直す。
+   * どれかを置き忘れると、粗くした瞬間に接地影が浮くか縁の幅が狂う
+   */
+  _applyShadowSize(size) {
+    for (const c of this.cascades) {
+      if (c.light.shadow.mapSize.x === size) continue;
+      c.light.shadow.mapSize.set(size, Math.round(size * SUN_DIR.y));
+      c.texel = (c.radius * 2) / size;
+      c.light.shadow.normalBias = SHADOW_NORMAL_BIAS_TEXELS * c.texel;
+      c.light.shadow.radius = (c.range * SUN_ANGULAR_TAN) / c.texel;
+      // 前の大きさで確保済みのマップは捨てて作り直させる
+      c.light.shadow.map?.dispose();
+      c.light.shadow.map = null;
+      c.light.shadow.needsUpdate = true;
+    }
+  }
+
   _resize() {
     const w = innerWidth, h = innerHeight;
+    this._vw = w;
+    this._vh = h;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.viewCamera.aspect = w / h;
     this.viewCamera.updateProjectionMatrix();
     // 倍率は窓の大きさで決まるので、寸法を入れる前に取り直す。
-    // 順番が逆だと合成器のバッファだけ古い倍率で作られて画がずれる
-    this.renderer.setPixelRatio(drawScale(w, h));
+    // 順番が逆だと合成器のバッファだけ古い倍率で作られて画がずれる。
+    // _userScaleは設定「描画のきめ細かさ」（既定1＝今まで通り）
+    this.renderer.setPixelRatio(drawScale(w, h) * this._userScale);
     this.renderer.setSize(w, h);
     this.fx.setSize(w, h);
     this.effects.setPixelScale(this.renderer.getDrawingBufferSize(new THREE.Vector2()).y);
+    // 寸法が変わるとキャンバスの中身が消えるので、メニューで止めていた絵を描き直す
+    this._idleDrawn = false;
   }
 
   /* 太陽の2枚を置き直す。近い1枚はカメラに付いていくので毎フレーム動かす */
@@ -1500,7 +1698,28 @@ class Game {
         // 焼き直す番でなければ前に焼いた1枚をそのまま使う。
         // 箱を動かすのも一緒に見送る。動かすと中身と行列が食い違って影がずれる
         if (this._shadowTick % c.interval !== 0) continue;
-        c.light.shadow.needsUpdate = true;
+        /* 番が来ても、遠くで何かが動いていた時しか焼き直さない。
+           太陽も地形も動かないので、誰も遠くで動いていなければ
+           前に焼いた1枚がそのまま正しい（判定の中身はshadowgate.js）。
+           近い枚の中の動きは、毎フレーム焼く近い枚が受け持つ。
+           前はここが無条件で、3フレームごとに517枚を丸ごと焼き直していた */
+        const g = this._farShadow;
+        g.begin(this.camera.position.x, this.camera.position.z);
+        if (this.mode === 'versus') {
+          if (this.remotes) {
+            for (const s of this.remotes.slots.values()) {
+              const r = s.handle.root;
+              g.add(r.position.x, r.position.z, false);
+            }
+          }
+        } else if (this.director) {
+          // 死体は片付くまでactiveに残る（enemy.jsの_retireCorpse参照）ので、
+          // ここを回れば生きている敵も死体も全部数えたことになる
+          for (const e of this.director.active) {
+            g.add(e.root.position.x, e.root.position.z, !e.alive && e.deathSettled);
+          }
+        }
+        if (g.end()) c.light.shadow.needsUpdate = true;
       }
       if (!c.follow) continue;
       // ライト空間へ移してテクセルの升目に載せてから戻す。載せずに動かすと、
@@ -1543,25 +1762,61 @@ class Game {
     const N = 8;
     for (let i = 0; i < N; i++) {
       const a = (i / N) * Math.PI * 2;
-      this.raycaster.set(this._probe, this._dirs[i].set(Math.cos(a), 0, Math.sin(a)));
-      this.raycaster.far = 40;
-      const hits = this.raycaster.intersectObjects(this.solidMeshes, false);
-      sum += hits.length ? hits[0].distance : 40;
+      // 欲しいのは距離だけなのでoctreeで足りる（材質もメッシュも要らない）
+      const hit = this._terrainRay(this._probe, this._dirs[i].set(Math.cos(a), 0, Math.sin(a)), 40);
+      sum += hit ? hit.distance : 40;
     }
     this.audio.setEnvironment(clamp(sum / N / 30, 0, 1));
   }
 
   /* -------------------------------------------------------- 射撃解決 */
 
+  /**
+   * 地形への1本レイ。octreeで飛ばす。当たらなければnull。
+   *
+   * intersectObjects(solidMeshes)は544枚のメッシュを毎回総当たりするので
+   * 1本0.2msかかる（level.jsの分割数のコメントに実測がある）。
+   * 毎フレーム何本も飛ばす所（手榴弾の弧・敵の発砲・散弾の9ペレット）が
+   * それを使うと、そこだけで1フレームの予算の何割も食う。
+   * octreeは既に組んであり、手榴弾の飛翔も移動判定も同じ物を見ているので、
+   * こちらで飛ばせば速いうえに「予測の線と実際の飛び方」もずれない。
+   *
+   * 返り値はoctreeの形: { distance, position, triangle }。
+   * メッシュの当たりと違って材質(kindOf)と面(face)は入っていない。
+   * 要る時は_meshNearで取り直す
+   */
+  _terrainRay(origin, dir, far) {
+    this._ray.origin.copy(origin);
+    this._ray.direction.copy(dir);
+    const hit = this.level.octree.rayIntersect(this._ray);
+    return hit && hit.distance <= far ? hit : null;
+  }
+
+  /**
+   * octreeの当たり(_terrainRayの返り値)から、同じ面をメッシュ側で取り直す。
+   * 着弾の見た目と音には材質(kindOf)と面の向きが要るが、octreeの三角形は
+   * どのメッシュから来たかを知らない。
+   * 当たった所の0.5m手前から短いレイを撃ち直せば、殆どのメッシュが
+   * 外接球で弾かれるので、長いレイの総当たりとは比べ物にならないほど安い。
+   * それでも見つからなければnull（呼ぶ側が既定の材質で受ける）
+   */
+  _meshNear(hit, dir) {
+    const back = Math.min(0.5, hit.distance);
+    _meshFrom.copy(hit.position).addScaledVector(dir, -back);
+    this.raycaster.set(_meshFrom, dir);
+    this.raycaster.far = back + 0.05;
+    const hs = this.raycaster.intersectObjects(this.solidMeshes, false);
+    return hs.length ? hs[0] : null;
+  }
+
   _resolveShot(shot) {
     if (this.mode === 'versus') return this._resolveShotVersus(shot);
     const { origin, dir, muzzle, def, pellet } = shot;
     if (pellet === 0) { this.shotsFired++; this._tally('shots'); }
 
-    this.raycaster.set(origin, dir);
-    this.raycaster.far = def.range;
-    const worldHits = this.raycaster.intersectObjects(this.solidMeshes, false);
-    const worldHit = worldHits.length ? worldHits[0] : null;
+    // 地形はoctreeで見る。散弾は1発でこれが9回呼ばれるので、
+    // 総当たり(1本0.2ms)のままだと引き金1回で1.9msのつっかえになる
+    const worldHit = this._terrainRay(origin, dir, def.range);
 
     // 敵は専用の球/カプセルで判定する
     let enemyHit = null;
@@ -1597,23 +1852,25 @@ class Game {
       }
       if (drawTracer) this.effects.tracer(muzzle, enemyHit.point, 0.03);
     } else if (worldHit) {
-      const normal = worldHit.face
-        ? this._hitNormal.copy(worldHit.face.normal).transformDirection(worldHit.object.matrixWorld)
+      // 材質と面の向きはメッシュ側から取り直す（octreeの三角形は材質を知らない）
+      const h = this._meshNear(worldHit, dir);
+      const normal = h?.face
+        ? this._hitNormal.copy(h.face.normal).transformDirection(h.object.matrixWorld)
         : this._hitNormal.copy(dir).negate();
-      const kind = this.kindOf.get(worldHit.object.material) ?? 'concrete';
+      const kind = h ? (this.kindOf.get(h.object.material) ?? 'concrete') : 'concrete';
       // 近接は弾ではない。壁を刃で擦っても火花は散らないし着弾痕も残らない。
       // ここを素通ししていたせいで、ナイフを振るたびに銃の着弾と同じ
       // 火花・粉塵・弾痕が壁に出ていた
       if (!def.melee) {
-        this.effects.impact(worldHit.point, normal, kind);
-        this.audio.impact(kind, worldHit.point, this.camera);
+        this.effects.impact(worldHit.position, normal, kind);
+        this.audio.impact(kind, worldHit.position, this.camera);
       } else {
         // 火花は出さないが、当たった手応えは要る。
         // 材質を渡すのは、鉄板とコンクリで鳴り方を変えるため。
         // 全部同じ鈍い音だと、何に当たったのか耳から分からない
-        this.audio.stab(worldHit.point, this.camera, kind);
+        this.audio.stab(worldHit.position, this.camera, kind);
       }
-      if (drawTracer) this.effects.tracer(muzzle, worldHit.point, 0.03);
+      if (drawTracer) this.effects.tracer(muzzle, worldHit.position, 0.03);
     } else if (drawTracer) {
       const far = this._hitNormal.copy(origin).addScaledVector(dir, def.range);
       this.effects.tracer(muzzle, far, 0.025);
@@ -1632,10 +1889,9 @@ class Game {
 
     // 近接は弾を飛ばさないので曳光弾も出さない（刃を振るたびに弾が飛んで見えていた）
     const drawTracer = !def.melee && pellet % 3 === 0;
-    this.raycaster.set(origin, dir);
-    this.raycaster.far = def.range;
-    const hits = this.raycaster.intersectObjects(this.solidMeshes, false);
-    const wallDist = hits.length ? hits[0].distance : Infinity;
+    // 地形はoctreeで見る（理由は_terrainRay参照）
+    const whit = this._terrainRay(origin, dir, def.range);
+    const wallDist = whit ? whit.distance : Infinity;
 
     // 相手に当たったかは手元でも粗く見る。当たっていれば壁の火花を出さない。
     // ここで出す判定はあくまで絵の切り替え用で、ダメージには一切使わない
@@ -1647,20 +1903,20 @@ class Game {
       }
       return;
     }
-    if (hits.length) {
-      const h = hits[0];
-      const normal = h.face
+    if (whit) {
+      const h = this._meshNear(whit, dir);
+      const normal = h?.face
         ? h.face.normal.clone().transformDirection(h.object.matrixWorld)
         : dir.clone().negate();
-      const kind = this.kindOf.get(h.object.material) ?? 'concrete';
+      const kind = h ? (this.kindOf.get(h.object.material) ?? 'concrete') : 'concrete';
       // 対戦側も同じ。近接では火花も着弾痕も出さない
       if (!def.melee) {
-        this.effects.impact(h.point, normal, kind);
-        this.audio.impact(kind, h.point, this.camera);
+        this.effects.impact(whit.position, normal, kind);
+        this.audio.impact(kind, whit.position, this.camera);
       } else {
-        this.audio.stab(h.point, this.camera, kind);
+        this.audio.stab(whit.position, this.camera, kind);
       }
-      if (drawTracer) this.effects.tracer(muzzle, h.point, 0.03);
+      if (drawTracer) this.effects.tracer(muzzle, whit.position, 0.03);
     } else if (drawTracer) {
       this.effects.tracer(muzzle, origin.clone().addScaledVector(dir, def.range), 0.025);
     }
@@ -1707,22 +1963,21 @@ class Game {
     );
     const toPlayer = playerEye.distanceTo(muzzle);
 
-    // 壁越しに当たらないよう、必ず遮蔽を確認する
-    this.raycaster.set(muzzle, dir);
-    this.raycaster.far = Math.max(toPlayer + 4, 8);
-    const hits = this.raycaster.intersectObjects(this.solidMeshes, false);
-    const blocked = hits.length && hits[0].distance < toPlayer - 0.4;
+    // 壁越しに当たらないよう、必ず遮蔽を確認する。
+    // 敵14体が撃ち合うと瞬間で毎秒30〜60発になるので、ここもoctreeで飛ばす
+    const ohit = this._terrainRay(muzzle, dir, Math.max(toPlayer + 4, 8));
+    const blocked = !!(ohit && ohit.distance < toPlayer - 0.4);
 
     this.effects.tracer(muzzle, muzzle.clone().addScaledVector(dir, Math.min(toPlayer + 6, 60)), 0.028, 0xffb066);
 
     if (blocked) {
-      const h = hits[0];
-      const normal = h.face
+      const h = this._meshNear(ohit, dir);
+      const normal = h?.face
         ? h.face.normal.clone().transformDirection(h.object.matrixWorld)
         : dir.clone().negate();
-      const kind = this.kindOf.get(h.object.material) ?? 'concrete';
-      this.effects.impact(h.point, normal, kind);
-      this.audio.impact(kind, h.point, this.camera);
+      const kind = h ? (this.kindOf.get(h.object.material) ?? 'concrete') : 'concrete';
+      this.effects.impact(ohit.position, normal, kind);
+      this.audio.impact(kind, ohit.position, this.camera);
       return;
     }
 
@@ -1758,16 +2013,15 @@ class Game {
       }
 
       // 外れ弾も周囲に着弾させる（掠める感じが出る）
-      this.raycaster.set(muzzle, dir);
-      this.raycaster.far = 80;
-      const mh = this.raycaster.intersectObjects(this.solidMeshes, false);
-      if (mh.length) {
-        const normal = mh[0].face
-          ? mh[0].face.normal.clone().transformDirection(mh[0].object.matrixWorld)
+      const mhit = this._terrainRay(muzzle, dir, 80);
+      if (mhit) {
+        const h = this._meshNear(mhit, dir);
+        const normal = h?.face
+          ? h.face.normal.clone().transformDirection(h.object.matrixWorld)
           : dir.clone().negate();
-        const kind = this.kindOf.get(mh[0].object.material) ?? 'concrete';
-        this.effects.impact(mh[0].point, normal, kind);
-        if (mh[0].distance < 26) this.audio.impact(kind, mh[0].point, this.camera);
+        const kind = h ? (this.kindOf.get(h.object.material) ?? 'concrete') : 'concrete';
+        this.effects.impact(mhit.position, normal, kind);
+        if (mhit.distance < 26) this.audio.impact(kind, mhit.position, this.camera);
       }
     }
   }
@@ -2054,8 +2308,8 @@ class Game {
       if (this._plateV.z > 1) continue;
       list.push({
         id: st.id,
-        x: (this._plateV.x * 0.5 + 0.5) * innerWidth,
-        y: (-this._plateV.y * 0.5 + 0.5) * innerHeight,
+        x: (this._plateV.x * 0.5 + 0.5) * this._vw,
+        y: (-this._plateV.y * 0.5 + 0.5) * this._vh,
         name: this.net.nameOf(st.id),
         hp: st.hp,
         dist,
@@ -2230,7 +2484,7 @@ class Game {
     this.hud.sprinting(this.player.sprinting);
 
     const spread = this.weapons._currentSpread(this.player);
-    const px = Math.tan(spread) / Math.tan((this.camera.fov * Math.PI) / 360) * (innerHeight / 2);
+    const px = Math.tan(spread) / Math.tan((this.camera.fov * Math.PI) / 360) * (this._vh / 2);
     this.hud.crosshair(clamp(px, 2, 190), this.weapons.adsFactor > 0.8);
 
     const w = this.weapons.current;
@@ -2333,11 +2587,13 @@ class Game {
       _arcStep.subVectors(pos, _arcPrev);
       const len = _arcStep.length();
       if (len > 1e-4) {
-        this.raycaster.set(_arcPrev, _arcStep.divideScalar(len));
-        this.raycaster.far = len;
-        const hit = this.raycaster.intersectObjects(this.solidMeshes, false);
-        if (hit.length) {
-          pos.copy(hit[0].point);
+        /* octreeで見る。前は544枚の総当たりを毎フレーム最大40回やっていて、
+           手榴弾を構えている間だけで1フレームの予算の1/4を食っていた。
+           実際の飛翔(_stepSoloNades)もoctreeに当てているので、
+           こちらで測る方が「予測の線」と「実際の飛び方」も一致する */
+        const hit = this._terrainRay(_arcPrev, _arcStep.divideScalar(len), len);
+        if (hit) {
+          pos.copy(hit.position);
           for (let k = i + 1; k < ARC_STEPS; k++) {
             arr[n++] = pos.x; arr[n++] = pos.y; arr[n++] = pos.z;
           }
@@ -2422,9 +2678,8 @@ class Game {
       _throwDir.subVectors(_throwOrigin, pos);
       const len = _throwDir.length() || 1;
       _throwDir.divideScalar(len);
-      this.raycaster.set(pos, _throwDir);
-      this.raycaster.far = len;
-      if (this.raycaster.intersectObjects(this.solidMeshes, false).length) continue;
+      // 遮蔽の有無だけ分かればよいのでoctreeで見る
+      if (this._terrainRay(pos, _throwDir, len)) continue;
 
       const dmg = Math.max(NADE.MIN_DMG, NADE.BLAST_DMG * (1 - d / NADE.BLAST_R));
       if (e.hit(dmg, 'chest')) this._onKill(e);
@@ -2482,15 +2737,34 @@ class Game {
     const sorted = Array.from(this._frames.subarray(0, n)).sort((a, b) => a - b);
     const at = (q) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))];
     const fps = (dt) => (dt > 0 ? Math.round(1 / dt) : 0);
+    // 描画命令・三角形は中央値で1つに潰す。敵の数で上下するので、
+    // 最大を取ると波の瞬間だけの数字になり、最小だと誰もいない時の数字になる
+    const mid = (buf, m) => {
+      if (!m) return null;
+      const s = Array.from(buf.subarray(0, m)).sort((a, b) => a - b);
+      return s[m >> 1];
+    };
     this.diag?.perf({
       fps: fps(at(0.5)),
       // 遅かった5%＝引っかかりの目安。並びの後ろから5%の所
       low: fps(at(0.95)),
       players: this.mode === 'versus' ? (this.net?.players.size | 0) : 1,
       wave: this.mode === 'solo' ? this.director.wave : null,
+      /* 何を減らせば軽くなるかの切り分け用。
+         calls=描画命令、tris=三角形、scale=描画倍率(%)。
+         倍率を%にするのは、受け口(server/report.js)が数字を丸めるため
+         （1.5をそのまま送ると2になる） */
+      calls: mid(this._infoCalls, this._infoN),
+      tris: mid(this._infoTris, this._infoN),
+      scale: Math.round((this.renderer?.getPixelRatio() || 0) * 100),
+      // 自動画質がどこまで下げて落ち着いたか。0=全部入り。自動を切っている人はnull
+      rung: this.autoQ?.enabled ? this.autoQ.rung : null,
     });
     this._frameN = 0;
     this._frameAt = 0;
+    this._infoAt = 0;
+    this._infoN = 0;
+    this._infoAcc = 0;
   }
 
   /**
@@ -2662,6 +2936,10 @@ class Game {
   /* ------------------------------------------------------- ループ */
 
   _loop() {
+    // 描画命令の数を0へ戻す。ここから次のrender全部（影・AO・ポスト）を数える。
+    // autoResetを切ってある理由はboot()のrenderer設定を参照
+    this.renderer.info.reset();
+
     const now = performance.now();
     let dt = (now - this._lastTime) / 1000;
     this._lastTime = now;
@@ -2677,6 +2955,8 @@ class Game {
       this._frameAt = (this._frameAt + 1) % FRAME_SAMPLES;
       if (this._frameN < FRAME_SAMPLES) this._frameN++;
     }
+    // 自動画質。重ければ1段ずつ絵を軽くする（遊んでいる間だけ数える）
+    this.autoQ?.frame(dt, this.state === 'playing');
 
     const playing = this.state === 'playing';
 
@@ -2806,8 +3086,8 @@ class Game {
     // ロビーの3D。start()されている間だけ描く
     this.charView?.update(dt);
 
-    // 空はカメラに追従させる（遠景として固定して見せる）
-    this.sky.position.copy(this.camera.position);
+    /* 空はscene.backgroundに焼いてあるので、ここでやることは無い。
+       前は球をカメラへ毎フレーム追従させていた（背景のキューブは勝手に付いてくる） */
 
     // 武器の主光源をワールドの太陽に合わせ直す。カメラ空間へ引き戻すことで、
     // 太陽の方を向けば銃も逆光になり、背にすれば順光になる
@@ -2833,12 +3113,40 @@ class Game {
 
     // 体力を音側へ渡す。低体力の心音と呼吸が鳴る
     this.audio.setVitals(this.player.health / this.player.maxHealth, this.player.alive);
+    // 試合の中かどうかも渡す。遠景の撃ち合いを試合の外で鳴らさないため。
+    // 一時停止と死亡画面は試合の続きなので鳴らしたままにする
+    this.audio.battle = this.state === 'playing' || this.state === 'paused' || this.state === 'dead';
     this._updateEnvironment(dt);
 
     // 影の箱はカメラの位置が決まった後でないと置けない
     this._updateSunCascades();
 
-    this.fx.composer.render();
+    /* メニュー・ロビーの間は毎フレーム描かない。
+       ホームもロビーもDOMの画面で、後ろの3Dはほぼ塗り潰されて見えないのに、
+       影・AO・ブルームまで全部の行程が毎フレーム回っていた
+       （閉じずに置いているだけでファンが回る、の原因の1つ）。
+       1枚だけ描いて止める。キャンバスは最後に描いた絵を出し続けるので、
+       止めても画面は変わらない。窓の大きさが変わった時だけ描き直す（_resize参照）。
+       一時停止(paused)と死亡画面(dead)は後ろで試合が見えているので今まで通り描く */
+    const idle = this.state === 'menu';
+    if (!idle || !this._idleDrawn) this.fx.composer.render();
+    this._idleDrawn = idle;
+
+    /* 描画命令と三角形は描き終わった後に読む（ここまでの合計がこのフレームの数）。
+       毎フレームは取らない。1秒の中ではほぼ動かない数字なので、1秒に1回で足りる */
+    const rinfo = this.renderer.info.render;
+    if (this.state === 'playing') {
+      this._infoAcc += dt;
+      if (this._infoAcc >= 1) {
+        this._infoAcc = 0;
+        this._infoCalls[this._infoAt] = rinfo.calls;
+        this._infoTris[this._infoAt] = rinfo.triangles;
+        this._infoAt = (this._infoAt + 1) % PERF_INFO_SAMPLES;
+        if (this._infoN < PERF_INFO_SAMPLES) this._infoN++;
+      }
+    }
+    // ?debugの数字窓。作っていない時（普段）はnullで何もしない
+    this.perfMeter?.frame(dt, rinfo.calls, rinfo.triangles, this.renderer.getPixelRatio());
 
     // Pの押した印はここで拾う。preserveDrawingBufferを立てていないので、
     // 描いた直後・ブラウザに制御を返す前でないと中身が読めない

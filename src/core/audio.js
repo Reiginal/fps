@@ -83,6 +83,12 @@ export class AudioEngine {
     this.volume = VOLUME_DEF;
     // 空間の開け具合(0=壁が近い 1=開けている)。init前に呼ばれても値だけ覚えておく
     this.openness = 0.65;
+    /* 試合の中にいるか。main.jsのループが毎フレーム入れる。
+       遠景の撃ち合い(_startAmbienceのdistant)は試合の外では鳴らさない。
+       メニューに置いたまま席を外しても、数秒おきに銃声のノード一式
+       （1発で十数個）を作っては捨て続けていた。風の層は流しっぱなしでよい
+       （起動時に作った物が回り続けるだけで、新しい物を作らない） */
+    this.battle = false;
     this._lowHp = 0;
     this._heartTimer = null;
     // 同時発音が増えすぎた時に層を間引くための負荷カウンタ
@@ -464,6 +470,15 @@ export class AudioEngine {
     const t = ctx.currentTime + delay;
     // 遠景の撃ち合いは何発重なっても手前の音を痩せさせない
     const busy = this._busy(t, dist > 60 ? 0.3 : 1);
+
+    /* 同時発音の上限。敵14体が撃ち合うと発砲は瞬間で毎秒30〜60発になり、
+       1発ごとにノード十数個のグラフを作っては捨てていた。
+       耳はその全部を聞き分けられない（近い数発の後ろで壁になるだけ）ので、
+       混んでいる時は遠い発砲から鳴らさない。層を痩せさせる既存の間引き
+       （尾はbusy<9、機関部はbusy<7）より一段外側の、丸ごとの打ち切り。
+       **自分の銃（距離0）は絶対に間引かない。** 撃った手応えが消えるのは事故 */
+    if (dist > 0
+      && (busy > 14 || (dist > 18 && busy > 10) || (dist > 45 && busy > 6))) return;
 
     // 距離帯ごとの重み。近＝クラック、中＝胴体と残響、遠＝低音のドスンだけ
     const wCrack = Math.pow(1 - step(3, 34, dist), 1.1);
@@ -1893,7 +1908,8 @@ export class AudioEngine {
     // 単発と連射を混ぜると「別の場所で戦闘が続いている」ように聞こえる
     const distant = () => {
       if (!this.ctx) return;
-      if (this.enabled && Math.random() < 0.7) {
+      // 試合の外(メニュー・ロビー)では鳴らさない。battleの説明はconstructor参照
+      if (this.enabled && this.battle && Math.random() < 0.7) {
         const d = rnd(90, 220);
         const burst = Math.random() < 0.45 ? Math.floor(rnd(2, 5)) : 1;
         for (let i = 0; i < burst; i++) {

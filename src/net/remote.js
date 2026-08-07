@@ -369,8 +369,9 @@ export class RemotePlayers {
       for (const m of o.meshes) m.castShadow = wantShadow;
     }
 
-    // 名札・銃声・ミニマップが同じフレームの頭の位置を読めるようにする
-    root.updateMatrixWorld(true);
+    // 名札・銃声・ミニマップが同じフレームの頭の位置を読めるようにする。
+    // getWorldPosition()が頭の先祖の行列だけをその場で計算するので、
+    // 全身の強制計算(updateMatrixWorld(true))は要らない（enemy.jsと同じ理屈）
     if (o.head) o.head.getWorldPosition(slot.handle.headPos);
     else slot.handle.headPos.set(st.x, st.y + HITBOX.STAND_H - 0.12, st.z);
   }
@@ -567,8 +568,8 @@ export class RemotePlayers {
     const bs = (slot.dead ? 1.55 : 1.02 - cr * 0.15) * e.bodyScale;
     b.scale.set(bs, 1, bs);
 
-    // 名前表示が同じフレームの頭の位置を読めるように、ここで world 変換を確定させる
-    root.updateMatrixWorld(true);
+    // 名前表示が同じフレームの頭の位置を読めるようにする。
+    // getWorldPosition()が先祖の行列を自分で計算するので全身の強制計算は要らない
     p.headBone.getWorldPosition(slot.handle.headPos);
   }
 }

@@ -102,9 +102,20 @@ const mkTargets = () => ({
     setEnabled(v) { this.enabled = v; },
     setVolume(v) { this.volume = v; },
   },
+  // 画質の層（main.jsが組むgfxと同じ口）
+  gfx: {
+    scale: null, ao: null, bloom: null, shadow: null, msaa: null, auto: null,
+    setRenderScale(v) { this.scale = v; },
+    setAo(v) { this.ao = v; },
+    setBloom(v) { this.bloom = v; },
+    setShadowQuality(v) { this.shadow = v; },
+    setMsaa(v) { this.msaa = v; },
+    setAuto(v) { this.auto = v; },
+  },
 });
 const snap = (t) => JSON.stringify({
   input: t.input, vol: t.audio.volume, voice: t.voice.enabled, vvol: t.voice.volume,
+  gfx: t.gfx,
 });
 
 console.log('\n[1] 表の作り');
@@ -122,6 +133,10 @@ console.log('\n[1] 表の作り');
   for (const s of SETTINGS) {
     ok(!!s.name && typeof s.apply === 'function' && s.def !== undefined,
       `${s.key} … 名前と既定値と効かせ方が揃っている`);
+    if (s.kind === 'select') {
+      ok(Array.isArray(s.options) && s.options.length >= 2 && s.options.includes(s.def),
+        `${s.key} … 選択肢があり、既定値がその中にある（${s.options?.join('/')}）`);
+    }
     if (s.kind !== 'range') continue;
     ok(s.min < s.max && s.step > 0, `${s.key} … 幅が正しい (${s.min}〜${s.max} 刻み${s.step})`);
     ok(s.def >= s.min && s.def <= s.max, `${s.key} … 既定値 ${s.def} が幅の中にある`);
@@ -147,6 +162,12 @@ console.log('\n[2] 既定のままなら、今までと同じ手触り');
   applySettings({ sens: 2 }, t2);
   ok(Math.abs(t2.input.sensitivity - 0.0044) < 1e-9,
     `×2で倍になる（${t2.input.sensitivity}）`);
+
+  // 画質の既定も「今までと同じ絵」。設定を足した副作用で
+  // 何も触っていない人の画面がぼやけたり陰影が消えたりしてはいけない
+  ok(t.gfx.scale === 1, `描画のきめ細かさの既定は100%（今 ${t.gfx.scale}）`);
+  ok(t.gfx.ao === true, '接地の陰影の既定は入り');
+  ok(t.gfx.bloom === true, '光のにじみの既定は入り');
 }
 
 console.log('\n[3] 壊れた値を正す');
@@ -174,6 +195,13 @@ console.log('\n[3] 壊れた値を正す');
   ok(coerce(full, '0') === false, '入り切りの0は切り');
   ok(coerce(full, '1') === true, '入り切りの1は入り');
   ok(coerce(full, null) === full.def, '覚えていない時は既定');
+
+  // 選択式。選択肢に無い物（壊れた値・作りを変えた後の昔の値）は既定へ
+  const shadow = defOf('gfxShadow');
+  ok(coerce(shadow, '中') === '中', '選択肢の中の値はそのまま通る');
+  ok(coerce(shadow, 'ultra') === shadow.def, '選択肢に無い値は既定へ');
+  ok(coerce(shadow, null) === shadow.def, '覚えていない時は既定');
+  ok(coerce(shadow, 12) === shadow.def, '数字が来ても落ちずに既定へ');
 }
 
 console.log('\n[4] 端末に覚えて、次に開いた時に戻ってくる');
@@ -224,7 +252,9 @@ console.log('\n[6] 表に足した物は必ず効く');
 // 効かせ先が本当に変わることを見る
 {
   for (const s of SETTINGS) {
-    const other = s.kind === 'check' ? !s.def : (s.def === s.min ? s.max : s.min);
+    const other = s.kind === 'check' ? !s.def
+      : s.kind === 'select' ? s.options.find((o) => o !== s.def)
+        : (s.def === s.min ? s.max : s.min);
     const t = mkTargets();
     applySettings({}, t);
     const before = snap(t);

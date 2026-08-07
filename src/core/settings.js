@@ -89,6 +89,70 @@ export const SETTINGS = [
       + 'そのかわりWindowsでは、しゃがみながらWを押すとタブが閉じることがあります',
     apply: (v, t) => { if (t.input) t.input.wantFullscreen = v; },
   },
+  /* ---- ここから画質。効かせ先は t.gfx（main.jsが組んで渡す） ----
+     友達のPCでカクついた時に、こちらが直すまで遊べないのでは遅い。
+     本人がその場で軽くできる逃げ道を置く。既定は全部「今までと同じ絵」 */
+  {
+    key: 'gfxAuto',
+    // **表の中で画質の先頭に置くこと。** 自動を切った時の巻き戻し(_applyRung(0))が
+    // 先に走ってから、下の各項目が覚えている値を上書きで効かせる順になっている
+    store: 'blackout.gfx.auto',
+    name: '画質を自動でまかせる',
+    kind: 'check',
+    def: true,
+    hint: 'カクつく端末では自動で1段ずつ画質を下げます（下げた時は画面に一言出ます）。'
+      + '下の項目を手で触ると自動は切れます',
+    apply: (v, t) => { t.gfx?.setAuto?.(v); },
+  },
+  {
+    key: 'gfxScale',
+    store: 'blackout.gfx.scale',
+    name: '描画のきめ細かさ',
+    kind: 'range',
+    min: 0.5, max: 1, step: 0.05, def: 1,
+    fmt: (v) => `${Math.round(v * 100)}%`,
+    hint: '下げると少しぼやける代わりに軽くなります。カクつく時はまずここから',
+    apply: (v, t) => { t.gfx?.setRenderScale?.(v); },
+  },
+  {
+    key: 'gfxAo',
+    store: 'blackout.gfx.ao',
+    name: '接地の陰影',
+    kind: 'check',
+    def: true,
+    hint: '物と床の接点に入る細い影です。切ると画面を2回描く工程が1回になり、大きく軽くなります',
+    apply: (v, t) => { t.gfx?.setAo?.(v); },
+  },
+  {
+    key: 'gfxBloom',
+    store: 'blackout.gfx.bloom',
+    name: '光のにじみ',
+    kind: 'check',
+    def: true,
+    hint: '太陽や発砲の光がふわっと広がる効果です。切ると少し軽くなります',
+    apply: (v, t) => { t.gfx?.setBloom?.(v); },
+  },
+  {
+    key: 'gfxShadow',
+    store: 'blackout.gfx.shadow',
+    name: '影のこまやかさ',
+    kind: 'select',
+    options: ['高', '中', '低'],
+    def: '高',
+    hint: '中は影が少し粗く、低はさらに遠く(16mの外)の動く影の更新がゆっくりになり、'
+      + '屋内のランプも消えます。ぼかしの細かさとランプは開き直してから効きます',
+    apply: (v, t) => { t.gfx?.setShadowQuality?.(v); },
+  },
+  {
+    key: 'gfxMsaa',
+    store: 'blackout.gfx.msaa',
+    name: 'ふちのギザギザ消し',
+    kind: 'check',
+    def: true,
+    hint: '物のふちをなめらかにする処理(MSAA)です。切ると軽くなりますが、'
+      + '開き直してから効きます',
+    apply: (v, t) => { t.gfx?.setMsaa?.(v); },
+  },
 ];
 
 export const defOf = (key) => SETTINGS.find((s) => s.key === key) || null;
@@ -106,6 +170,10 @@ export function coerce(def, raw) {
   if (def.kind === 'check') {
     if (raw === null || raw === undefined || raw === '') return def.def;
     return raw === true || raw === '1' || raw === 'true';
+  }
+  // 選択式は、選択肢に無い物（壊れた値・昔の値）を全部既定へ落とす
+  if (def.kind === 'select') {
+    return def.options.includes(raw) ? raw : def.def;
   }
   const n = typeof raw === 'number' ? raw : parseFloat(raw);
   if (!Number.isFinite(n)) return def.def;

@@ -80,16 +80,30 @@ export class SettingsMenu {
       val.className = 'stval';
       head.append(name, val);
 
-      const input = document.createElement('input');
-      if (s.kind === 'check') {
-        input.type = 'checkbox';
-        input.className = 'stcheck';
+      let input;
+      if (s.kind === 'select') {
+        // 多択（影のこまやかさ等）。つまみにすると「0.5が何なのか」を
+        // 数字から想像させることになるので、言葉の選択肢で出す
+        input = document.createElement('select');
+        input.className = 'stselect';
+        for (const o of s.options) {
+          const opt = document.createElement('option');
+          opt.value = o;
+          opt.textContent = o;
+          input.appendChild(opt);
+        }
       } else {
-        input.type = 'range';
-        input.className = 'strange';
-        input.min = String(s.min);
-        input.max = String(s.max);
-        input.step = String(s.step);
+        input = document.createElement('input');
+        if (s.kind === 'check') {
+          input.type = 'checkbox';
+          input.className = 'stcheck';
+        } else {
+          input.type = 'range';
+          input.className = 'strange';
+          input.min = String(s.min);
+          input.max = String(s.max);
+          input.step = String(s.step);
+        }
       }
       // つまみは掴んで動かしている最中もずっと input が飛ぶ。
       // change（離した時）にすると、動かしている間の音量が変わらず、

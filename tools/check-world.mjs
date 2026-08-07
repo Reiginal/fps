@@ -55,5 +55,35 @@ console.log('\n[3] 地形の指紋が変わっていない');
 ok(w.stats.tris > 0, `三角形 ${w.stats.tris.toLocaleString()}`);
 ok(Array.isArray(w.arenaSpawns) && w.arenaSpawns.length >= 4, `対戦の湧き場所 ${w.arenaSpawns.length}箇所`);
 
+console.log('\n[4] 空は焼いた絵で、毎フレーム計算し直していない');
+/* 空のシェーダは雲のfbmで1ピクセル80回のハッシュを回す。
+   球のまま場面に置くと、renderOrder=-1000で一番先に描かれて、
+   ビルで隠れる画素まで毎フレーム全画面ぶん払う。
+   空は起動時に決めたきり動かないので、キューブマップへ1回焼いて貼る */
+{
+  const { readFileSync } = await import('node:fs');
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  ok(/WebGLCubeRenderTarget[\s\S]{0,120}?HalfFloatType/.test(main),
+    'キューブへHalfFloatで焼いている（8bitだと太陽の芯が頭打ちで夕日が死ぬ）');
+  ok(/scene\.background = skyRT\.texture/.test(main), '焼いた絵を背景に貼っている');
+  ok(!/scene\.add\(sky\)/.test(main), '空の球を場面に置いていない');
+  ok(!/this\.sky\.position\.copy/.test(main), '毎フレームの空の追従が残っていない');
+}
+
+console.log('\n[5] 屋内ランプは3灯まで、低設定では0灯');
+/* 点光源は影を落とさなくても全フラグメントで評価される。
+   数がなし崩しに増えると、全材質の塗りがそのぶん重くなる。
+   （buildWorld()はサーバー用で光を持たないので、ここはソースで数える） */
+{
+  const { readFileSync } = await import('node:fs');
+  const level = readFileSync(new URL('../src/world/level.js', import.meta.url), 'utf8');
+  const lights = (level.match(/new THREE\.PointLight\(/g) || []).length;
+  ok(lights === 3, `地形の点光源は3灯（今${lights}灯。増やす時は塗りの重さと引き換え）`);
+  ok((level.match(/if \(lamps\) \{/g) || []).length === 3, '3灯とも入り切りの口を通っている');
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  ok(/buildLevel\(mats, \{ lamps: savedGfx\.gfxShadow !== '低' \}\)/.test(main),
+    '影のこまやかさ「低」でランプが消える繋ぎがある');
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);

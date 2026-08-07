@@ -124,6 +124,15 @@ export function reportRecord(bodyText) {
     fps: num(m.fps),
     low: num(m.low),
     players: num(m.players),
+    /* 何を減らせば軽くなるかの切り分け用。callsは描画命令(GPUへ頼んだ回数)、
+       trisは三角形、scaleは描画倍率を%にした物（丸めで小数が消えないように%で受ける）。
+       fpsだけだと「重い」は分かっても、命令が多いのか三角形が多いのかが分からない */
+    calls: num(m.calls),
+    tris: num(m.tris),
+    scale: num(m.scale),
+    // 自動画質がどこまで下げて落ち着いたか（0=全部入り、大きいほど軽い絵）。
+    // fpsが良く見えても、rungが深ければ「下げたから保てている」と読める
+    rung: num(m.rung),
   };
 }
 

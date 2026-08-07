@@ -1656,7 +1656,11 @@ export class Enemy {
      「頭を撃ったのに抜けた」「何も無い所が頭判定」はここが原因 */
   _syncHitboxesFromBones() {
     const p = this.parts;
-    this.root.updateMatrixWorld(true);
+    /* ここで root.updateMatrixWorld(true) を呼ばない。
+       あれは69個の節を毎回強制で計算し直すうえ、同じフレームの描画時に
+       three側がもう一度全身を計算する（二重払い）。
+       getWorldPosition()は自分の先祖の行列だけをその場で計算してくれるので、
+       読みたい骨のぶんだけで足りる（_footIK・_conformToGroundも同じ理屈） */
     p.headBone.getWorldPosition(this._headPos);
     p.chestTop.getWorldPosition(this._chestB);
     p.chestBot.getWorldPosition(this._chestA);
@@ -2122,7 +2126,7 @@ export class Enemy {
   /** 倒れ切った所で地形に合わせる。剛体を回すだけだと木箱や斜面に必ず刺さる */
   _conformToGround() {
     const p = this.parts;
-    this.root.updateMatrixWorld(true);
+    // 全身の強制計算はしない（理由は_syncHitboxesFromBones参照）
     p.chest.getWorldPosition(_v);
     const gy = this._groundBelow(_v.x, _v.y + 0.6, _v.z);
     this._deathLift = gy === null ? 0 : clamp(gy - this.feetY, -0.15, 1.0);
@@ -2646,7 +2650,8 @@ export class Enemy {
      浮いた側は膝を伸ばして届かせる。地形を一度も見ない歩行は必ず足が刺さる */
   _footIK(dt, stepAmp) {
     const p = this.parts;
-    this.root.updateMatrixWorld(true);
+    // 全身の強制計算はしない（理由は_syncHitboxesFromBones参照）。
+    // 読むのは両足だけで、getWorldPosition()が足の先祖ぶんを自分で計算する
     this.footTimer -= dt;
     const sample = this.footTimer <= 0;
     if (sample) this.footTimer = 0.09 + Math.random() * 0.04;

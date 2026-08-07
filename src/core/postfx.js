@@ -80,6 +80,11 @@ const AoComposeShader = {
     tAo: { value: null },
     tDepth: { value: null },
     tNormal: { value: null },
+    /* 設定「接地の陰影」を切った時に1になる。このパス自体は消せない
+       （MSAAのrtWorldを合成器の鎖へ写す繋ぎ目を兼ねている）ので、
+       AOと接触影の計算だけ素通しにする。AO側のパス(GTAOPass)は止まっていて
+       バッファが古いままなので、読んでしまうと前のフレームの陰が貼り付く */
+    uAoOff: { value: 0 },
     uAoTexel: { value: new THREE.Vector2(1 / 960, 1 / 540) },
     uIntensity: { value: 0.62 },
     // 直射が当たっている面にどれだけAOを残すか。0.55まで絞ると
@@ -149,6 +154,7 @@ const AoComposeShader = {
   fragmentShader: /* glsl */`
     uniform sampler2D tWorld, tAo, tDepth, tNormal;
     uniform vec2 uAoTexel;
+    uniform float uAoOff;
     uniform float uIntensity, uDirectKeep, uLumaLo, uLumaHi, uSunLo, uSunHi;
     uniform float uNarrow, uWide, uContactGain, uDeepLo, uDeepHi, uContactBoost;
     uniform mat4 uProj, uProjInv;
@@ -186,6 +192,8 @@ const AoComposeShader = {
 
     void main() {
       vec3 col = texture2D(tWorld, vUv).rgb;
+      // 接地の陰影を切っている間は、世界の絵をそのまま次のパスへ渡すだけ
+      if (uAoOff > 0.5) { gl_FragColor = vec4(col, 1.0); return; }
       float ao = texture2D(tAo, vUv).r;
 
       float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
@@ -1285,7 +1293,7 @@ export const FinishShader = {
 
 /* ---------------------------------------------------------------- 組み立て */
 
-export function createComposer(renderer, scene, camera, viewScene, viewCamera) {
+export function createComposer(renderer, scene, camera, viewScene, viewCamera, { msaa = true } = {}) {
   // 実際の描画バッファ寸法で作る。CSS寸法で作ると高DPI画面でぼやける
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
 
@@ -1309,7 +1317,9 @@ export function createComposer(renderer, scene, camera, viewScene, viewCamera) {
   // ここだけで半分になる。上の実測どおり買えるのは輪郭の階調だけなので、
   // 2本でも中間の被覆率は拾えるし、この後にFXAAも通る。
   // 金網や手すりの線が硬く感じたら、まずここを4へ戻すのが一番効く
-  const samples = Math.min(2, renderer.capabilities.maxSamples || 0);
+  // 設定「ふちのギザギザ消し」を切っている端末では0本＝MSAAなし。
+  // バッファの確保時に決まる物なので、切り替えは開き直した時（main.jsのboot参照）
+  const samples = msaa ? Math.min(2, renderer.capabilities.maxSamples || 0) : 0;
 
   // 世界を描く先。MSAAを効かせるのはここと武器のrtViewだけにする。
   // EffectComposerは渡したターゲットを複製してping-pongの2枚にするので、
@@ -1383,15 +1393,35 @@ export function createComposer(renderer, scene, camera, viewScene, viewCamera) {
   // 半透明の板(着弾痕・曳光弾・マズルフラッシュ・煙)まで法線バッファに描くと、
   // 手前に偽の遮蔽物ができて撃つたびに画面が暗くなる。深度を書かない物はAOの計算から外す
   const aoHidden = ao._visibilityCache;
+  /* 外す候補を毎フレームscene.traverse()で探さない。
+     traverseはシーンの全部（地形550＋敵の関節×体数＋粒＋…で2千個超）を
+     コールバック付きで訪ねるので、探すこと自体が毎フレームのCPU仕事になる。
+     候補（粒・曳光弾・着弾痕・貼り分けの板）は起動時に組んだプールでほぼ固定なので、
+     一覧を作って使い回す。
+     ただし完全な固定と決め打ちすると、後から増えた半透明の板を外し損ねて
+     「撃つと画面が暗くなる」が再発しうる。そこで2秒に1回だけ全走査で一覧を
+     組み直す——増え物を見逃しても最長2秒で自己回復する保険 */
+  const aoCands = [];
+  let aoScanIn = 0;
+  const aoPick = (o) => {
+    const m = o.material;
+    if (o.isPoints || o.isLine || o.isLine2 || o.isSprite || (m && m.depthWrite === false)) {
+      aoCands.push(o);
+    }
+  };
   ao._overrideVisibility = function () {
-    this.scene.traverse((o) => {
-      if (!o.visible) return;
-      const m = o.material;
-      if (o.isPoints || o.isLine || o.isLine2 || o.isSprite || (m && m.depthWrite === false)) {
-        o.visible = false;
-        aoHidden.push(o);
-      }
-    });
+    if (--aoScanIn <= 0) {
+      aoScanIn = 120;
+      aoCands.length = 0;
+      this.scene.traverse(aoPick);
+    }
+    for (const o of aoCands) {
+      // 見えていない物は触らない。触ると、戻す時に「元から隠れていた物」まで
+      // 表示されてしまう（戻す側は一律visible=trueにするため）
+      if (!o.visible) continue;
+      o.visible = false;
+      aoHidden.push(o);
+    }
   };
 
   // GTAOは法線バッファを作るのに renderer.render() をもう一度呼ぶ。そのままだと
