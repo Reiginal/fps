@@ -203,6 +203,28 @@ const remove = (key) => { try { localStorage.removeItem(key); } catch { /* 消�
 /** 端末に覚えさせる形。入り切りは前からある '1' / '0' を使う */
 const encode = (def, v) => (def.kind === 'check' ? (v ? '1' : '0') : String(v));
 
+/* ------------------------------------------ 画質の既定の強制リセット */
+
+/* 画質の既定を大きく変えた時に、**保存済みの端末にも1回だけ**新しい既定を効かせる。
+ *
+ * 設定は保存値が既定より強い。既定を軽くしても、一度でも画質を触った端末や、
+ * 「既定に戻す」が書き込む式だった頃に押した端末は、古い値のまま固定される。
+ * 「設定を開いて既定に戻すを押して」と遊ぶ人全員に頼んで回るのは無理。
+ *
+ * 番号を上げると、次に開いた時に**画質の保存値だけ**が消えて新既定へ落ちる。
+ * 感度・音量・全画面は人の手触りなので触らない。
+ * 番号が同じ間は何もしないので、リセット後に自分で選び直した値はそのまま残る */
+const GFX_RESET_STORE = 'blackout.gfx.resetVer';
+const GFX_RESET_VER = '1';   // 上げた記録: 1=2026-08-07 既定を軽め(85%・陰影切り・影中)へ倒した
+
+export function forceGfxDefaults() {
+  if (read(GFX_RESET_STORE) === GFX_RESET_VER) return;
+  for (const s of SETTINGS) if (s.key.startsWith('gfx')) remove(s.store);
+  write(GFX_RESET_STORE, GFX_RESET_VER);
+}
+// 読み込まれた時に1回走る。loadSettings()より前に済ませたいのでここで呼ぶ
+forceGfxDefaults();
+
 /** 全部読む。壊れていた物は既定へ落ちるので、戻り値は必ず使える値 */
 export function loadSettings() {
   const out = {};

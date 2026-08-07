@@ -77,6 +77,9 @@ const mkStore = () => {
   return {
     getItem: (k) => (m.has(k) ? m.get(k) : null),
     setItem: (k, v) => m.set(k, String(v)),
+    // 消す口も本物と揃える。無いと、消す系(既定に戻す・強制リセット)が
+    // 例外→握り潰しで**何もしないのに検査は通る**形になる（実際になった）
+    removeItem: (k) => m.delete(k),
     _map: m,
   };
 };
@@ -84,7 +87,7 @@ globalThis.localStorage = mkStore();
 
 const {
   SETTINGS, SENS_BASE, VOLUME_DEF, coerce, defOf,
-  loadSettings, saveSetting, resetSettings, applySettings,
+  loadSettings, saveSetting, resetSettings, applySettings, forceGfxDefaults,
 } = await import('../src/core/settings.js');
 const { SettingsMenu } = await import('../src/ui/settings.js');
 
@@ -413,6 +416,30 @@ console.log('\n[9] 画面の器と、開ける口が実在する');
     '一時停止に設定のボタンを置いて、押した時の処理も繋いである');
   ok(/settings\?\.isOpen/.test(main),
     '設定が開いている間は、後ろの画面を押してもマウスを掴まない');
+}
+
+console.log('\n[10] 画質の既定は版番号で全員に強制できる');
+/* 既定を軽くしても、保存済みの端末は古い値のまま固定される。
+   「設定を開いて既定に戻すを押して」と全員に頼んで回るのは無理なので、
+   版番号を上げたら、次に開いた時に画質の保存値だけ消して新既定へ落とす */
+{
+  // 古い端末を再現: 全部盛りの頃の値が保存されていて、版の印は無い
+  globalThis.localStorage = mkStore();
+  localStorage.setItem('blackout.gfx.scale', '1');
+  localStorage.setItem('blackout.gfx.ao', '1');
+  localStorage.setItem('blackout.gfx.shadow', '高');
+  localStorage.setItem('blackout.sens', '1.4');
+  forceGfxDefaults();
+  const v = loadSettings();
+  ok(v.gfxScale === 0.85 && v.gfxAo === false && v.gfxShadow === '中',
+    `古い保存値が消えて新既定になる（${v.gfxScale} / ${v.gfxAo} / ${v.gfxShadow}）`);
+  ok(v.sens === 1.4, '感度は人の手触りなので消さない');
+  ok(localStorage.getItem('blackout.gfx.resetVer') !== null, '済んだ印が残る');
+
+  // リセット後に自分で選び直した値は、次に開いても消えない（版が同じ間は何もしない）
+  saveSetting('gfxAo', true);
+  forceGfxDefaults();
+  ok(loadSettings().gfxAo === true, '印が付いた後に選んだ値はそのまま');
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
