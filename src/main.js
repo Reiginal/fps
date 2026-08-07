@@ -26,6 +26,7 @@ import { CharView } from './ui/charview.js';
 import { NetClient } from './net/client.js';
 import { RemotePlayers } from './net/remote.js';
 import { preloadCharModel, SOLO_MODEL } from './ai/glbchar.js';
+import { FarShadowGate } from './world/shadowgate.js';
 import {
   K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, outsideZone, CHARACTERS,
   TEAM_NAMES,
@@ -640,6 +641,8 @@ class Game {
     this._sunQuatInv = this._sunQuat.clone().invert();
     this._sunCenter = new THREE.Vector3();
     this._shadowTick = 0;
+    // 遠い方の影マップを焼き直すべきかの門番（中身の説明はshadowgate.js）
+    this._farShadow = new FarShadowGate();
 
     this.cascades = CASCADES.map((c) => {
       // 日射しの色も時間帯で変える。向きだけだと「影が伸びた」で終わって、
@@ -1553,7 +1556,28 @@ class Game {
         // 焼き直す番でなければ前に焼いた1枚をそのまま使う。
         // 箱を動かすのも一緒に見送る。動かすと中身と行列が食い違って影がずれる
         if (this._shadowTick % c.interval !== 0) continue;
-        c.light.shadow.needsUpdate = true;
+        /* 番が来ても、遠くで何かが動いていた時しか焼き直さない。
+           太陽も地形も動かないので、誰も遠くで動いていなければ
+           前に焼いた1枚がそのまま正しい（判定の中身はshadowgate.js）。
+           近い枚の中の動きは、毎フレーム焼く近い枚が受け持つ。
+           前はここが無条件で、3フレームごとに517枚を丸ごと焼き直していた */
+        const g = this._farShadow;
+        g.begin(this.camera.position.x, this.camera.position.z);
+        if (this.mode === 'versus') {
+          if (this.remotes) {
+            for (const s of this.remotes.slots.values()) {
+              const r = s.handle.root;
+              g.add(r.position.x, r.position.z, false);
+            }
+          }
+        } else if (this.director) {
+          // 死体は片付くまでactiveに残る（enemy.jsの_retireCorpse参照）ので、
+          // ここを回れば生きている敵も死体も全部数えたことになる
+          for (const e of this.director.active) {
+            g.add(e.root.position.x, e.root.position.z, !e.alive && e.deathSettled);
+          }
+        }
+        if (g.end()) c.light.shadow.needsUpdate = true;
       }
       if (!c.follow) continue;
       // ライト空間へ移してテクセルの升目に載せてから戻す。載せずに動かすと、
