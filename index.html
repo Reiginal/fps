@@ -527,45 +527,7 @@
   #quit.hidden { display: none; }
   #quit .hint { margin: 18px 0 6px; }
 
-  /* --------------------------------------------------------- 戦績 */
-  /* 設定と同じ器。違うのは中身が縦に長いことで、
-     実績が増えると画面からはみ出すので、panel側でスクロールさせる */
-  #stats {
-    position: fixed; inset: 0; z-index: 40;
-    display: flex; align-items: center; justify-content: center;
-    padding: 24px 0; overflow-y: auto;
-    background: rgba(3, 5, 8, .9);
-  }
-  #stats.hidden { display: none; }
-  .sxpanel { width: min(460px, 88vw); text-align: center; }
-  .sxpanel .title { font-size: 26px; }
-  .sxpanel .subtitle { margin-bottom: 20px; }
-
-  .sxhead2 {
-    text-align: left; margin: 22px 0 8px;
-    font-family: var(--mono); font-size: 10px; letter-spacing: .24em; color: var(--dim);
-  }
-  /* 通算の数字。2列に並べる。1列だと10行を超えて縦に伸びすぎる */
-  #sxTallies { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 14px; }
-  .sxtally {
-    display: flex; justify-content: space-between; align-items: baseline;
-    font-family: var(--mono); font-size: 11px; letter-spacing: .06em; color: var(--dim);
-    padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,.07);
-  }
-  .sxtally b { color: var(--hud); font-size: 13px; }
-
-  .sxach { text-align: left; margin-bottom: 12px; opacity: .55; }
-  /* 解除済みだけ色を戻す。並べただけでは、取った物と取っていない物が同じ顔になる */
-  .sxach.got { opacity: 1; }
-  .sxahead {
-    display: flex; justify-content: space-between; align-items: baseline;
-    font-family: var(--mono); font-size: 12px; letter-spacing: .1em; color: var(--hud);
-  }
-  .sxacount { font-size: 10px; color: var(--dim); }
-  .sxach.got .sxacount { color: var(--ok); }
-  .sxbar { height: 3px; margin-top: 5px; background: rgba(255,255,255,.08); }
-  .sxbar i { display: block; height: 100%; background: var(--dim); transition: width .3s; }
-  .sxach.got .sxbar i { background: var(--ok); }
+  /* 戦績の画面のCSSはここにあったが、画面ごと消した（下の器のコメント参照） */
 
   /* --------------------------------------------------------- 声 */
   /* 十字の少し下。**視線の先に近い所に置く。**
@@ -1063,7 +1025,6 @@
 
     <div class="netbtns">
       <button id="nmQuit" class="netbtn" type="button">終了</button>
-      <button id="nmStats" class="netbtn" type="button">戦績</button>
       <button id="nmSettings" class="netbtn" type="button">設定</button>
       <button id="nmSolo" class="netbtn" type="button">1人で遊ぶ</button>
       <button id="nmJoin" class="netbtn main" type="button">対戦に参加</button>
@@ -1071,21 +1032,8 @@
   </div>
 </div>
 
-<!-- 戦績と実績。中身は src/core/stats.js の表からJSが並べるので、ここは器だけ -->
-<div id="stats" class="hidden">
-  <div class="sxpanel">
-    <div class="title">戦績</div>
-    <div class="subtitle" id="sxDone">0 / 0 解除</div>
-    <div class="sxhead2">通算</div>
-    <div id="sxTallies"></div>
-    <div class="sxhead2">実績</div>
-    <div id="sxList"></div>
-    <div class="stbtns">
-      <button id="sxReset" class="netbtn" type="button">記録を消す</button>
-      <button id="sxClose" class="netbtn main" type="button">閉じる</button>
-    </div>
-  </div>
-</div>
+<!-- 戦績の画面はここにあったが消した（2026-08-07、「誰も見ない」）。
+     記録そのもの(src/core/stats.js)は死亡画面の自己ベストと実績の解除通知が使うので残っている -->
 
 <!-- 設定。中身は src/core/settings.js の表からJSが並べるので、ここは器だけ。
      ホームからも一時停止からも同じ物を開く（2つ作ると片方だけ直して見た目がずれる） -->

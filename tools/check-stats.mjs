@@ -76,7 +76,6 @@ const {
   TALLIES, ACHIEVEMENTS, emptyTally, mergeTally, loadStats, saveStats, resetStats,
   progressOf, unlockedIds, newlyUnlocked, accuracyOf,
 } = await import('../src/core/stats.js');
-const { StatsMenu } = await import('../src/ui/statsmenu.js');
 
 let bad = 0;
 const ok = (c, msg) => { console.log(`  ${c ? '○' : '× 失敗:'} ${msg}`); if (!c) bad++; };
@@ -233,66 +232,19 @@ console.log('\n[8] 撃つたびに端末へ書かない');
   }
 }
 
-console.log('\n[9] 戦績の画面');
-{
-  globalThis.localStorage = mkStore();
-  const root = document.getElementById('stats');
-  root.classList.add('hidden');
-  const menu = new StatsMenu();
-  ok(!menu.isOpen, '起動した時は閉じている');
-
-  menu.show({ ...emptyTally(), kills: 120, shots: 400, hits: 140, bestScore: 3000 });
-  ok(menu.isOpen, '開ける');
-
-  const tallies = document.getElementById('sxTallies');
-  // 命中率は覚えずに毎回引くので、行は表より1つ多い
-  ok(tallies.children.length === TALLIES.length + 1,
-    `通算が ${tallies.children.length} 行（表${TALLIES.length}個＋命中率）`);
-  const accRow = tallies.children[tallies.children.length - 1];
-  ok(accRow.children.some((c) => c.textContent === '35%'),
-    `命中率が計算されて出ている（${accRow.children.map((c) => c.textContent).join(' ')}）`);
-
-  const list = document.getElementById('sxList');
-  ok(list.children.length === ACHIEVEMENTS.length,
-    `実績が ${list.children.length} 個並ぶ`);
-  // **解除できていない物も名前を出す。** 隠すと何をすれば増えるのか分からない
-  const got = list.children.filter((c) => c.classList.contains('got')).length;
-  ok(got >= 1 && got < ACHIEVEMENTS.length,
-    `解除済みだけ色が変わる（${got} / ${ACHIEVEMENTS.length}）`);
-  ok(document.getElementById('sxDone').textContent === `${got} / ${ACHIEVEMENTS.length} 解除`,
-    `解除数が題に出る（${document.getElementById('sxDone').textContent}）`);
-
-  // 記録を消すのは2回押させる。押し間違いで通算が飛ぶのが一番きつい
-  const reset = document.getElementById('sxReset');
-  reset.onclick();
-  ok(menu.stats.kills === 120, '1回目では消えない');
-  ok(reset.textContent !== '記録を消す', `文言が変わって念を押す（${reset.textContent}）`);
-  reset.onclick();
-  ok(menu.stats.kills === 0, '2回目で消える');
-
-  menu.show();
-  root.onclick({ target: root });
-  ok(!menu.isOpen, '枠の外を押すと閉じる');
-  menu.show();
-  document.getElementById('sxClose').onclick();
-  ok(!menu.isOpen, '閉じるボタンが効く');
-}
-
-console.log('\n[10] 画面の器と、開ける口が実在する');
+console.log('\n[9] 戦績の画面は無い（2026-08-07に消した）');
+/* ホームの「戦績」ボタンは誰も開かなかったので、画面ごと消した。
+   記録そのもの(stats.js)は残す: 死亡画面の自己ベストと実績の解除通知が使う。
+   ここで見張るのは「中途半端に蘇らないこと」——入口だけ戻ると開けない画面になり、
+   器だけ戻ると押せないボタンになる */
 {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  for (const id of ['stats', 'sxTallies', 'sxList', 'sxClose', 'sxReset', 'sxDone', 'nmStats', 'achfeed']) {
-    ok(html.includes(`id="${id}"`), `id="${id}" が index.html にある`);
-  }
-  ok(/id="stats"[^>]*class="[^"]*hidden/.test(html), '戦績は閉じた状態で置いてある');
+  ok(!html.includes('id="nmStats"'), 'ホームに戦績ボタンが無い');
+  ok(!html.includes('id="stats"'), '戦績の器が無い');
+  ok(html.includes('id="achfeed"'), '実績の解除通知の器は残っている');
 
   const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
-  // **開くたびに、まだ書いていない今回ぶんも足して渡す。**
-  // 渡さないと、遊んだ直後に開いた時だけ数字が古い
-  ok(/onStats\s*=\s*\(\)\s*=>\s*this\.statsMenu\.show\(this\.totalStats\)/.test(main),
-    '戦績には今回ぶんを足した数字を渡している');
-  ok(/statsMenu\?\.isOpen/.test(main),
-    '戦績が開いている間は、後ろの画面を押してもマウスを掴まない');
+  ok(!/StatsMenu/.test(main), 'main.jsが戦績の画面を読み込んでいない');
 
   // 自己ベストを2箇所に持たない。
   // コメントには「昔ここにあった」と残してあるので、コメントを外してから見る
