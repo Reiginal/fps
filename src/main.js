@@ -528,6 +528,8 @@ class Game {
     this._hitNormal = new THREE.Vector3();
     // 誰がいつ撃ったか。散弾を1発の銃声にまとめるのに使う
     this._lastFireAt = new Map();
+    // 誰の弾道をいつ引いたか。散弾の9通で9本引かないためのまとめ（_remoteTracer参照）
+    this._lastTraceAt = new Map();
     // 死んでいる間の入力を止める受け皿。Inputと同じ形をしていればよい
     this._noInput = {
       down: () => false,
@@ -2102,6 +2104,10 @@ class Game {
           this.player.addRecoil(0.012 + Math.random() * 0.010, (Math.random() - 0.5) * 0.018);
           this._damageArrow(ev.by);
         }
+        // 人に当たった弾の弾道。自分が撃たれた時ほど「どこからか」が要る
+        if (ev.by !== me && this._vecOf(this._evPos, ev.p)) {
+          this._remoteTracer(ev.by, this._evPos);
+        }
         break;
       }
 
@@ -2235,6 +2241,7 @@ class Game {
         this.hud.kill(`${net.nameOf(ev.id)}が退出`, false);
         this.remotes?.remove(ev.id);
         this._lastFireAt.delete(ev.id);
+        this._lastTraceAt.delete(ev.id);
         break;
 
       case EV.IMPACT: {
@@ -2245,11 +2252,34 @@ class Game {
         if (this._evPos.distanceTo(this.camera.position) < 26) {
           this.audio.impact(ev.k || 'concrete', this._evPos, this.camera);
         }
+        // 相手の弾道もここで引く（発射の電文には向きが無いので、着弾から逆に描く）
+        this._remoteTracer(ev.by, this._evPos);
         break;
       }
 
       default: break;
     }
+  }
+
+  /**
+   * 相手の弾道を1本引く。
+   *
+   * 発射の電文(FIRE)には向きが載っていない（音とミニマップ用なので要らなかった）。
+   * なので着弾(IMPACT)・命中(HIT)の電文が届いた時に
+   * 「撃った人の位置 → 当たった点」で曳光弾を描く。
+   * 外れて何にも当たらなかった弾は描けないが、このマップで80m飛んで
+   * 何にも当たらない弾はほぼ無いので、どこから撃たれているかは画で読める。
+   * 散弾は1回の引き金で9通届くので、同じ人からは30msにまとめる（FIREの音と同じ理屈）
+   */
+  _remoteTracer(by, to) {
+    const r = this.remotes?.get(by);
+    if (!r) return;
+    const t = performance.now();
+    if (t - (this._lastTraceAt.get(by) || 0) < 30) return;
+    this._lastTraceAt.set(by, t);
+    _throwOrigin.copy(r.headPos);
+    _throwOrigin.y -= 0.25;   // 頭からでなく銃の高さから出す
+    this.effects.tracer(_throwOrigin, to, 0.028, 0xffb066);
   }
 
   // 撃たれた方向を画面のリングで示す。相手が見えていなくても向きだけは出す
