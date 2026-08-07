@@ -3861,6 +3861,10 @@ export function buildLevel(mats) {
   return {
     root,
     octree,
+    // 衝突に参加する物のグループ。octreeはここから組んである。
+    // tools/check-rays.mjs が「octreeのレイとメッシュのレイが同じ答えか」を
+    // 突き合わせるのに使う（propsの飾りは衝突に入らないので比べる相手から外す）
+    solids,
     enemySpawns,
     arenaSpawns,
     coverPoints,

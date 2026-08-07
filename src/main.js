@@ -363,6 +363,8 @@ const _arcPos = new THREE.Vector3();
 const _arcVel = new THREE.Vector3();
 const _arcPrev = new THREE.Vector3();
 const _arcStep = new THREE.Vector3();
+// octreeの当たりから同じ面をメッシュ側で取り直す時の、短いレイの始点（_meshNear参照）
+const _meshFrom = new THREE.Vector3();
 
 /**
  * 地形を真上から1枚だけ焼いて、2Dキャンバスとして返す。
@@ -1620,25 +1622,61 @@ class Game {
     const N = 8;
     for (let i = 0; i < N; i++) {
       const a = (i / N) * Math.PI * 2;
-      this.raycaster.set(this._probe, this._dirs[i].set(Math.cos(a), 0, Math.sin(a)));
-      this.raycaster.far = 40;
-      const hits = this.raycaster.intersectObjects(this.solidMeshes, false);
-      sum += hits.length ? hits[0].distance : 40;
+      // 欲しいのは距離だけなのでoctreeで足りる（材質もメッシュも要らない）
+      const hit = this._terrainRay(this._probe, this._dirs[i].set(Math.cos(a), 0, Math.sin(a)), 40);
+      sum += hit ? hit.distance : 40;
     }
     this.audio.setEnvironment(clamp(sum / N / 30, 0, 1));
   }
 
   /* -------------------------------------------------------- 射撃解決 */
 
+  /**
+   * 地形への1本レイ。octreeで飛ばす。当たらなければnull。
+   *
+   * intersectObjects(solidMeshes)は544枚のメッシュを毎回総当たりするので
+   * 1本0.2msかかる（level.jsの分割数のコメントに実測がある）。
+   * 毎フレーム何本も飛ばす所（手榴弾の弧・敵の発砲・散弾の9ペレット）が
+   * それを使うと、そこだけで1フレームの予算の何割も食う。
+   * octreeは既に組んであり、手榴弾の飛翔も移動判定も同じ物を見ているので、
+   * こちらで飛ばせば速いうえに「予測の線と実際の飛び方」もずれない。
+   *
+   * 返り値はoctreeの形: { distance, position, triangle }。
+   * メッシュの当たりと違って材質(kindOf)と面(face)は入っていない。
+   * 要る時は_meshNearで取り直す
+   */
+  _terrainRay(origin, dir, far) {
+    this._ray.origin.copy(origin);
+    this._ray.direction.copy(dir);
+    const hit = this.level.octree.rayIntersect(this._ray);
+    return hit && hit.distance <= far ? hit : null;
+  }
+
+  /**
+   * octreeの当たり(_terrainRayの返り値)から、同じ面をメッシュ側で取り直す。
+   * 着弾の見た目と音には材質(kindOf)と面の向きが要るが、octreeの三角形は
+   * どのメッシュから来たかを知らない。
+   * 当たった所の0.5m手前から短いレイを撃ち直せば、殆どのメッシュが
+   * 外接球で弾かれるので、長いレイの総当たりとは比べ物にならないほど安い。
+   * それでも見つからなければnull（呼ぶ側が既定の材質で受ける）
+   */
+  _meshNear(hit, dir) {
+    const back = Math.min(0.5, hit.distance);
+    _meshFrom.copy(hit.position).addScaledVector(dir, -back);
+    this.raycaster.set(_meshFrom, dir);
+    this.raycaster.far = back + 0.05;
+    const hs = this.raycaster.intersectObjects(this.solidMeshes, false);
+    return hs.length ? hs[0] : null;
+  }
+
   _resolveShot(shot) {
     if (this.mode === 'versus') return this._resolveShotVersus(shot);
     const { origin, dir, muzzle, def, pellet } = shot;
     if (pellet === 0) { this.shotsFired++; this._tally('shots'); }
 
-    this.raycaster.set(origin, dir);
-    this.raycaster.far = def.range;
-    const worldHits = this.raycaster.intersectObjects(this.solidMeshes, false);
-    const worldHit = worldHits.length ? worldHits[0] : null;
+    // 地形はoctreeで見る。散弾は1発でこれが9回呼ばれるので、
+    // 総当たり(1本0.2ms)のままだと引き金1回で1.9msのつっかえになる
+    const worldHit = this._terrainRay(origin, dir, def.range);
 
     // 敵は専用の球/カプセルで判定する
     let enemyHit = null;
@@ -1674,23 +1712,25 @@ class Game {
       }
       if (drawTracer) this.effects.tracer(muzzle, enemyHit.point, 0.03);
     } else if (worldHit) {
-      const normal = worldHit.face
-        ? this._hitNormal.copy(worldHit.face.normal).transformDirection(worldHit.object.matrixWorld)
+      // 材質と面の向きはメッシュ側から取り直す（octreeの三角形は材質を知らない）
+      const h = this._meshNear(worldHit, dir);
+      const normal = h?.face
+        ? this._hitNormal.copy(h.face.normal).transformDirection(h.object.matrixWorld)
         : this._hitNormal.copy(dir).negate();
-      const kind = this.kindOf.get(worldHit.object.material) ?? 'concrete';
+      const kind = h ? (this.kindOf.get(h.object.material) ?? 'concrete') : 'concrete';
       // 近接は弾ではない。壁を刃で擦っても火花は散らないし着弾痕も残らない。
       // ここを素通ししていたせいで、ナイフを振るたびに銃の着弾と同じ
       // 火花・粉塵・弾痕が壁に出ていた
       if (!def.melee) {
-        this.effects.impact(worldHit.point, normal, kind);
-        this.audio.impact(kind, worldHit.point, this.camera);
+        this.effects.impact(worldHit.position, normal, kind);
+        this.audio.impact(kind, worldHit.position, this.camera);
       } else {
         // 火花は出さないが、当たった手応えは要る。
         // 材質を渡すのは、鉄板とコンクリで鳴り方を変えるため。
         // 全部同じ鈍い音だと、何に当たったのか耳から分からない
-        this.audio.stab(worldHit.point, this.camera, kind);
+        this.audio.stab(worldHit.position, this.camera, kind);
       }
-      if (drawTracer) this.effects.tracer(muzzle, worldHit.point, 0.03);
+      if (drawTracer) this.effects.tracer(muzzle, worldHit.position, 0.03);
     } else if (drawTracer) {
       const far = this._hitNormal.copy(origin).addScaledVector(dir, def.range);
       this.effects.tracer(muzzle, far, 0.025);
@@ -1709,10 +1749,9 @@ class Game {
 
     // 近接は弾を飛ばさないので曳光弾も出さない（刃を振るたびに弾が飛んで見えていた）
     const drawTracer = !def.melee && pellet % 3 === 0;
-    this.raycaster.set(origin, dir);
-    this.raycaster.far = def.range;
-    const hits = this.raycaster.intersectObjects(this.solidMeshes, false);
-    const wallDist = hits.length ? hits[0].distance : Infinity;
+    // 地形はoctreeで見る（理由は_terrainRay参照）
+    const whit = this._terrainRay(origin, dir, def.range);
+    const wallDist = whit ? whit.distance : Infinity;
 
     // 相手に当たったかは手元でも粗く見る。当たっていれば壁の火花を出さない。
     // ここで出す判定はあくまで絵の切り替え用で、ダメージには一切使わない
@@ -1724,20 +1763,20 @@ class Game {
       }
       return;
     }
-    if (hits.length) {
-      const h = hits[0];
-      const normal = h.face
+    if (whit) {
+      const h = this._meshNear(whit, dir);
+      const normal = h?.face
         ? h.face.normal.clone().transformDirection(h.object.matrixWorld)
         : dir.clone().negate();
-      const kind = this.kindOf.get(h.object.material) ?? 'concrete';
+      const kind = h ? (this.kindOf.get(h.object.material) ?? 'concrete') : 'concrete';
       // 対戦側も同じ。近接では火花も着弾痕も出さない
       if (!def.melee) {
-        this.effects.impact(h.point, normal, kind);
-        this.audio.impact(kind, h.point, this.camera);
+        this.effects.impact(whit.position, normal, kind);
+        this.audio.impact(kind, whit.position, this.camera);
       } else {
-        this.audio.stab(h.point, this.camera, kind);
+        this.audio.stab(whit.position, this.camera, kind);
       }
-      if (drawTracer) this.effects.tracer(muzzle, h.point, 0.03);
+      if (drawTracer) this.effects.tracer(muzzle, whit.position, 0.03);
     } else if (drawTracer) {
       this.effects.tracer(muzzle, origin.clone().addScaledVector(dir, def.range), 0.025);
     }
@@ -1784,22 +1823,21 @@ class Game {
     );
     const toPlayer = playerEye.distanceTo(muzzle);
 
-    // 壁越しに当たらないよう、必ず遮蔽を確認する
-    this.raycaster.set(muzzle, dir);
-    this.raycaster.far = Math.max(toPlayer + 4, 8);
-    const hits = this.raycaster.intersectObjects(this.solidMeshes, false);
-    const blocked = hits.length && hits[0].distance < toPlayer - 0.4;
+    // 壁越しに当たらないよう、必ず遮蔽を確認する。
+    // 敵14体が撃ち合うと瞬間で毎秒30〜60発になるので、ここもoctreeで飛ばす
+    const ohit = this._terrainRay(muzzle, dir, Math.max(toPlayer + 4, 8));
+    const blocked = !!(ohit && ohit.distance < toPlayer - 0.4);
 
     this.effects.tracer(muzzle, muzzle.clone().addScaledVector(dir, Math.min(toPlayer + 6, 60)), 0.028, 0xffb066);
 
     if (blocked) {
-      const h = hits[0];
-      const normal = h.face
+      const h = this._meshNear(ohit, dir);
+      const normal = h?.face
         ? h.face.normal.clone().transformDirection(h.object.matrixWorld)
         : dir.clone().negate();
-      const kind = this.kindOf.get(h.object.material) ?? 'concrete';
-      this.effects.impact(h.point, normal, kind);
-      this.audio.impact(kind, h.point, this.camera);
+      const kind = h ? (this.kindOf.get(h.object.material) ?? 'concrete') : 'concrete';
+      this.effects.impact(ohit.position, normal, kind);
+      this.audio.impact(kind, ohit.position, this.camera);
       return;
     }
 
@@ -1835,16 +1873,15 @@ class Game {
       }
 
       // 外れ弾も周囲に着弾させる（掠める感じが出る）
-      this.raycaster.set(muzzle, dir);
-      this.raycaster.far = 80;
-      const mh = this.raycaster.intersectObjects(this.solidMeshes, false);
-      if (mh.length) {
-        const normal = mh[0].face
-          ? mh[0].face.normal.clone().transformDirection(mh[0].object.matrixWorld)
+      const mhit = this._terrainRay(muzzle, dir, 80);
+      if (mhit) {
+        const h = this._meshNear(mhit, dir);
+        const normal = h?.face
+          ? h.face.normal.clone().transformDirection(h.object.matrixWorld)
           : dir.clone().negate();
-        const kind = this.kindOf.get(mh[0].object.material) ?? 'concrete';
-        this.effects.impact(mh[0].point, normal, kind);
-        if (mh[0].distance < 26) this.audio.impact(kind, mh[0].point, this.camera);
+        const kind = h ? (this.kindOf.get(h.object.material) ?? 'concrete') : 'concrete';
+        this.effects.impact(mhit.position, normal, kind);
+        if (mhit.distance < 26) this.audio.impact(kind, mhit.position, this.camera);
       }
     }
   }
@@ -2410,11 +2447,13 @@ class Game {
       _arcStep.subVectors(pos, _arcPrev);
       const len = _arcStep.length();
       if (len > 1e-4) {
-        this.raycaster.set(_arcPrev, _arcStep.divideScalar(len));
-        this.raycaster.far = len;
-        const hit = this.raycaster.intersectObjects(this.solidMeshes, false);
-        if (hit.length) {
-          pos.copy(hit[0].point);
+        /* octreeで見る。前は544枚の総当たりを毎フレーム最大40回やっていて、
+           手榴弾を構えている間だけで1フレームの予算の1/4を食っていた。
+           実際の飛翔(_stepSoloNades)もoctreeに当てているので、
+           こちらで測る方が「予測の線」と「実際の飛び方」も一致する */
+        const hit = this._terrainRay(_arcPrev, _arcStep.divideScalar(len), len);
+        if (hit) {
+          pos.copy(hit.position);
           for (let k = i + 1; k < ARC_STEPS; k++) {
             arr[n++] = pos.x; arr[n++] = pos.y; arr[n++] = pos.z;
           }
@@ -2499,9 +2538,8 @@ class Game {
       _throwDir.subVectors(_throwOrigin, pos);
       const len = _throwDir.length() || 1;
       _throwDir.divideScalar(len);
-      this.raycaster.set(pos, _throwDir);
-      this.raycaster.far = len;
-      if (this.raycaster.intersectObjects(this.solidMeshes, false).length) continue;
+      // 遮蔽の有無だけ分かればよいのでoctreeで見る
+      if (this._terrainRay(pos, _throwDir, len)) continue;
 
       const dmg = Math.max(NADE.MIN_DMG, NADE.BLAST_DMG * (1 - d / NADE.BLAST_R));
       if (e.hit(dmg, 'chest')) this._onKill(e);
