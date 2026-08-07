@@ -81,5 +81,29 @@ ok(noComment(deploy).indexOf('npm run e2e') < noComment(deploy).indexOf('flyctl 
 console.log('\n[6] このファイル自身も走る');
 ok(real.includes('check-meta.mjs'), 'check-meta.mjs 自身が tools/ にある');
 
+console.log('\n[7] ブラウザ検査が見るidが、画面に実在する');
+/* e2eはデプロイ直前にしか走らない。見ているidが画面から消えると、
+   手元のcheckは全部緑のまま、デプロイの段で初めて止まる
+   （戦績ボタンを消した時に実際に止まった）。
+   e2eのソースから locator('#〜') と id一覧のリテラルを拾って、
+   index.htmlに実在するかをここ（毎回走る側）で突き合わせる */
+{
+  const { readFileSync: rf } = await import('node:fs');
+  const spec = rf(new URL('../e2e/boot.spec.mjs', import.meta.url), 'utf8');
+  const html = rf(new URL('../index.html', import.meta.url), 'utf8');
+  const ids = new Set();
+  for (const m of spec.matchAll(/locator\(['"`]#([A-Za-z][\w-]*)['"`]\)/g)) ids.add(m[1]);
+  for (const m of spec.matchAll(/\[((?:'[A-Za-z]\w*',?\s*)+)\]/g)) {
+    for (const q of m[1].matchAll(/'([A-Za-z]\w*)'/g)) {
+      // id一覧のリテラルだけを拾いたいので、index.htmlのid規約(nm〜等)に限る
+      if (/^(nm|st|sx|ov)[A-Z]/.test(q[1])) ids.add(q[1]);
+    }
+  }
+  ok(ids.size >= 5, `e2eが見るidを${ids.size}個拾えた（拾えなさすぎたら検査の壊れ）`);
+  for (const id of ids) {
+    ok(html.includes(`id="${id}"`), `#${id} が index.html に実在する`);
+  }
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);
