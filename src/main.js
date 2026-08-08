@@ -382,6 +382,12 @@ const _arcPrev = new THREE.Vector3();
 const _arcStep = new THREE.Vector3();
 // octreeの当たりから同じ面をメッシュ側で取り直す時の、短いレイの始点（_meshNear参照）
 const _meshFrom = new THREE.Vector3();
+// 敵の発砲(_enemyShot)用の使い回し。発砲は敵14体の撃ち合いで毎秒30〜60回来るので、
+// 1発ごとにnewすると毎秒150個級のゴミになる（enemy.js側の_shootは先に使い回し化済み。
+// 受け側のここだけnewが残っていた）。effects.tracer/impactは同期で写し取るので渡してよい
+const _shotEye = new THREE.Vector3();
+const _shotEnd = new THREE.Vector3();
+const _shotNormal = new THREE.Vector3();
 
 /**
  * 地形を真上から1枚だけ焼いて、2Dキャンバスとして返す。
@@ -1975,7 +1981,7 @@ class Game {
     this._markBlip(enemy, muzzle);
 
     const player = this.player;
-    const playerEye = new THREE.Vector3(
+    const playerEye = _shotEye.set(
       player.collider.start.x,
       player.feetY + player.height - 0.16,
       player.collider.start.z,
@@ -1987,13 +1993,17 @@ class Game {
     const ohit = this._terrainRay(muzzle, dir, Math.max(toPlayer + 4, 8));
     const blocked = !!(ohit && ohit.distance < toPlayer - 0.4);
 
-    this.effects.tracer(muzzle, muzzle.clone().addScaledVector(dir, Math.min(toPlayer + 6, 60)), 0.028, 0xffb066);
+    this.effects.tracer(
+      muzzle,
+      _shotEnd.copy(muzzle).addScaledVector(dir, Math.min(toPlayer + 6, 60)),
+      0.028, 0xffb066,
+    );
 
     if (blocked) {
       const h = this._meshNear(ohit, dir);
       const normal = h?.face
-        ? h.face.normal.clone().transformDirection(h.object.matrixWorld)
-        : dir.clone().negate();
+        ? _shotNormal.copy(h.face.normal).transformDirection(h.object.matrixWorld)
+        : _shotNormal.copy(dir).negate();
       const kind = h ? (this.kindOf.get(h.object.material) ?? 'concrete') : 'concrete';
       this.effects.impact(ohit.position, normal, kind);
       this.audio.impact(kind, ohit.position, this.camera);
@@ -2036,8 +2046,8 @@ class Game {
       if (mhit) {
         const h = this._meshNear(mhit, dir);
         const normal = h?.face
-          ? h.face.normal.clone().transformDirection(h.object.matrixWorld)
-          : dir.clone().negate();
+          ? _shotNormal.copy(h.face.normal).transformDirection(h.object.matrixWorld)
+          : _shotNormal.copy(dir).negate();
         const kind = h ? (this.kindOf.get(h.object.material) ?? 'concrete') : 'concrete';
         this.effects.impact(mhit.position, normal, kind);
         if (mhit.distance < 26) this.audio.impact(kind, mhit.position, this.camera);
