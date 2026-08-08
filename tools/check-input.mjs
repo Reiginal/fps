@@ -18,7 +18,12 @@ const ok = (c, msg) => { console.log(`  ${c ? '○' : '× 失敗:'} ${msg}`); if
 
 /* ブラウザの代わりに、頼まれた内容を記録するだけの偽物を置く。
    dom-stubにはこれらが無いので、ここで足す */
-const log = { fullscreen: 0, exit: 0, lockedKeys: null, unlocked: 0 };
+// orderは「掴む」と「全画面」を頼んだ順番。**この順番そのものが検査の対象**なので、
+// 回数ではなく並びで持つ。lockRejectsを立てると、掴む方を断るブラウザになる
+const log = {
+  fullscreen: 0, exit: 0, lockedKeys: null, unlocked: 0,
+  order: [], lockRejects: false,
+};
 // navigatorはNodeのバージョンで扱いが割れる。**両方で通る形にしないとCIが片肺で落ちる。**
 //   Node 20 … そもそも生えていない（触るとReferenceError）
 //   Node 21以降 … 生えているが、差し替えられないgetterになっている（代入すると例外）
@@ -36,6 +41,7 @@ document.fullscreenElement = null;
 document.documentElement = {
   requestFullscreen: () => {
     log.fullscreen++;
+    log.order.push('全画面');
     document.fullscreenElement = document.documentElement;
     return Promise.resolve();
   },
@@ -57,7 +63,15 @@ document.addEventListener = (type, fn) => {
 };
 const dom = {
   addEventListener: () => {},
-  requestPointerLock: () => { document.pointerLockElement = dom; },
+  // 本物のChromeと同じく約束(Promise)を返す。断る側も再現できるようにしてある
+  requestPointerLock: () => {
+    log.order.push('掴む');
+    if (log.lockRejects) {
+      return Promise.reject(new Error('A user gesture is required to request Pointer Lock.'));
+    }
+    document.pointerLockElement = dom;
+    return Promise.resolve();
+  },
 };
 const input = new Input(dom);
 // 全画面の約束は次のフレームで解決するので、待つ手を用意しておく
@@ -121,6 +135,48 @@ console.log('\n[4] 全画面でない時にexitFullscreenを呼んでも落ち�
   try { input.exitFullscreen(); } catch { threw = true; }
   ok(!threw, '例外を投げない');
   ok(log.exit === before, '窓のままなら何もしない');
+}
+
+console.log('\n[5] 掴むのを全画面より先に頼む');
+/* **順番を逆にすると必ず断られる。**
+   ブラウザは「人がたった今押した」という印を1回ぶんしか持っていなくて、
+   全画面はそれを使い切る（掴む方は使い切らない）。
+   先に全画面を頼むと、掴む方には印が残っていなくて
+   "A user gesture is required to request Pointer Lock." で断られる。
+   2026-08-08まで実際にこの順で、遊ぶ側の画面に読めない英語が出ていた */
+{
+  document.fullscreenElement = null;
+  document.pointerLockElement = null;
+  log.order.length = 0;
+  input.requestLock();
+  await settle();
+  ok(log.order[0] === '掴む', `掴む方を先に頼んでいる（順番: ${log.order.join('→')}）`);
+  ok(log.order.includes('全画面'), '全画面も頼んでいる');
+}
+
+console.log('\n[6] 掴むのを断られても、拾い手のいない失敗にしない');
+/* 断られること自体は普通に起きる（掴みを外した直後は、少しの間ブラウザが掴み直させない）。
+   受けずに放っておくとunhandledrejectionになり、diagの赤い枠へ
+   ブラウザの英語がそのまま出る。**しかもdiagはエラーを消さないので、
+   一度出たら遊び終わりまで残る**（死亡画面まで残っているのを実際に見た） */
+{
+  let unhandled = null;
+  const onUnhandled = (e) => { unhandled = e; };
+  process.on('unhandledRejection', onUnhandled);
+  let told = 0;
+  input.onLockFail(() => { told++; });
+  log.lockRejects = true;
+  document.fullscreenElement = null;
+  document.pointerLockElement = null;
+  input.requestLock();
+  // 約束の失敗が拾われないと分かるのは、その回の処理が全部終わった後。
+  // 1回の待ちでは早すぎて、受けていなくても素通りしてしまう
+  await settle();
+  await settle();
+  ok(told === 1, '断られたことを受け取っている');
+  ok(!unhandled, `拾い手のいない失敗になっていない（${unhandled?.message ?? 'なし'}）`);
+  process.off('unhandledRejection', onUnhandled);
+  log.lockRejects = false;
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
