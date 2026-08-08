@@ -115,13 +115,17 @@ console.log('\n[8] main.jsと表の繋ぎ');
     'どこまで下げたかが/logsの報告に乗る');
 }
 
-console.log('\n[段の表] どの段も、既定の設定に対して実際に何かを削る');
+console.log('\n[段の表] 段が進むほど必ず軽くなる');
 {
   /* なぜ見るか: 既定を軽くした時に「既定と同じ内容の段」が空回りになる事故が
      実際に起きた（既定85%の頃に段1=85%、既定AO切りなのに段3=AO切り。
      5段のうち2段が何もせず、一番効く段まで最短32秒のうち16秒がただの待ち）。
      表(gfxrungs.js)と既定(settings.js)は別ファイルなので、
-     片方だけ変えるとまた空回りが生まれる。ここで突き合わせる */
+     片方だけ変えるとまた空回りが生まれる。ここで突き合わせる。
+
+     **既定が最低限になってからは、段の主な客は「絵を盛った人」。**
+     既定のまま遊ぶ人には下げ代がほとんど無いので、
+     「盛った人には全段効く」＋「既定の人にも最後の段は効く」を見る形にする */
   const { MAX_RUNG, rungValues } = await import('../src/core/gfxrungs.js');
   const { loadSettings } = await import('../src/core/settings.js');
   // 既定の設定＝空のlocalStorageで読んだ値
@@ -129,25 +133,39 @@ console.log('\n[段の表] どの段も、既定の設定に対して実際に�
     getItem: () => null, setItem: () => {}, removeItem: () => {},
   };
   const defaults = loadSettings();
-
   const weight = (a) => JSON.stringify(a);
-  let prev = rungValues(defaults, 0);
+
+  // (1) 絵を盛った人には、どの段も何かを削る
+  const rich = { ...defaults, gfxScale: 1, gfxAo: true, gfxBloom: true, gfxShadow: '高' };
+  let prev = rungValues(rich, 0);
+  ok(weight(prev) === weight({ scale: 1, ao: true, bloom: true, shadow: '高' }),
+    '段0は設定どおり（盛った人の絵をそのまま出す）');
   for (let r = 1; r <= MAX_RUNG; r++) {
-    const cur = rungValues(defaults, r);
-    ok(weight(cur) !== weight(prev), `段${r}は段${r - 1}から何かが変わる（空回りしない）`);
-    // 変わる向きは軽い方だけ。上がる項目が1つでもあると、段が進んだのに重くなる
-    ok(cur.scale <= prev.scale, `段${r}で倍率が上がらない（${prev.scale}→${cur.scale}）`);
-    ok(!(!prev.ao && cur.ao) && !(!prev.bloom && cur.bloom), `段${r}でAO/にじみが点かない`);
-    ok(!(prev.shadow === '低' && cur.shadow !== '低'), `段${r}で影が上がらない`);
+    const cur = rungValues(rich, r);
+    ok(weight(cur) !== weight(prev), `盛った設定で段${r}は段${r - 1}から何かが変わる`);
     prev = cur;
   }
 
-  // 盛っている人（全部入り）の設定でも、段は必ず低い方へ倒れる
-  const rich = { ...defaults, gfxScale: 1, gfxAo: true, gfxBloom: true, gfxShadow: '高' };
-  const r2 = rungValues(rich, 2);
-  ok(r2.scale <= 0.6 && !r2.ao && !r2.bloom, '盛った設定でも段2で倍率0.6・AO/にじみ切り');
-  const r0 = rungValues(rich, 0);
-  ok(r0.scale === 1 && r0.ao && r0.bloom && r0.shadow === '高', '段0は設定どおり');
+  // (2) どちらの設定でも、段が進んで重くなる項目が1つも無い
+  for (const [name, base] of [['既定', defaults], ['盛った設定', rich]]) {
+    let p = rungValues(base, 0);
+    let bump = 0;
+    for (let r = 1; r <= MAX_RUNG; r++) {
+      const c = rungValues(base, r);
+      if (c.scale > p.scale) bump++;
+      if (!p.ao && c.ao) bump++;
+      if (!p.bloom && c.bloom) bump++;
+      if (p.shadow === '低' && c.shadow !== '低') bump++;
+      p = c;
+    }
+    ok(bump === 0, `${name}で、段が進んで重くなる項目が無い`);
+  }
+
+  // (3) 既定のまま遊ぶ人にも、最後の段だけは効く（逃げ道が塞がっていない）
+  const d0 = rungValues(defaults, 0);
+  const dLast = rungValues(defaults, MAX_RUNG);
+  ok(dLast.scale < d0.scale,
+    `既定でも最後の段で倍率が下がる（${d0.scale}→${dLast.scale}）`);
 }
 
 console.log('\n[段の記憶] 前回落ち着いた段を覚えて、次の起動で使える');

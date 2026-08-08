@@ -168,15 +168,21 @@ console.log('\n[2] 既定のままなら、今までと同じ手触り');
   ok(Math.abs(t2.input.sensitivity - 0.0044) < 1e-9,
     `×2で倍になる（${t2.input.sensitivity}）`);
 
-  /* 画質の既定は「軽め」（2026-08-07に方針変更、2026-08-08にさらに一段）。
-     85%・にじみ入りでも、MacBook Proで1人プレイを10分遊んだら熱くなった。
-     このゲームは軽さが機能より優先なので、既定は
-     きめ細かさ75%・陰影切り・にじみ切り・MSAA切り・影は中に倒し、
-     盛りたい人が設定で上げる向きにする */
-  ok(t.gfx.scale === 0.75, `描画のきめ細かさの既定は75%（今 ${t.gfx.scale}）`);
+  /* 画質の既定は「一番軽い側」（2026-08-08に確定）。
+     85%→75%と2段下げてもMacBook Proは10分で熱くなり、
+     本人が遊んで落ち着いた設定がほぼ最低限だったので、既定をそこへ合わせた。
+     **遊ぶ人の大半は設定を開かない。開かない人が一番損をする形にしない。**
+     余裕がある人だけ設定で上げる向き（上げたことは端末に残る） */
+  ok(t.gfx.scale === 0.55, `描画のきめ細かさの既定は55%（今 ${t.gfx.scale}）`);
   ok(t.gfx.ao === false, '接地の陰影の既定は切り（入れると画面を2回描く）');
   ok(t.gfx.bloom === false, '光のにじみの既定は切り（画面全体を何度も塗り直すため）');
-  ok(t.gfx.shadow === '中', `影のこまやかさの既定は中（今 ${t.gfx.shadow}）`);
+  ok(t.gfx.shadow === '低', `影のこまやかさの既定は低（今 ${t.gfx.shadow}）`);
+  ok(t.gfx.msaa === false, 'ふちのギザギザ消しの既定は切り（帯域が倍になるため）');
+  ok(t.gfx.fpsCap === 30, `fps上限の既定は30（今 ${t.gfx.fpsCap}）`);
+  // 上げる余地が全部残っていること（最低限に倒したせいで、
+  // 上げたい人の行き先が無くなっていたら本末転倒）
+  const scaleDef = SETTINGS.find((s) => s.key === 'gfxScale');
+  ok(scaleDef.def > scaleDef.min, `きめ細かさは下限(${scaleDef.min})より上（上げも下げもできる）`);
 }
 
 console.log('\n[3] 壊れた値を正す');
@@ -436,7 +442,7 @@ console.log('\n[10] 画質の既定は版番号で全員に強制できる');
   localStorage.setItem('blackout.sens', '1.4');
   forceGfxDefaults();
   const v = loadSettings();
-  ok(v.gfxScale === 0.75 && v.gfxAo === false && v.gfxShadow === '中',
+  ok(v.gfxScale === 0.55 && v.gfxAo === false && v.gfxShadow === '低',
     `古い保存値が消えて新既定になる（${v.gfxScale} / ${v.gfxAo} / ${v.gfxShadow}）`);
   ok(v.sens === 1.4, '感度は人の手触りなので消さない');
   ok(localStorage.getItem('blackout.gfx.autorung') === null, '自動画質が覚えた段も消える');

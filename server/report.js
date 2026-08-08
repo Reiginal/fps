@@ -147,12 +147,26 @@ export function reportRecord(bodyText) {
   };
 }
 
-/** 流れて消える方（flyctl logs）へ出す1行。人が目で追うためだけの形 */
+/* 流れて消える方（flyctl logs）へ出す1行。人が目で追うためだけの形。
+ *
+ * **数字もここへ出す。** 前は名前とメッセージとブラウザ名だけを組み立てていて、
+ * fpsも描画命令も1分ごとの列も全部落としていた。そのせいで
+ * `flyctl logs` には「[描画の重さ] れい: 描画の重さ」としか出ず、
+ * **肝心の数字を見るには毎回/logsを鍵付きで開くしかなかった**（2026-08-08）。
+ * 鍵は手元に無いので、こちらから重さを追えない状態だった。
+ * 中身のある項目だけを並べるので、エラーの行は今まで通り短いまま */
 export function reportLine(bodyText) {
   const r = reportRecord(bodyText);
   if (!r) return null;
   const tag = { solo: '[1人で遊んだ]', perf: '[描画の重さ]' }[r.kind] || '[画面のエラー]';
+  // 並べる順番は「まず結論(fps)、次に切り分け(何が多いか)、最後に設定」。
+  // 1分ごとの列は長いので末尾に置く
+  const num = ['fps', 'low', 'calls', 'tris', 'scale', 'rung', 'cap', 'wave', 'kills', 'score']
+    .filter((k) => r[k] !== null && r[k] !== undefined)
+    .map((k) => `${k}=${r[k]}`);
+  for (const k of ['fpsMins', 'lowMins']) if (r[k]) num.push(`${k}=${r[k]}`);
   return `${tag} ${r.name}: ${r.message}`
+    + (num.length ? ` ${num.join(' ')}` : '')
     + (r.where ? ` @ ${r.where}` : '')
     + (r.ua ? ` [${r.ua}]` : '');
 }

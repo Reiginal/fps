@@ -103,7 +103,29 @@ console.log('\n[3] 受け口: 数字の列だけが通る');
   ok((rl?.fpsMins ?? '').length <= 200, '長すぎる列は切られる');
 }
 
-console.log('\n[4] 表への通り道: 受けた数字がlogs.addまで届く');
+console.log('\n[4] 流れる方(flyctl logs)にも数字が出る');
+{
+  /* /logsの表は鍵が要るので、開発する側から重さを追うには
+     flyctl logsに数字が出ている必要がある。
+     前はここが名前とメッセージだけで、「[描画の重さ] れい: 描画の重さ」しか出ず、
+     肝心の数字を一度も見られなかった（2026-08-08） */
+  const { reportLine } = await import('../server/report.js');
+  const line = reportLine(JSON.stringify({
+    kind: 'perf', message: '描画の重さ', name: 'れい',
+    fps: 60, low: 44, calls: 412, tris: 96000, scale: 55, rung: 0, cap: 30,
+    fpsMins: '60,58,52', lowMins: '44,40,33',
+  }));
+  for (const k of ['fps=60', 'low=44', 'calls=412', 'tris=96000', 'scale=55',
+    'cap=30', 'fpsMins=60,58,52', 'lowMins=44,40,33']) {
+    ok(line.includes(k), `${k} が1行に出る`);
+  }
+  ok(!line.includes('\n'), '1行のまま（ログの他の行に紛れ込ませない）');
+  // エラーの行は今まで通り短いまま（数字を持たないので並ばない）
+  const err = reportLine(JSON.stringify({ message: 'x is not a function', name: 'れい' }));
+  ok(!/=/.test(err), 'エラーの行には数字の並びが付かない');
+}
+
+console.log('\n[5] 表への通り道: 受けた数字がlogs.addまで届く');
 {
   // reportRecordで受けても、index.jsのlogs.add()に並べ忘れると表に出ない。
   // 実際にcalls/tris/scale/rungがここで落ちていた
