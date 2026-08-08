@@ -325,5 +325,38 @@ console.log('\n[5] 器の繋ぎ込み（HTML/CSS/メニュー）');
   ok(/'nmTutorial'/.test(e2e), 'e2eがボタンの実在を見ている');
 }
 
+console.log('\n[6] 本編との縁切り（戦績・波・死・当たり先）');
+{
+  /* チュートリアルは本編と同じ道具（敵・武器・地形の判定）を使う。
+     縁を切る所を切り忘れると、
+       ・練習の発砲が通算戦績に混ざる（後から分離できない）
+       ・一時停止から戻った瞬間に敵の波が湧く
+       ・手榴弾の自爆で結果画面へ飛ばされる
+     のどれも実際に遊ばないと気づけない。ソースの形で見張る
+     （コメントを外してから見る。理由コメントに同じ語が出るため） */
+  const src = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/mg, '');
+  ok(/_tally\(key, n = 1\) \{\s*if \(this\.tutorial\) return;/.test(src),
+    '_tallyの先頭で止める（戦績を汚さない唯一の急所）');
+  ok(/_tallyBest\(key, v\) \{\s*if \(this\.tutorial\) return;/.test(src),
+    '_tallyBestも同じ');
+  ok(/mode === 'solo' && !this\.tutorial && this\.director\.wave === 0/.test(src),
+    '波の起動にガードがある（一時停止からの復帰でも通る行）');
+  ok(/_onPlayerDown\(\) \{\s*if \(this\.state === 'dead'\) return;\s*if \(this\.tutorial\) \{/.test(src),
+    '_onPlayerDownの先頭で受ける（倒れない・結果画面へ行かない）');
+  // 当たり先の差し替え。射撃と爆風の両方（片方だけだと手榴弾が的に効かない）
+  const swaps = (src.match(/this\._shootables \?\? this\.director\.active/g) || []).length;
+  ok(swaps === 2, `射撃と爆風の当たり先が差し替え式（${swaps}/2箇所）`);
+  // 世界を戻す口が、ソロ開始・対戦参加・ホームの全経路に居る
+  ok(/_enterSolo\(\) \{\s*this\._leaveTutorial\(\);/.test(src), '_enterSoloで片付ける');
+  ok(/_joinMatch\(\{ url, name \}\) \{\s*this\._leaveTutorial\(\);/.test(src),
+    '_joinMatchで片付ける');
+  ok(/_goHome\(\) \{[\s\S]{0,200}?_leaveTutorial\(\);/.test(src), '_goHomeで片付ける');
+  // 修了はstateを先に立ててから掴みを離す（逆だと一時停止画面に化ける）
+  ok(/_finishTutorial\(\) \{[\s\S]{0,200}?state = 'paused';\s*document\.exitPointerLock/.test(src),
+    '修了はstateを先に立てる');
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);

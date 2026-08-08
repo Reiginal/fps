@@ -1699,6 +1699,14 @@ export class Enemy {
     };
   }
 
+  /**
+   * 棒立ちに戻す。spawn()は「湧いたら攻める」前提でCHASEを立てるが、
+   * チュートリアルの的は動かない兵士として立たせたい。
+   * update()を呼ばない使い方（main.jsの_placeTarget）とセットで使う
+   * （呼ぶと索敵が22m以内で勝手にALERTへ進めてしまう）
+   */
+  standDown() { this.state = STATE.IDLE; }
+
   hit(amount, part, shotDir) {
     if (!this.alive) return false;
     if (shotDir) this._lastShotDir.copy(shotDir);
