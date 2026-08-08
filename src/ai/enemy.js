@@ -1523,9 +1523,12 @@ export class Enemy {
     this.groundTimer = 0;
     this.footGround[0] = this.footGround[1] = pos.y;
     this.blob.visible = true;
-    // 死体で切った影を戻す
-    for (const m of this.meshes) m.castShadow = true;
-    this._corpseShadowOn = true;
+    /* 影は切った状態で湧く。湧き地点は場外の縁で、必ず近い影の箱(13m)の外だから。
+       近づいてくれば最初のupdate()の_liveShadow()が点ける。
+       trueで湧かせると、遠い影マップが次に焼き直る1回にだけ写り込んで、
+       動く敵の影が「その1枚のまま置き去り」になる */
+    for (const m of this.meshes) m.castShadow = false;
+    this._shadowOn = false;
     this._detailOn = true;
     for (const g of this.parts.detail) g.visible = true;
     this._pickUpGun();
@@ -1851,6 +1854,7 @@ export class Enemy {
     this.coverCooldown -= dt;
     this._playerDist = dist;
     this._updateDetail(dist);
+    this._liveShadow();
 
     // 接地の暗がりと足のIKに使う床の高さ。毎フレーム引くと重いので間引く
     this.groundTimer -= dt;
@@ -2225,14 +2229,33 @@ export class Enemy {
     fore.quaternion.slerp(this._qa, k);
   }
 
-  /* 死体の影。前回は倒れ切って3秒で一律castShadow=falseにしていたので、
-     目の前の死体だけ影が消えて床から浮いた絵になっていた。
-     負荷を切りたいのは遠くの死体なので、距離で決める */
-  _corpseShadow() {
-    const want = this._playerDist < 35;
-    if (want === this._corpseShadowOn) return;
-    this._corpseShadowOn = want;
+  /* 生きている敵の影。近い影の箱（半径16m・カメラ追従・毎フレーム焼く）に
+     入る距離の敵だけ影を落とす。13はshadowgate.jsのnear=13と同じ余白の取り方。
+
+     なぜ切るか: 13mの外の敵が写る先は遠い方の影マップで、あちらは
+     「動く物が写っている限り、影を落とすメッシュ全部（500枚超）を焼き直し続ける」。
+     ソロは敵が常に歩いているので、実質3フレームに1回それが走っていた。
+     動く敵を遠い枚から締め出せば、遠い枚は静止した地形と死体だけの
+     「めったに焼かない1枚」になる（門番の判定はshadowgate.js、
+     数え上げはmain.jsの_updateSunCascades）。
+     外の敵も足元の暗がり(blob)は持っているので、接地感は消えない */
+  _liveShadow() {
+    const want = this._playerDist < 13;
+    if (want === this._shadowOn) return;
+    this._shadowOn = want;
     for (const m of this.meshes) m.castShadow = want;
+  }
+
+  /* 死体の影。落ち着いた死体はもう動かないので、遠い影マップの住人にする
+     （撮り直しは死体が増えた・片付いた時だけ。shadowgate.jsの指紋）。
+     前は35mの距離で入り切りしていたが、あれは遠い枚を3フレームごとに
+     焼き直していた頃の節約。焼き直しが指紋駆動になった今は、
+     距離で切ると「切り替わったのに焼き直しが走らず、影だけ古い」が起きる。
+     常に落とす方が安いし正しい（毎回の焼き直しに8体ぶん乗るだけ） */
+  _corpseShadow() {
+    if (this._shadowOn) return;
+    this._shadowOn = true;
+    for (const m of this.meshes) m.castShadow = true;
   }
 
   _updateDeath(dt) {
