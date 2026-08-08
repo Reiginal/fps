@@ -18,11 +18,14 @@
 // 移動系(1-5)を通路の前半で、射撃系(6-10)を射撃線で、
 // 2段階操作の難しい物(11-12)を最後に。
 //
-// 達成条件のkind:
-//   accum … valueの累積がgoalに達したら
-//   time  … 条件を満たしている時間の合計がgoal秒に達したら
-//   count … 入場時からの増分（またはエッジの回数）がgoalに達したら
-//   phase … 「Aを見た後にB」の2段階（ADSの往復・武器の行き来）
+// **移動系の課題は「やっている時間」ではなく「通路のどこまで進めたか」で見る。**
+// 最初は「しゃがみを1.5秒」のような時間で数えていたが、
+// その場でキーを押して待つだけでクリアになってしまい、
+// 「時間で解決してる感じ」と言われた（2026-08-09）。
+// 段差の奥・梁の奥は、跳ばないと・しゃがまないと物理的に辿り着けない地形なので、
+// **そこに立っていること自体が「できた」の証明**になる。
+// goalZは通路のZ座標（+側で湧いて-側へ進む）。仕掛けの座標と噛み合っているかは
+// tools/check-tutorial.mjsが地形を実際に組んで突き合わせる
 export const TUTORIAL_STEPS = [
   {
     id: 'look',
@@ -32,27 +35,27 @@ export const TUTORIAL_STEPS = [
   },
   {
     id: 'move',
-    main: 'W A S D で歩いてみる',
+    main: 'W A S D で通路の奥へ歩く',
     sub: 'Wが前・Sが後ろ・AとDが横',
-    goal: 3.0,   // 歩いている時間の合計（秒）
+    goalZ: 10,   // 湧き(z=18)から8m歩いた所
   },
   {
     id: 'sprint',
     main: 'Wで前に進みながら 左Shift で走る',
     sub: '前に進んでいる間だけ走れる',
-    goal: 1.5,
+    goal: 10,    // 走った距離(m)。速さ7.4m/sなので1.5秒ほど走れば届く
   },
   {
     id: 'jump',
-    main: 'Space でジャンプして、段差を越えて進む',
+    main: 'Space でジャンプして、2つの段差を越える',
     sub: '段の手前で押すと登れる',
-    goal: 2,     // 跳んだ回数
+    goalZ: -2,   // 2つ目の段(z=0)の奥。跳ばないと辿り着けない
   },
   {
     id: 'crouch',
-    main: 'Ctrl か C を押している間しゃがむ',
-    sub: '低い梁の下は、しゃがむと通れる',
-    goal: 1.5,
+    main: 'Ctrl か C でしゃがんで、低い梁をくぐる',
+    sub: '押している間だけしゃがむ',
+    goalZ: -6,   // 梁(z=-4)の奥。しゃがまないと通れない
   },
   {
     id: 'shoot',
@@ -124,8 +127,9 @@ export class TutorialMachine {
   /**
    * 毎フレーム呼ぶ。達成して次へ進んだフレームだけ 'advance' を返す。
    * snapは全部プリミティブ:
-   *   { dt, yaw, pitch, speed, onFloor, sprinting, crouching,
+   *   { dt, yaw, pitch, z, speed, onFloor, sprinting, crouching,
    *     shots, kills, adsFactor, reloading, weaponIndex, threw, healed }
+   * zは通路のどこまで進んだか（移動系の課題は位置で判定する）
    */
   update(snap) {
     if (this.done) return null;
@@ -154,22 +158,18 @@ export class TutorialMachine {
         hit = this._progress >= s.goal;
         break;
       }
+      /* 移動系は位置で見る（表の頭のコメント参照）。
+         先に奥まで進んでいた人は課題に入った瞬間クリアになるが、それでいい。
+         段差の奥に立っている＝跳んだことは地形が保証している */
       case 'move':
-        if (snap.onFloor && snap.speed > 1.0) this._progress += snap.dt;
-        hit = this._progress >= s.goal;
+      case 'jump':
+      case 'crouch':
+        hit = snap.z <= s.goalZ;
         break;
       case 'sprint':
-        if (snap.sprinting) this._progress += snap.dt;
-        hit = this._progress >= s.goal;
-        break;
-      case 'jump':
-        // 跳んだ瞬間＝接地が離れた瞬間。落下でも数えてしまうが、
-        // この通路に落ちる場所は無いので跳ぶ以外でここは立たない
-        if (prev && prev.onFloor && !snap.onFloor) this._progress += 1;
-        hit = this._progress >= s.goal;
-        break;
-      case 'crouch':
-        if (snap.crouching) this._progress += snap.dt;
+        // 走った距離。時間でなく距離なのは、壁に向かって走り続けても
+        // 進まなければ「走れた」ことにならないため（speedは実際の移動速度）
+        if (snap.sprinting) this._progress += snap.speed * snap.dt;
         hit = this._progress >= s.goal;
         break;
       case 'shoot':
@@ -226,11 +226,14 @@ export class TutorialMachine {
     if (!s) return { main: '', sub: '' };
     let left = '';
     switch (s.id) {
-      case 'move': case 'sprint': case 'crouch':
-        left = `あと${Math.max(1, Math.ceil(s.goal - this._progress))}秒`;
+      case 'move': case 'jump': case 'crouch': {
+        // 目的地までの距離。位置はupdateで見た最後の値から出す
+        const z = this._prev?.z;
+        if (typeof z === 'number') left = `あと${Math.max(1, Math.ceil(z - s.goalZ))}m先へ`;
         break;
-      case 'jump':
-        left = `あと${s.goal - this._progress}回`;
+      }
+      case 'sprint':
+        left = `あと${Math.max(1, Math.ceil(s.goal - this._progress))}m`;
         break;
       case 'shoot':
         left = `あと${Math.max(0, s.goal - this._progress)}発`;

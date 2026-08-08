@@ -15,9 +15,10 @@ import { TUTORIAL_STEPS, TutorialMachine } from '../src/core/tutorial.js';
 let bad = 0;
 const ok = (c, msg) => { console.log(`  ${c ? '○' : '× 失敗:'} ${msg}`); if (!c) bad++; };
 
-// 素のスナップショット。1フレームぶん。上書きしたい所だけ渡す
+// 素のスナップショット。1フレームぶん。上書きしたい所だけ渡す。
+// zの既定は湧き地点（そこに立っているだけでは移動系の課題が進まないこと）
 const snap = (over = {}) => ({
-  dt: 1 / 60, yaw: 0, pitch: 0, speed: 0, onFloor: true,
+  dt: 1 / 60, yaw: 0, pitch: 0, z: 18, speed: 0, onFloor: true,
   sprinting: false, crouching: false, shots: 0, kills: 0,
   adsFactor: 0, reloading: 0, weaponIndex: 0, threw: false, healed: false,
   ...over,
@@ -45,31 +46,40 @@ console.log('\n[1] ステップ機械: 全遷移');
   m.update(snap({ yaw: 50 * 0.05 }));
   ok(m.step.id === 'move', '2.5radで進む');
 
-  // move: 空中や停止では数えない。歩き合計3.0秒で進む
-  run(m, 300, { speed: 3, onFloor: false });
-  ok(m.step.id === 'move', '空中の移動は数えない');
-  run(m, 179, { speed: 3 });     // 179/60 = 2.98秒
-  ok(m.step.id === 'move', '2.98秒ではまだ');
-  run(m, 3, { speed: 3 });
-  ok(m.step.id === 'sprint', '3.0秒で進む');
+  /* 移動系は「そこまで行けたか」の位置で見る。
+     時間で数えていた頃は、その場でキーを押して待つだけでクリアになって
+     「時間で解決してる感じ」と言われた。押しているだけでは進まないことを
+     それぞれの課題で確かめる */
 
-  // sprint: 1.5秒
-  run(m, 89, { sprinting: true });
-  ok(m.step.id === 'sprint', '1.48秒ではまだ');
-  run(m, 3, { sprinting: true });
-  ok(m.step.id === 'jump', '1.5秒で進む');
+  // move: 湧き地点に立っているだけでは進まない。奥まで歩いて進む
+  run(m, 120, {});
+  ok(m.step.id === 'move', '湧き地点に立っているだけでは進まない');
+  run(m, 5, { z: 10.5 });
+  ok(m.step.id === 'move', 'あと0.5m手前ではまだ');
+  run(m, 2, { z: 10 });
+  ok(m.step.id === 'sprint', '8m歩いて進む');
 
-  // jump: 接地→空中のエッジ2回。空中のままでは数えない
-  run(m, 200, { onFloor: false });
-  ok(m.step.id === 'jump', '空中に居続けても1回しか数えない');
-  run(m, 5, { onFloor: true });
-  run(m, 5, { onFloor: false });   // 2回目のエッジ
-  ok(m.step.id === 'crouch', '2回跳んで進む');
+  // sprint: 距離で見る。キーを押しているだけ（進んでいない）では数えない
+  run(m, 300, { z: 10, sprinting: true, speed: 0 });
+  ok(m.step.id === 'sprint', '壁に向かって走っても進まない（距離が出ていない）');
+  run(m, 80, { z: 8, sprinting: true, speed: 7.4 });   // 9.87m
+  ok(m.step.id === 'sprint', '9.9mではまだ');
+  run(m, 3, { z: 8, sprinting: true, speed: 7.4 });
+  ok(m.step.id === 'jump', '10m走って進む');
 
-  // crouch: 1.5秒。**この時点で既に100発撃っていた人**を再現する
+  // jump: 2つ目の段の奥に立てたか（跳ばないと辿り着けない地形なので位置が証明）
+  run(m, 120, { z: 1, onFloor: false });
+  ok(m.step.id === 'jump', '段の手前で跳んでいるだけでは進まない');
+  run(m, 2, { z: -2 });
+  ok(m.step.id === 'crouch', '段を越え切って進む');
+
+  // crouch: 梁の奥。しゃがんでいるだけ（くぐっていない）では進まない
+  run(m, 300, { z: -3, crouching: true });
+  ok(m.step.id === 'crouch', 'しゃがんで待っているだけでは進まない');
+  // くぐり切る。**この時点で既に100発撃っていた人**を再現する
   // （入場フレームの基準取りにこの100が乗ることを次の項で確かめる）
-  run(m, 92, { crouching: true, shots: 100 });
-  ok(m.step.id === 'shoot', 'しゃがみ1.5秒で進む');
+  run(m, 2, { z: -6, shots: 100 });
+  ok(m.step.id === 'shoot', '梁をくぐり切って進む');
 
   // shoot: 入場時の累積は基準から除外。+5発で進む
   run(m, 10, { shots: 100 });
@@ -230,6 +240,19 @@ console.log('\n[3] 小ステージ: 実際に組んで寸法を測る');
     ok(!hit || hit.distance > dist,
       `射撃線から的(${s.x}, ${s.z})へ視線が通る`);
   }
+
+  /* 課題の目的地(goalZ)が仕掛けの座標と噛み合っているか。
+     表(tutorial.js)と通路(tutorial-level.js)は別ファイルなので、
+     片方だけ動かすと「段の手前なのにクリア」「くぐり切ったのにクリアされない」になる。
+     仕掛けの端の座標は通路の実装と同じ値（段: z=0で奥行き1.6→奥端-0.8、
+     梁: z=-4で奥行き1.4→奥端-4.7、最初の段の手前端4.8、土嚢-8） */
+  const gates = Object.fromEntries(TUTORIAL_STEPS.map((s) => [s.id, s]));
+  ok(gates.move.goalZ < level.playerSpawn.z - 4 && gates.move.goalZ > 4.8,
+    `歩きの目的地(z=${gates.move.goalZ})は湧きと最初の段の間`);
+  ok(gates.jump.goalZ < -0.8 && gates.jump.goalZ > -3.3,
+    `ジャンプの目的地(z=${gates.jump.goalZ})は2つ目の段の奥・梁の手前`);
+  ok(gates.crouch.goalZ < -4.7 && gates.crouch.goalZ > -7.6,
+    `しゃがみの目的地(z=${gates.crouch.goalZ})は梁の奥・土嚢の手前`);
 
   // 決まりごとのソース検査。**コメントを外してから見る**
   // （「呼ぶな」の理由コメントに名前が出ているので、生のまま見ると誤検知する。

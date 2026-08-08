@@ -1357,6 +1357,8 @@ class Game {
       dt,
       yaw: p.yaw,
       pitch: p.pitch,
+      // 通路のどこまで進んだか。移動系の課題は「そこまで行けた」で判定する
+      z: p.collider.start.z,
       speed: p.horizontalSpeed,
       onFloor: p.onFloor,
       sprinting: p.sprinting,
