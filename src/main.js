@@ -15,8 +15,9 @@ import { Director } from './ai/enemy.js';
 import { HUD } from './ui/hud.js';
 import { NetMenu, NET_MSG } from './ui/netmenu.js';
 import { SettingsMenu } from './ui/settings.js';
-import { loadSettings, saveSetting } from './core/settings.js';
+import { loadSettings, saveSetting, loadSavedRung, saveRung } from './core/settings.js';
 import { AutoQuality } from './core/autoquality.js';
+import { MAX_RUNG, rungValues } from './core/gfxrungs.js';
 import { PerfSegments } from './core/perfsegments.js';
 import { VoiceChat, PTT_CODE } from './net/voice.js';
 import { emptyTally, mergeTally, loadStats, saveStats, newlyUnlocked } from './core/stats.js';
@@ -944,7 +945,9 @@ class Game {
       setAuto: (v) => {
         if (v) { this.autoQ.enable(); return; }
         this.autoQ.disable();
-        // 自動で下げていた分は戻す。手で決めたい人の画面に下げ跡を残さない
+        // 自動で下げていた分は戻す。手で決めたい人の画面に下げ跡を残さない。
+        // 覚えていた段も消す（入れ直した時に昔の段から始まらないように）
+        saveRung(0);
         if (this.autoQ.rung !== 0) {
           this.autoQ.rung = 0;
           this._applyRung(0);
@@ -954,10 +957,13 @@ class Game {
     this._gfx = gfx;
 
     /* 自動画質。重い端末では1段ずつ絵を軽くする（時機の判断はautoquality.js、
-       何を下げるかは_applyRung）。手で画質を触った人には手を出さない（下のonChange） */
-    this.autoQ = new AutoQuality();
+       段の中身はgfxrungs.jsの表、配るのは_applyRung）。
+       手で画質を触った人には手を出さない（下のonChange） */
+    this.autoQ = new AutoQuality({ maxRung: MAX_RUNG });
     this.autoQ.onChange = (from, to) => {
       this._applyRung(to);
+      // 落ち着いた段を覚えておく。次の起動はこの段から始める（下の復元）
+      saveRung(to);
       // 下げた時だけ一言出す。上げ直しは黙ってやる（良くなった報告は騒音）
       if (to > from) {
         this.diag?.setState('autoq', 'カクつくので画質を1段下げました（設定からも変えられます）');
@@ -979,10 +985,28 @@ class Game {
       if (key.startsWith('gfx') && key !== 'gfxAuto' && this.autoQ.enabled) {
         this.autoQ.disable();
         this.autoQ.rung = 0;
+        // 覚えていた段も消す。自動を切った人が後で入れ直した時に、
+        // 昔の段から始まると「手で選んだのに勝手に下がっている」に見える
+        saveRung(0);
         this.settings.values.gfxAuto = saveSetting('gfxAuto', false);
         this.settings._refresh();
       }
     };
+
+    /* 前回のセッションで自動画質が落ち着いた段から始める。
+       毎回0（全部入り）から始めると、重い端末は**毎回**遊び始めの数十秒を
+       カクつきながら過ごしてから軽くなる、を繰り返すことになる。
+       上げ直しの仕組み（30秒良ければ1段戻す）が生きているので、
+       前回たまたま重かっただけの日は勝手に戻る。
+       設定の反映（new SettingsMenuのapply）の後に置くこと。
+       先に置くと、設定の適用が段の頭打ちを素の値で上書きする */
+    if (this.settings.values.gfxAuto && this.autoQ.enabled) {
+      const r = clamp(loadSavedRung(), 0, MAX_RUNG);
+      if (r > 0) {
+        this.autoQ.rung = r;
+        this._applyRung(r);
+      }
+    }
     menu.onSettings = () => this.settings.show();
 
     // 戦績の画面はここにあったが消した（2026-08-07、「誰も見ない」）。
@@ -1662,19 +1686,17 @@ class Game {
   }
 
   /**
-   * 自動画質の段を絵へ落とす。段の意味はここが持つ（autoquality.jsは時機だけ）。
-   *   0=全部入り → 1=描画85% → 2=描画70% → 3=接地の陰影オフ →
-   *   4=光のにじみオフ → 5=影ひかえめ
-   * 再コンパイルの要らない物（倍率・パスの入り切り）を先に並べてある。
-   * ユーザーが設定で下げている物より上へは戻さない（必ず低い方へ倒す）
+   * 自動画質の段を絵へ落とす。段の意味はgfxrungs.jsの表が持つ
+   * （autoquality.jsは時機だけ、ここは配るだけ）。
+   * 表の値はユーザーが設定で下げている物より上へは戻さない（必ず低い方へ倒す）
    */
   _applyRung(r) {
-    const v = this.settings?.values || {};
+    const a = rungValues(this.settings?.values, r);
     const gfx = this._gfx;
-    gfx.setRenderScale(Math.min(v.gfxScale ?? 1, r >= 2 ? 0.7 : r >= 1 ? 0.85 : 1));
-    gfx.setAo((v.gfxAo ?? true) && r < 3);
-    gfx.setBloom((v.gfxBloom ?? true) && r < 4);
-    gfx.setShadowQuality(r >= 5 ? '低' : (v.gfxShadow ?? '高'));
+    gfx.setRenderScale(a.scale);
+    gfx.setAo(a.ao);
+    gfx.setBloom(a.bloom);
+    gfx.setShadowQuality(a.shadow);
   }
 
   /**

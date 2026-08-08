@@ -115,5 +115,64 @@ console.log('\n[8] main.jsと表の繋ぎ');
     'どこまで下げたかが/logsの報告に乗る');
 }
 
+console.log('\n[段の表] どの段も、既定の設定に対して実際に何かを削る');
+{
+  /* なぜ見るか: 既定を軽くした時に「既定と同じ内容の段」が空回りになる事故が
+     実際に起きた（既定85%の頃に段1=85%、既定AO切りなのに段3=AO切り。
+     5段のうち2段が何もせず、一番効く段まで最短32秒のうち16秒がただの待ち）。
+     表(gfxrungs.js)と既定(settings.js)は別ファイルなので、
+     片方だけ変えるとまた空回りが生まれる。ここで突き合わせる */
+  const { MAX_RUNG, rungValues } = await import('../src/core/gfxrungs.js');
+  const { loadSettings } = await import('../src/core/settings.js');
+  // 既定の設定＝空のlocalStorageで読んだ値
+  globalThis.localStorage = {
+    getItem: () => null, setItem: () => {}, removeItem: () => {},
+  };
+  const defaults = loadSettings();
+
+  const weight = (a) => JSON.stringify(a);
+  let prev = rungValues(defaults, 0);
+  for (let r = 1; r <= MAX_RUNG; r++) {
+    const cur = rungValues(defaults, r);
+    ok(weight(cur) !== weight(prev), `段${r}は段${r - 1}から何かが変わる（空回りしない）`);
+    // 変わる向きは軽い方だけ。上がる項目が1つでもあると、段が進んだのに重くなる
+    ok(cur.scale <= prev.scale, `段${r}で倍率が上がらない（${prev.scale}→${cur.scale}）`);
+    ok(!(!prev.ao && cur.ao) && !(!prev.bloom && cur.bloom), `段${r}でAO/にじみが点かない`);
+    ok(!(prev.shadow === '低' && cur.shadow !== '低'), `段${r}で影が上がらない`);
+    prev = cur;
+  }
+
+  // 盛っている人（全部入り）の設定でも、段は必ず低い方へ倒れる
+  const rich = { ...defaults, gfxScale: 1, gfxAo: true, gfxBloom: true, gfxShadow: '高' };
+  const r2 = rungValues(rich, 2);
+  ok(r2.scale <= 0.6 && !r2.ao && !r2.bloom, '盛った設定でも段2で倍率0.6・AO/にじみ切り');
+  const r0 = rungValues(rich, 0);
+  ok(r0.scale === 1 && r0.ao && r0.bloom && r0.shadow === '高', '段0は設定どおり');
+}
+
+console.log('\n[段の記憶] 前回落ち着いた段を覚えて、次の起動で使える');
+{
+  const { loadSavedRung, saveRung } = await import('../src/core/settings.js');
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+  };
+  ok(loadSavedRung() === 0, '何も無ければ0（全部入り）');
+  saveRung(3);
+  ok(loadSavedRung() === 3, '書いた段が読める');
+  saveRung(0);
+  ok(loadSavedRung() === 0 && !store.has('blackout.gfx.autorung'), '0は消す（メモを残さない）');
+  store.set('blackout.gfx.autorung', 'でたらめ');
+  ok(loadSavedRung() === 0, '壊れた値は0扱い');
+  // main.js側の繋ぎ込み: 起動時の復元と、段が動いた時の保存
+  const { readFileSync } = await import('node:fs');
+  const mainSrc = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  ok(/loadSavedRung\(\)/.test(mainSrc), '起動時に読んでいる');
+  ok(/gfxAuto && this\.autoQ\.enabled/.test(mainSrc), '自動が入っている時だけ復元する');
+  ok(/saveRung\(to\)/.test(mainSrc), '段が動いた時に書いている');
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);

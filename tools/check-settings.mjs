@@ -166,13 +166,14 @@ console.log('\n[2] 既定のままなら、今までと同じ手触り');
   ok(Math.abs(t2.input.sensitivity - 0.0044) < 1e-9,
     `×2で倍になる（${t2.input.sensitivity}）`);
 
-  /* 画質の既定は「軽め」（2026-08-07に方針変更）。
-     全部盛りの既定にしていたら、M1のMacBookで1人プレイを少し遊んだだけで
-     熱くなった。このゲームは軽さが機能より優先なので、既定は
-     きめ細かさ85%・接地の陰影切り・影は中に倒し、盛りたい人が上げる向きにする */
-  ok(t.gfx.scale === 0.85, `描画のきめ細かさの既定は85%（今 ${t.gfx.scale}）`);
+  /* 画質の既定は「軽め」（2026-08-07に方針変更、2026-08-08にさらに一段）。
+     85%・にじみ入りでも、MacBook Proで1人プレイを10分遊んだら熱くなった。
+     このゲームは軽さが機能より優先なので、既定は
+     きめ細かさ75%・陰影切り・にじみ切り・MSAA切り・影は中に倒し、
+     盛りたい人が設定で上げる向きにする */
+  ok(t.gfx.scale === 0.75, `描画のきめ細かさの既定は75%（今 ${t.gfx.scale}）`);
   ok(t.gfx.ao === false, '接地の陰影の既定は切り（入れると画面を2回描く）');
-  ok(t.gfx.bloom === true, '光のにじみの既定は入り');
+  ok(t.gfx.bloom === false, '光のにじみの既定は切り（画面全体を何度も塗り直すため）');
   ok(t.gfx.shadow === '中', `影のこまやかさの既定は中（今 ${t.gfx.shadow}）`);
 }
 
@@ -423,17 +424,20 @@ console.log('\n[10] 画質の既定は版番号で全員に強制できる');
    「設定を開いて既定に戻すを押して」と全員に頼んで回るのは無理なので、
    版番号を上げたら、次に開いた時に画質の保存値だけ消して新既定へ落とす */
 {
-  // 古い端末を再現: 全部盛りの頃の値が保存されていて、版の印は無い
+  // 古い端末を再現: 全部盛りの頃の値が保存されていて、版の印は無い。
+  // 自動画質が覚えた段も入れておく（既定が変わると段の意味も変わるので消える対象）
   globalThis.localStorage = mkStore();
   localStorage.setItem('blackout.gfx.scale', '1');
   localStorage.setItem('blackout.gfx.ao', '1');
   localStorage.setItem('blackout.gfx.shadow', '高');
+  localStorage.setItem('blackout.gfx.autorung', '3');
   localStorage.setItem('blackout.sens', '1.4');
   forceGfxDefaults();
   const v = loadSettings();
-  ok(v.gfxScale === 0.85 && v.gfxAo === false && v.gfxShadow === '中',
+  ok(v.gfxScale === 0.75 && v.gfxAo === false && v.gfxShadow === '中',
     `古い保存値が消えて新既定になる（${v.gfxScale} / ${v.gfxAo} / ${v.gfxShadow}）`);
   ok(v.sens === 1.4, '感度は人の手触りなので消さない');
+  ok(localStorage.getItem('blackout.gfx.autorung') === null, '自動画質が覚えた段も消える');
   ok(localStorage.getItem('blackout.gfx.resetVer') !== null, '済んだ印が残る');
 
   // リセット後に自分で選び直した値は、次に開いても消えない（版が同じ間は何もしない）
