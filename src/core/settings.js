@@ -118,7 +118,7 @@ export const SETTINGS = [
     store: 'blackout.gfx.scale',
     name: '描画のきめ細かさ',
     kind: 'range',
-    min: 0.5, max: 1, step: 0.05, def: 0.85,
+    min: 0.5, max: 1, step: 0.05, def: 0.75,
     fmt: (v) => `${Math.round(v * 100)}%`,
     hint: '下げると少しぼやける代わりに軽くなります。カクつく時はまずここから',
     apply: (v, t) => { t.gfx?.setRenderScale?.(v); },
@@ -140,8 +140,9 @@ export const SETTINGS = [
     store: 'blackout.gfx.bloom',
     name: '光のにじみ',
     kind: 'check',
-    def: true,
-    hint: '太陽や発砲の光がふわっと広がる効果です。切ると少し軽くなります',
+    def: false,
+    hint: '太陽や発砲の光がふわっと広がる効果です。入れると絵は華やかになりますが、'
+      + '画面全体を何度も塗り直すので発熱がぐっと増えます',
     apply: (v, t) => { t.gfx?.setBloom?.(v); },
   },
   {
@@ -162,9 +163,9 @@ export const SETTINGS = [
     store: 'blackout.gfx.msaa',
     name: 'ふちのギザギザ消し',
     kind: 'check',
-    def: true,
-    hint: '物のふちをなめらかにする処理(MSAA)です。切ると軽くなりますが、'
-      + '開き直してから効きます',
+    def: false,
+    hint: '物のふちをなめらかにする処理(MSAA)です。別のなめらか処理(FXAA)は'
+      + '常に効いているので、切っても縁は破綻しません。入り切りは開き直してから効きます',
     apply: (v, t) => { t.gfx?.setMsaa?.(v); },
   },
 ];
@@ -203,6 +204,24 @@ const remove = (key) => { try { localStorage.removeItem(key); } catch { /* 消�
 /** 端末に覚えさせる形。入り切りは前からある '1' / '0' を使う */
 const encode = (def, v) => (def.kind === 'check' ? (v ? '1' : '0') : String(v));
 
+/* ------------------------------------------ 自動画質の段の記憶 */
+
+/* 自動画質が落ち着いた段。次の起動はこの段から始める（main.jsの復元）。
+   毎回0（全部入り）から始めると、重い端末は毎回カクつく数十秒を過ごしてから
+   軽くなるのを繰り返す。段が動くたびにmain.jsがsaveRung()で書く。
+   設定の表に入れないのは、これが「人が選ぶ物」ではなく機械のメモだから */
+const RUNG_STORE = 'blackout.gfx.autorung';
+
+export function loadSavedRung() {
+  const n = parseInt(read(RUNG_STORE) ?? '', 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+export function saveRung(r) {
+  if ((r | 0) > 0) write(RUNG_STORE, String(r | 0));
+  else remove(RUNG_STORE);
+}
+
 /* ------------------------------------------ 画質の既定の強制リセット */
 
 /* 画質の既定を大きく変えた時に、**保存済みの端末にも1回だけ**新しい既定を効かせる。
@@ -215,11 +234,16 @@ const encode = (def, v) => (def.kind === 'check' ? (v ? '1' : '0') : String(v));
  * 感度・音量・全画面は人の手触りなので触らない。
  * 番号が同じ間は何もしないので、リセット後に自分で選び直した値はそのまま残る */
 const GFX_RESET_STORE = 'blackout.gfx.resetVer';
-const GFX_RESET_VER = '1';   // 上げた記録: 1=2026-08-07 既定を軽め(85%・陰影切り・影中)へ倒した
+// 上げた記録: 1=2026-08-07 既定を軽め(85%・陰影切り・影中)へ倒した
+//             2=2026-08-08 さらに軽く(75%・にじみ切り・MSAA切り)。
+//               MacBook Proで10分遊ぶと熱くなると言われた日。経緯はPR #84
+const GFX_RESET_VER = '2';
 
 export function forceGfxDefaults() {
   if (read(GFX_RESET_STORE) === GFX_RESET_VER) return;
   for (const s of SETTINGS) if (s.key.startsWith('gfx')) remove(s.store);
+  // 自動画質が覚えている段も消す。既定が変わると段の意味も変わる
+  remove(RUNG_STORE);
   write(GFX_RESET_STORE, GFX_RESET_VER);
 }
 // 読み込まれた時に1回走る。loadSettings()より前に済ませたいのでここで呼ぶ
