@@ -223,7 +223,9 @@ console.log('\n[8] 撃つたびに端末へ書かない');
   // saveStats を直に呼ぶのは流し込みの1箇所だけ
   const saves = (main.match(/saveStats\(/g) || []).length;
   ok(saves === 1, `書き出しは1箇所だけ（${saves}箇所）`);
-  ok(/_flushStats\(\)\s*\{[\s\S]{0,400}?saveStats\(/.test(main),
+  // 窓は800字。_flushStatsの頭に重さの報告（_reportPerf）とその理由コメントが
+  // 入った（2026-08-08）ので、400では先頭からsaveStatsまで届かなくなった
+  ok(/_flushStats\(\)\s*\{[\s\S]{0,800}?saveStats\(/.test(main),
     'その1箇所が _flushStats の中にある');
 
   // 流し込む区切りが揃っているか。どれか1つ抜けると、その道で抜けた回だけ記録が消える
