@@ -1738,10 +1738,16 @@ class Game {
             }
           }
         } else if (this.director) {
-          // 死体は片付くまでactiveに残る（enemy.jsの_retireCorpse参照）ので、
-          // ここを回れば生きている敵も死体も全部数えたことになる
+          /* 数えるのは**落ち着いた死体だけ**。
+             生きている敵は13mの外でcastShadowを切ってある（enemy.jsの_liveShadow）ので、
+             遠い枚には写らない＝動いても焼き直す理由にならない。ここで数えると
+             「写りもしない敵が歩くたびに500枚超を焼き直す」が復活する（実際そうなっていた）。
+             倒れている最中(3秒)の死体も写らない（settledになった瞬間に指紋が変わって
+             1回だけ焼かれる）。片付けられた死体(root.visible=false)は姿が消えた側なので、
+             数えから外して指紋を変える＝そこでも1回焼いて影を消す */
           for (const e of this.director.active) {
-            g.add(e.root.position.x, e.root.position.z, !e.alive && e.deathSettled);
+            if (e.alive || !e.deathSettled || !e.root.visible) continue;
+            g.add(e.root.position.x, e.root.position.z, true);
           }
         }
         if (g.end()) c.light.shadow.needsUpdate = true;
