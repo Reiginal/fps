@@ -1488,6 +1488,12 @@ export function createComposer(renderer, scene, camera, viewScene, viewCamera, {
   };
   focus.setSize(size.x, size.y);
   composer.addPass(focus);
+  /* 今は止めてある。この出力(tFocus)を読むのは grade/sharpen の
+     「uAds * uDofStrength > 0.002」の分岐の中だけで、uDofStrengthを
+     0以外にする場所がどこにも無い＝世界側の被写界深度は今は使っていない。
+     誰も読まない1x1を毎フレーム描き続ける意味は無いので寝かせておく。
+     **世界側のDOFを使い始める時は、この行を外すこと**（仕組みは全部生きている） */
+  focus.enabled = false;
 
   /* ------------------------------------------------------------ ブルーム */
 
