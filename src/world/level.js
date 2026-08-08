@@ -978,8 +978,19 @@ export function buildLevel(mats, { lamps = true } = {}) {
     fxEmit(g, mat, x, y, z, ry, 0, 0, tint);
   };
   // 壁の根本の泥はね。長い壁は板を割って貼る（引き伸ばすと1枚の帯に見える）
-  const grimeBase = (x, z, ry, len, h = 1.0, tint = 1) => {
+  const grimeBase = (x, z, ry, len, h = 1.0, tint = 1, gap = null) => {
     const dirX = Math.cos(ry), dirZ = -Math.sin(ry);
+    // 扉のために基礎の段差を切り欠いた所。板を通しで貼ると、段差が無くなった
+    // 開口のど真ん中に泥の板だけが宙に浮いて残る。切り欠きの左右へ分けて貼る
+    if (gap) {
+      const s = gap.u - gap.w / 2, e = gap.u + gap.w / 2;
+      for (const [a, b] of [[-len / 2, s], [e, len / 2]]) {
+        if (b - a < 0.5) continue;
+        const u = (a + b) / 2;
+        grimeBase(x + dirX * u, z + dirZ * u, ry, b - a, h, tint);
+      }
+      return;
+    }
     const n = Math.max(1, Math.round(len / 3.8));
     const seg = len / n;
     for (let i = 0; i < n; i++) {
@@ -989,12 +1000,18 @@ export function buildLevel(mats, { lamps = true } = {}) {
         x + dirX * u, h * (0.72 + hv * 0.62), z + dirZ * u, ry, tint);
     }
   };
-  // 建物の4辺の根本へまとめて。wは東西、dは南北の外寸
-  const grimeRing = (cx, cz, w, d, h = 1.0) => {
-    grimeBase(cx, cz + d / 2, 0, w, h);
-    grimeBase(cx, cz - d / 2, Math.PI, w, h);
-    grimeBase(cx + w / 2, cz, Math.PI / 2, d, h);
-    grimeBase(cx - w / 2, cz, -Math.PI / 2, d, h);
+  // 建物の4辺の根本へまとめて。wは東西、dは南北の外寸。
+  // doorsはbandと同じ書き方で渡す（切り欠いた所に泥の板を残さないため）。
+  // 4辺のうちz-とx+はuの向きがbandと逆に走るので、ここで符号を合わせる
+  const grimeRing = (cx, cz, w, d, h = 1.0, doors = []) => {
+    const gapOf = (side, flip) => {
+      const o = doors.find((q) => q.side === side);
+      return o ? { u: flip ? -o.u : o.u, w: o.w } : null;
+    };
+    grimeBase(cx, cz + d / 2, 0, w, h, 1, gapOf('z+', false));
+    grimeBase(cx, cz - d / 2, Math.PI, w, h, 1, gapOf('z-', true));
+    grimeBase(cx + w / 2, cz, Math.PI / 2, d, h, 1, gapOf('x+', true));
+    grimeBase(cx - w / 2, cz, -Math.PI / 2, d, h, 1, gapOf('x-', false));
   };
   // ボルト・溶接部から下へ落ちる錆垂れ
   const rustRun = (x, yTop, z, ry, w = 0.30, h = 1.1, tint = 1) =>
@@ -1025,12 +1042,34 @@ export function buildLevel(mats, { lamps = true } = {}) {
     emit(makeBox(w, h, d, texScale), mat, x, yC, z, ry, rx, rz, solid);
 
   // 外周だけを囲む帯。基礎の段差・モールディング・蛇腹に使う。
-  // 中身の詰まった箱で作ると建物の内側が埋まって入れなくなる
-  const band = (w, d, h, t, mat, cx, yBottom, cz, texScale = 2.0) => {
-    box(w, h, t, mat, cx, yBottom, cz - d / 2 + t / 2, 0, texScale);
-    box(w, h, t, mat, cx, yBottom, cz + d / 2 - t / 2, 0, texScale);
-    box(t, h, d - t * 2, mat, cx - w / 2 + t / 2, yBottom, cz, 0, texScale);
-    box(t, h, d - t * 2, mat, cx + w / 2 - t / 2, yBottom, cz, 0, texScale);
+  // 中身の詰まった箱で作ると建物の内側が埋まって入れなくなる。
+  //
+  // doorsは帯を切り欠く所。**基礎の段差が入口を横切ると、床まで開いているはずの
+  // 扉の前に腰の高さのコンクリートが通しで残る。** 建物Bはこれで
+  // 「屋根の崩落跡から落ちたら二度と出られない部屋」になっていた。
+  // 段差の天端は1.15mで、跳べる高さ(0.99m)より上。立ったまま跳ぶと
+  // まぐさ(2.9m)に頭がつかえて乗り越えの補助も効かないので、
+  // しゃがみ跳びを知らないと本当に出られない。
+  //
+  // sideは 'z-' 'z+' が東西へ走る辺、'x-' 'x+' が南北へ走る辺。
+  // uは辺の中心からの位置で、z辺は+X向き・x辺は+Z向きに測る
+  // （開口をuで指定するwallRunと同じ場所を指せるようにするため）
+  const band = (w, d, h, t, mat, cx, yBottom, cz, texScale = 2.0, doors = []) => {
+    const run = (side, len, place) => {
+      const cuts = doors.filter((o) => o.side === side)
+        .map((o) => [clamp(o.u - o.w / 2, -len / 2, len / 2), clamp(o.u + o.w / 2, -len / 2, len / 2)])
+        .sort((a, b) => a[0] - b[0]);
+      let cursor = -len / 2;
+      for (const [s, e] of cuts) {
+        if (s - cursor > 0.02) place((cursor + s) / 2, s - cursor);
+        cursor = Math.max(cursor, e);
+      }
+      if (len / 2 - cursor > 0.02) place((cursor + len / 2) / 2, len / 2 - cursor);
+    };
+    run('z-', w, (u, l) => box(l, h, t, mat, cx + u, yBottom, cz - d / 2 + t / 2, 0, texScale));
+    run('z+', w, (u, l) => box(l, h, t, mat, cx + u, yBottom, cz + d / 2 - t / 2, 0, texScale));
+    run('x-', d - t * 2, (u, l) => box(t, h, l, mat, cx - w / 2 + t / 2, yBottom, cz + u, 0, texScale));
+    run('x+', d - t * 2, (u, l) => box(t, h, l, mat, cx + w / 2 - t / 2, yBottom, cz + u, 0, texScale));
   };
 
   // 建物の出隅の面取り。直角の角は稜線にハイライトが1本も走らないので、
@@ -1072,14 +1111,42 @@ export function buildLevel(mats, { lamps = true } = {}) {
       box(w, y1 - y0, t, mat, cx + dirX * u, yBase + y0, cz + dirZ * u, ry, texScale);
     };
     const list = holes.slice().sort((a, b) => a.u - b.u);
-    let cursor = -len / 2;
+
+    /* 壁を積む。開口の左右の端を全部並べて、その間の細長い区画ごとに
+       「かかっている開口の高さを抜いた残り」へ壁を入れる。
+
+       前は「前の開口の右端から次の開口の左端まで」と順に積んでいた。
+       開口どうしが横に重ならない限りこれで同じ形になるが、
+       **重なると後の開口の腰壁が先の開口を塗り潰す。**
+       建物Bの西の入口(u=0 幅3.0 床から2.9m)は、真上に足した高窓
+       (u=0 幅2.0 3.7〜5.0m)の腰壁(0〜3.7m)で完全に塞がっていた。
+       扉が絵だけになっていたので、屋根の崩落跡から中へ落ちると出られなかった */
+    const cuts = [-len / 2, len / 2];
+    for (const ho of list) {
+      cuts.push(clamp(ho.u - ho.w / 2, -len / 2, len / 2));
+      cuts.push(clamp(ho.u + ho.w / 2, -len / 2, len / 2));
+    }
+    cuts.sort((a, b) => a - b);
+    for (let i = 0; i < cuts.length - 1; i++) {
+      const u0 = cuts[i], u1 = cuts[i + 1];
+      if (u1 - u0 <= 0.02) continue;
+      const mid = (u0 + u1) / 2;
+      const spans = list
+        .filter((ho) => ho.u - ho.w / 2 < mid && ho.u + ho.w / 2 > mid)
+        .map((ho) => [ho.y0, ho.y1])
+        .sort((a, b) => a[0] - b[0]);
+      let y = 0;
+      for (const [y0, y1] of spans) {
+        if (y0 > y) seg(u0, u1, y, y0);
+        y = Math.max(y, y1);
+      }
+      seg(u0, u1, y, h);
+    }
+
+    /* 開口まわりの造作。見切り・建具はこちらで開口ごとに足す */
     for (const ho of list) {
       const s = clamp(ho.u - ho.w / 2, -len / 2, len / 2);
       const e = clamp(ho.u + ho.w / 2, -len / 2, len / 2);
-      seg(cursor, s, 0, h);
-      seg(s, e, 0, ho.y0);
-      seg(s, e, ho.y1, h);
-      cursor = Math.max(cursor, e);
       // 窓台とまぐさの見切り。厚みが1段出るだけで開口が「穴」から「窓」になる
       if (ho.trim !== false && ho.y1 - ho.y0 > 0.05) {
         const u = (s + e) / 2;
@@ -1136,7 +1203,6 @@ export function buildLevel(mats, { lamps = true } = {}) {
         }
       }
     }
-    seg(cursor, len / 2, 0, h);
   };
 
   /* -------------------------------------------------- 斜路・階段・板 */
@@ -2099,8 +2165,11 @@ export function buildLevel(mats, { lamps = true } = {}) {
   // 元の斜路は屋上のパラペットに阻まれて登れなかったので階段に置き換えた
   {
     const cx = -21, cz = -20, w = 17, d = 14, h = 6.5, t = 0.55;
-    band(w + 0.9, d + 0.9, 0.5, 1.2, M.concrete, cx, 0, cz, 2.5);    // 基礎の段差
-    band(w + 0.4, d + 0.4, 0.65, 0.9, M.brick, cx, 0.5, cz, 2.0);    // 腰のレンガ
+    // 南面の正面入口（下のwallRunの u=0 / 幅3.0）はここで切り欠く。
+    // 切らないと基礎の段差と腰壁が入口を横切って、扉が飾りになる
+    const doors = [{ side: 'z+', u: 0, w: 3.0 }];
+    band(w + 0.9, d + 0.9, 0.5, 1.2, M.concrete, cx, 0, cz, 2.5, doors);    // 基礎の段差
+    band(w + 0.4, d + 0.4, 0.65, 0.9, M.brick, cx, 0.5, cz, 2.0, doors);    // 腰のレンガ
     // 南面（正面）
     wallRun(M.plaster, cx, cz + d / 2, 0, w, h, t, [
       { u: 0, w: 3.0, y0: 0, y1: 2.9 },
@@ -2215,8 +2284,11 @@ export function buildLevel(mats, { lamps = true } = {}) {
   /* -------------------------------------- 建物B（南東・レンガの詰所） */
   {
     const cx = 23, cz = 21, w = 15, d = 15, h = 5.5, t = 0.55;
-    band(w + 0.9, d + 0.9, 0.5, 1.2, M.concrete, cx, 0, cz, 2.5);
-    band(w + 0.4, d + 0.4, 0.65, 0.9, M.concrete, cx, 0.5, cz, 2.0);
+    // 西面の入口（下のwallRunの u=0 / 幅3.0）を切り欠く。
+    // ここが塞がっていたせいで、屋根の崩落跡から落ちると出られなかった
+    const doors = [{ side: 'x-', u: 0, w: 3.0 }];
+    band(w + 0.9, d + 0.9, 0.5, 1.2, M.concrete, cx, 0, cz, 2.5, doors);
+    band(w + 0.4, d + 0.4, 0.65, 0.9, M.concrete, cx, 0.5, cz, 2.0, doors);
     wallRun(M.brick, cx - w / 2, cz, Math.PI / 2, d, h, t, [
       { u: 0, w: 3.0, y0: 0, y1: 2.9 },
       { u: -5.0, w: 1.7, y0: 1.2, y1: 2.7 },
@@ -3654,8 +3726,10 @@ export function buildLevel(mats, { lamps = true } = {}) {
     // (3) 壁と地面の接線。跳ね返った泥は必ず下端に溜まる
     // 建物は基礎の段差(高さ0.5前後)から上で面が0.25引っ込むので、
     // 泥はねの板はその基礎の高さに収める。はみ出すと板が壁から浮く
-    grimeRing(-21, -20, 17.9, 14.9, 0.55);
-    grimeRing(23, 21, 15.9, 15.9, 0.55);
+    // 入口は基礎の段差を切り欠いてあるので、泥はねの板もそこだけ空ける
+    // （建物を組んでいる所のdoorsと同じ位置・同じ幅）
+    grimeRing(-21, -20, 17.9, 14.9, 0.55, [{ side: 'z+', u: 0, w: 3.0 }]);
+    grimeRing(23, 21, 15.9, 15.9, 0.55, [{ side: 'x-', u: 0, w: 3.0 }]);
     grimeRing(24, -25, 23.0, 14.0, 0.50);
     grimeRing(0, 0, 15.0, 14.0, 0.85);   // 掩体は基礎が無く壁が直に地面へ落ちる
     // 外周壁も基礎の段差が0.25手前に出ているので、その面へ貼る。
