@@ -37,12 +37,15 @@ export class NetMenu {
       root: $('netmenu'),
       name: $('nmName'),
       status: $('nmStatus'), solo: $('nmSolo'), join: $('nmJoin'),
+      tutorial: $('nmTutorial'),
       settings: $('nmSettings'), quit: $('nmQuit'),
     };
 
     // 統合側が差し替える。初期値を空関数にしておくと、繋ぎ忘れても画面が落ちない
     this.onSolo = () => {};
     this.onJoin = () => {};
+    // FPSが初めての人向けの練習場を開く口
+    this.onTutorial = () => {};
     // 設定を開く口。画面そのものは src/ui/settings.js が持っている
     this.onSettings = () => {};
     // 戦績を開く口はここにあったが、画面ごと消した（「誰も見ない」）
@@ -62,6 +65,11 @@ export class NetMenu {
       if (this.busy) return;
       this._store();
       this.onSolo();
+    };
+    this.el.tutorial.onclick = () => {
+      if (this.busy) return;
+      this._store();
+      this.onTutorial();
     };
     this.el.join.onclick = () => this._join();
 
@@ -104,6 +112,8 @@ export class NetMenu {
     this.el.root.classList.toggle('busy', this.busy);
     this.el.solo.disabled = this.busy;
     this.el.join.disabled = this.busy;
+    // ここに書き忘れると、対戦の接続中にチュートリアルへ入れてしまう
+    this.el.tutorial.disabled = this.busy;
   }
 
   /* ------------------------------------------------------------ 中身 */

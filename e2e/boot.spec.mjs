@@ -48,7 +48,7 @@ test('開いてホーム画面まで来て、画面でエラーが出ていな�
   // 戦績ボタン(nmStats)を消した時、ここが古いままでデプロイが止まった
   // （e2eはデプロイ直前にしか走らないので、手元のcheckでは気づけなかった）
   await expect(page.locator('#netmenu')).toBeVisible();
-  for (const id of ['nmName', 'nmJoin', 'nmSolo', 'nmSettings', 'nmQuit']) {
+  for (const id of ['nmName', 'nmJoin', 'nmSolo', 'nmSettings', 'nmQuit', 'nmTutorial']) {
     await expect(page.locator(`#${id}`), `${id} が出ていない`).toBeVisible();
   }
 

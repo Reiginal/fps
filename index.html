@@ -196,6 +196,9 @@
      同じ画面に意味の違う数字を2つ置くと どちらが勝敗かが読めなくなる */
   #hud.versus #scoreBox { display: none; }
   #hud.versus #matchBox { display: block; }
+  /* チュートリアル中は波・得点・地図を出さない。課題に集中してもらう画面なので、
+     読めない数字が並んでいるだけで未経験者には圧になる */
+  #hud.tutorial #waveBox, #hud.tutorial #scoreBox, #hud.tutorial #minimap { display: none; }
   #matchScore {
     font-size: 46px; font-weight: 600; line-height: 1;
     letter-spacing: .1em;
@@ -363,6 +366,21 @@
   #specHint { font-size: 11px; letter-spacing: .16em; margin-top: 6px; color: #68727e; }
   #specHint.hidden { display: none; }
 
+  /* ------------------------------------------- チュートリアルの課題 */
+  /* クロスヘアの下・観戦の札(bottom 13%)より上。
+     未経験者が一番よく見る場所は画面の真ん中なので、視線の少し下に置く */
+  #tutorial {
+    position: absolute; left: 50%; bottom: 20%;
+    transform: translateX(-50%);
+    text-align: center;
+    text-shadow: 0 2px 18px rgba(0,0,0,.9);
+    pointer-events: none;
+    max-width: 80vw;
+  }
+  #tutorial.hidden { display: none; }
+  #tutMain { font-size: 16px; letter-spacing: .14em; color: var(--accent); }
+  #tutSub { font-size: 12px; letter-spacing: .12em; margin-top: 7px; color: var(--hud); }
+
   /* --------------------------------------------------- オーバーレイ */
   #overlay {
     display: flex; align-items: center; justify-content: center;
@@ -484,6 +502,8 @@
   .netbtn:hover { background: rgba(255,255,255,.07); }
   .netbtn.main { border-color: var(--accent); color: var(--accent); background: rgba(99,210,255,.08); }
   .netbtn.main:hover { background: rgba(99,210,255,.16); }
+  /* チュートリアルの行。下の4個の行と間を空ける */
+  .netbtns.tutrow { margin-bottom: 10px; }
   /* 接続中に連打されると同じ部屋へ何本も繋ぎにいく */
   #netmenu.busy .netbtn { opacity: .35; cursor: default; pointer-events: none; }
 
@@ -901,6 +921,12 @@
     <div id="specHint">クリックで次の人</div>
   </div>
 
+  <!-- チュートリアルの課題。今なにをすればいいかを常に出しておく -->
+  <div id="tutorial" class="hidden">
+    <div id="tutMain"></div>
+    <div id="tutSub"></div>
+  </div>
+
   <div id="elim">
     <div id="elimMark"><i></i><i></i></div>
     <div id="elimBody">
@@ -1045,6 +1071,11 @@
 
     <div id="nmStatus"></div>
 
+    <!-- チュートリアルだけ別の行。既存の行は4個でぎりぎりの幅なので、
+         5個目を同じ行へ入れると全員のボタンが潰れる -->
+    <div class="netbtns tutrow">
+      <button id="nmTutorial" class="netbtn" type="button">はじめての人へ — チュートリアル</button>
+    </div>
     <div class="netbtns">
       <button id="nmQuit" class="netbtn" type="button">終了</button>
       <button id="nmSettings" class="netbtn" type="button">設定</button>

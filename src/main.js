@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import { buildMaterials, createSky, skyFogColor, installAerialPerspective } from './world/textures.js';
 import { currentTimeOfDay } from './world/sun.js';
 import { buildLevel } from './world/level.js';
+import { buildTutorialLevel } from './world/tutorial-level.js';
+import { TutorialMachine } from './core/tutorial.js';
 import { Effects } from './world/effects.js';
 import { Input } from './core/input.js';
 import { AudioEngine } from './core/audio.js';
@@ -13,7 +15,7 @@ import {
 import { Capsule } from 'three/addons/math/Capsule.js';
 import { Player } from './player/player.js';
 import { WeaponSystem } from './player/weapons.js';
-import { Director } from './ai/enemy.js';
+import { Director, Enemy } from './ai/enemy.js';
 import { HUD } from './ui/hud.js';
 import { NetMenu, NET_MSG } from './ui/netmenu.js';
 import { SettingsMenu } from './ui/settings.js';
@@ -525,6 +527,11 @@ class Game {
     /* 観戦カメラ（対戦で倒れている間）。今どの人の肩越しに居るか。
        deathcam側へ渡す壁当たりの受け口はここで1つ作って使い回す
        （毎フレーム関数を作ると、そのぶんゴミが出る） */
+    /* チュートリアル（詳しくは_enterTutorial）。tutorialが真の間は
+       波が湧かない・戦績に混ざらない・倒れない。
+       _shootablesは射撃と爆風の当たり先の差し替え口で、普段はnull＝本編の敵 */
+    this.tutorial = false;
+    this._shootables = null;
     this._specId = null;
     this._specRay = (from, dir, maxDist) => {
       _specFrom.set(from.x, from.y, from.z);
@@ -792,6 +799,9 @@ class Game {
     const level = buildLevel(mats, { lamps: savedGfx.gfxShadow !== '低' });
     scene.add(level.root);
     this.level = level;
+    // 本編の地形を控えておく。チュートリアルの小ステージと行き来する時、
+    // 「今どっちに居るか」はthis.levelが持ち、戻り先はこれが持つ（_setWorld参照）
+    this._mainLevel = level;
     // 射線判定用。当たり判定専用の見えない床は除き、見えている面だけを対象にする
     this.solidMeshes = [];
     level.root.traverse((o) => { if (o.isMesh && o.visible) this.solidMeshes.push(o); });
@@ -839,6 +849,9 @@ class Game {
     this.player.onLand = (i) => this.audio.land(Math.min(1, i * 1.4), this._footSurface());
     this.weapons.onShot = (s) => this._resolveShot(s);
     this.weapons.onThrow = () => this._throwNade();
+    // 包帯を巻き終えた瞬間。チュートリアルの課題「巻く」の判定にだけ使う
+    // （本編では未使用の口。player.js側が呼んでくれる）
+    this.player.onHealDone = () => { if (this.tutorial) this._tutFlags.healed = true; };
     this.weapons.onEject = (pos, dir) => this.effects.ejectCasing(pos, dir, camera);
     this.effects.onCasingLand = (pos) => this.audio.click(4200, 0.16, 0.05, pos, camera);
     this.director.onEnemyShoot = (...a) => this._enemyShot(...a);
@@ -1106,6 +1119,15 @@ class Game {
       // 選んだ直後にロックを取らないと、画面が固まったように見える
       this.input.requestLock();
     };
+    menu.onTutorial = () => {
+      this._wakeAudio();
+      this.diag.name = menu.playerName || '';
+      // 別の文言で送る。未経験の人がどこまで辿り着けたかを/logsで追えるように
+      this.diag.event('チュートリアルを始めた');
+      this._enterTutorial();
+      menu.hide();
+      this.input.requestLock();
+    };
     menu.onJoin = (opt) => {
       this._wakeAudio();
       // ここで全画面に入っておく。
@@ -1174,6 +1196,8 @@ class Game {
   }
 
   _enterSolo() {
+    // チュートリアルから来た時は先に世界を戻す（何度呼んでも無害な作り）
+    this._leaveTutorial();
     this.mode = 'solo';
     this.hud.setMode('solo');
     this.director.reset();
@@ -1181,7 +1205,189 @@ class Game {
     this._restart();
   }
 
+  /* -------------------------------------------------- チュートリアル */
+
+  /**
+   * ステージの参照を差し替える。本編と小ステージはどちらもsceneに居て、
+   * visibleの入り切りで見せ替える（作り直すより速く、切り替えで何も漏れない）。
+   *
+   * **ここに並んでいるのが「地形を見ている参照」の全リスト。**
+   * どれか1つでも差し替え忘れると、見えないのに当たる・当たるのに見えない、
+   * のような追いにくい壊れ方をする（調査で洗い出した6点）
+   */
+  _setWorld(level) {
+    if (this.level?.root) this.level.root.visible = false;
+    level.root.visible = true;
+    this.level = level;                          // 射線・手榴弾・湧き位置
+    this.player.octree = level.octree;           // 足元の衝突
+    this.player.bounds = level.bounds;           // 場外へ出さない壁
+    this.effects.octree = level.octree;          // 薬莢の跳ね
+    this.effects.debris.octree = level.octree;   // 破片の跳ね
+    this.effects.sparks.octree = level.octree;   // 火花の跳ね
+    this.director.level = level;                 // 敵の落下リセット
+    // 射線の材質引き当て（火花の種類・着弾音）。見えている面だけを対象にする
+    this.solidMeshes.length = 0;
+    level.root.traverse((o) => { if (o.isMesh && o.visible) this.solidMeshes.push(o); });
+  }
+
+  _enterTutorial() {
+    this.tutorial = true;
+    // modeは'solo'のまま。'tutorial'という第3のmodeを作ると、
+    // mode判定が8箇所に散っているこのファイルの挙動が黙って変わる
+    this.mode = 'solo';
+    this.hud.setMode('solo');
+    this.hud.setTutorial(true);
+    // 小ステージは初回だけ組む（開かないセッションでは1バイトも払わない）。
+    // 材質は本編と同じインスタンスなのでテクスチャの追加コストは無い
+    if (!this._tutLevel) {
+      this._tutLevel = buildTutorialLevel(this.mats);
+      this.scene.add(this._tutLevel.root);
+    }
+    this._setWorld(this._tutLevel);
+    this.director.reset();
+    this.effects.clear();
+    this._restart();   // teleport先はthis.level.playerSpawnなので差し替えの後に呼ぶ
+    // 敵の波は永久に起こさない。_restart()の中のdirector.reset()が
+    // betweenWavesを2.0へ戻すので、必ずこの順で上書きする
+    this.director.betweenWaves = Infinity;
+    // 進行係。武器の番号は「持ち物の並び」から渡す（1=ライフル、2=ピストル）
+    this._tutMachine ??= new TutorialMachine({
+      rifleIndex: this.weapons.carry[0],
+      pistolIndex: this.weapons.carry[1],
+    });
+    this._tutMachine.reset();
+    this._tutFlags = { threw: false, healed: false };
+    this._tutKills = 0;
+    this._spawnTutorialTargets();
+  }
+
+  /** 的を置く。位置は小ステージのenemySpawns（射撃レーンの3点） */
+  _spawnTutorialTargets() {
+    this._tutTargets ??= [];
+    const spots = this._tutLevel.enemySpawns;
+    while (this._tutTargets.length < spots.length) {
+      // Enemyはsceneを知らない（Directorが姿を足す係）。ここでは自分で足す
+      const e = new Enemy(this._tutLevel);
+      this.scene.add(e.root);
+      this.scene.add(e.blob);
+      e.onDeath = (en) => {
+        // 本編の_onKillは使わない。得点・実績・通算戦績が絡むうえ、
+        // ここで欲しいのは「倒せた」の手応えだけ
+        this._tutKills++;
+        this.effects.bloodPool(en.collider.start);
+        this.audio.kill(false);
+        this.hud.kill('的を撃破', false);
+      };
+      this._tutTargets.push(e);
+    }
+    for (let i = 0; i < spots.length; i++) {
+      this._placeTarget(this._tutTargets[i], spots[i]);
+      this._tutTargets[i]._spot = spots[i];
+    }
+    // 射撃判定と爆風の当たり先を的に向ける（_resolveShotと_explodeSolo参照）
+    this._shootables = this._tutTargets;
+  }
+
+  /**
+   * 的を立たせる。**update()は呼ばない前提の置き方。**
+   * 呼ばない敵は完全に静止する（歩きも索敵も0コスト）が、
+   * そのぶんspawn()が任せていた配置を自分でやる必要がある:
+   * root（見た目）はupdateの中で置かれるので手で置き、
+   * 接地の暗がり(blob)も_updateContact()で足元へ持ってくる
+   */
+  _placeTarget(e, pos) {
+    e.spawn(pos);
+    e.standDown();          // spawnは追跡状態で立たせるので、棒立ちへ戻す
+    e.root.position.set(pos.x, pos.y, pos.z);
+    // プレイヤー側(+Z)を向かせる。向き0は-Z向きなので半回転
+    e.aimYaw = e.lowerYaw = e.facing = Math.PI;
+    e.root.rotation.y = Math.PI;
+    e._updateContact();
+    e._respawnT = 0;
+  }
+
+  /** チュートリアルの後片付け。何度呼んでも無害（入っていなければ何もしない） */
+  _leaveTutorial() {
+    if (!this.tutorial) return;
+    this.tutorial = false;
+    this.hud.setTutorial(false);
+    this.hud.tutorial(null);
+    this._shootables = null;
+    for (const t of this._tutTargets ?? []) {
+      t.alive = false;
+      t.root.visible = false;
+      t.blob.visible = false;
+    }
+    this._setWorld(this._mainLevel);
+  }
+
+  /**
+   * 修了。全課題を終えた瞬間に呼ばれる。
+   * **stateを先に'paused'へ立ててから掴みを離す。** 逆にすると、
+   * 掴みが外れた合図(onLockChange)が「遊んでいる最中の中断」と解釈して
+   * 一時停止画面を出し、この修了画面を上書きしてしまう
+   */
+  _finishTutorial() {
+    this.diag?.event('チュートリアルを終えた');
+    this.state = 'paused';
+    document.exitPointerLock?.();
+    this.weapons?.cancelThrowHold();
+    this.hud.show(false);
+    this._pauseOverlay(`
+      <div class="title">修了</div>
+      <div class="subtitle">基本操作はぜんぶ使えた</div>
+      <div class="stats">撃った <b>${this.shotsFired}</b>発 ・ 倒した <b>${this._tutKills}</b>体</div>
+      <div class="cta">クリックで自由練習（的は何度でも起き上がる）</div>
+      <div><button id="ovHome" class="ovhome" type="button">ホームへ戻る</button></div>
+    `);
+  }
+
+  /** 毎フレーム（ソロのループから）。課題の判定と的の面倒だけ */
+  _tutorialFrame(dt) {
+    // 死んだ的だけ動かして倒れ演出を進める。倒れ切ったら少し置いて起き上がる
+    // （的が尽きて課題が詰む、を作らない）
+    for (const t of this._tutTargets) {
+      if (t.alive) continue;
+      if (!t.deathSettled) t.update(dt, this.player, { octree: this.level.octree });
+      else if ((t._respawnT += dt) > 2.5) this._placeTarget(t, t._spot);
+    }
+    const w = this.weapons;
+    const p = this.player;
+    const res = this._tutMachine.update({
+      dt,
+      yaw: p.yaw,
+      pitch: p.pitch,
+      speed: p.horizontalSpeed,
+      onFloor: p.onFloor,
+      sprinting: p.sprinting,
+      crouching: p.crouching,
+      shots: this.shotsFired,
+      kills: this._tutKills,
+      adsFactor: w.adsFactor,
+      reloading: w.reloading,
+      weaponIndex: w.index,
+      threw: this._tutFlags.threw,
+      healed: this._tutFlags.healed,
+    });
+    this._tutFlags.threw = false;
+    this._tutFlags.healed = false;
+    if (res === 'advance') {
+      this.hud.banner('達成', '', 1.2);
+      this.audio.click(1400, 0.35, 0.2);
+      const s = this._tutMachine.step;
+      if (!s) { this._finishTutorial(); return; }
+      // 包帯の課題は、体力が満タンだと巻き始め自体を断られる(startHeal)。
+      // 課題に入る時に少し削っておく（チュートリアル中は死なないので安全）
+      if (s.id === 'heal') this.player.health = Math.min(this.player.health, 55);
+    }
+    const l = this._tutMachine.done
+      ? { main: '自由練習', sub: 'ESCを押して「ホームへ戻る」で終了' }
+      : this._tutMachine.label();
+    this.hud.tutorial(l.main, l.sub);
+  }
+
   async _joinMatch({ url, name }) {
+    this._leaveTutorial();
     // 切れた時に自分で入り直せるよう、入った先を覚えておく。
     // 覚えないと、繋ぎ先を作るのが選択画面の中にあるので手が届かない
     this._lastJoin = { url };
@@ -1446,7 +1652,11 @@ class Game {
           this.hud.show(true);
           // 対戦の湧きと得点はサーバーが持っている。ここで波を起こすと
           // 対戦の最中にAIの敵が湧いてくる
-          if (this.mode === 'solo' && this.director.wave === 0) this.director.betweenWaves = 1.5;
+          // チュートリアルには波を起こさない。この行は一時停止からの復帰でも
+          // 通るので、ここのガードを忘れると「ESCを押して戻ったら敵が湧く」になる
+          if (this.mode === 'solo' && !this.tutorial && this.director.wave === 0) {
+            this.director.betweenWaves = 1.5;
+          }
         }
       } else if (this.state === 'playing') {
         this.state = 'paused';
@@ -1475,6 +1685,20 @@ class Game {
           回線 <b>${Math.round(this.net?.ping || 0)}</b>ms
         </div>
         <div class="cta">クリックで復帰</div>
+        <div>
+          <button id="ovSettings" class="ovhome" type="button">設定</button>
+          <button id="ovHome" class="ovhome" type="button">ホームへ戻る</button>
+        </div>
+      `);
+      return;
+    }
+    if (this.tutorial) {
+      // チュートリアルにはスコアも波も無い。数字を並べると未経験者には
+      // 「何か悪いことをしたのか」に見えるので、出すのは戻り方だけ
+      this._pauseOverlay(`
+        <div class="title">一時停止</div>
+        <div class="subtitle">チュートリアル</div>
+        <div class="cta">クリックで再開</div>
         <div>
           <button id="ovSettings" class="ovhome" type="button">設定</button>
           <button id="ovHome" class="ovhome" type="button">ホームへ戻る</button>
@@ -1538,6 +1762,8 @@ class Game {
       this._quitMatch();
       return;
     }
+    // チュートリアルから戻る時は世界と的を片付ける（入っていなければ何もしない）
+    this._leaveTutorial();
     this._flushStats();
     this.hud.show(false);
     this.hud.hideOverlay();
@@ -1550,11 +1776,17 @@ class Game {
 
   /** 今回ぶんを1つ数える。**ここでは書き出さない**（区切りでまとめて流す） */
   _tally(key, n = 1) {
+    /* チュートリアルの分は通算に混ぜない。呼び出しは9箇所に散っているので、
+       それぞれをガードすると新しい呼び出しを足した時に必ず漏れる。受け側で止める。
+       sessionが全部0のままなら、_flushStats()の空ガードが自然に効いて
+       localStorageにも触らず、実績のトーストも出ない */
+    if (this.tutorial) return;
     this.session[key] = (this.session[key] | 0) + n;
   }
 
   /** 一番良かった回だけ残す物（連続撃破・到達ウェーブ・スコア） */
   _tallyBest(key, v) {
+    if (this.tutorial) return;
     if (v > (this.session[key] | 0)) this.session[key] = v;
   }
 
@@ -1602,6 +1834,16 @@ class Game {
      以前はこの3箇所が同じ4行を各自持っていて、演出を足すなら3箇所を直す形だった */
   _onPlayerDown() {
     if (this.state === 'dead') return;
+    /* チュートリアルでは倒れない。落下も手榴弾の自爆も全部この1本道を通るので、
+       ここで受ければ死亡・戦績・リザルト・倒れ込みが1箇所で全部止まる。
+       未経験の人が操作を試している最中に結果画面へ飛ばされると、
+       何が起きたか分からないまま最初からになる */
+    if (this.tutorial) {
+      this.player.refill();
+      this.damageFlash = 0;
+      this.hud.banner('大丈夫', 'チュートリアル中は倒れない', 1.6);
+      return;
+    }
     this.state = 'dead';
     // 1人用の出撃が終わった。ここが通算へ流し込む区切りになる。
     // 到達ウェーブとスコアは、この回の最後の値が一番良い値なのでここで取る
@@ -1949,9 +2191,10 @@ class Game {
     // 総当たり(1本0.2ms)のままだと引き金1回で1.9msのつっかえになる
     const worldHit = this._terrainRay(origin, dir, def.range);
 
-    // 敵は専用の球/カプセルで判定する
+    // 敵は専用の球/カプセルで判定する。
+    // _shootablesはチュートリアルの的（居る時だけ差し替わる。普段はnull）
     let enemyHit = null;
-    for (const e of this.director.active) {
+    for (const e of this._shootables ?? this.director.active) {
       if (!e.alive) continue;
       const h = e.intersect(origin, dir);
       if (h && h.distance <= def.range && (!enemyHit || h.distance < enemyHit.distance)) enemyHit = h;
@@ -2795,6 +3038,8 @@ class Game {
       return;
     }
     this._soloNadeLeft--;
+    // チュートリアルの課題「投げる」の判定はこの1フレームの印で拾う
+    if (this.tutorial) this._tutFlags.threw = true;
     const cam = this.camera;
     _throwOrigin.setFromMatrixPosition(cam.matrixWorld);
     _throwDir.set(0, 0, -1).applyQuaternion(cam.quaternion);
@@ -2856,7 +3101,9 @@ class Game {
     this.effects.explosion(pos);
     this.audio.explosion(pos, this.camera);
 
-    for (const e of this.director.active) {
+    // チュートリアル中は的へ（差し替えないと「手榴弾が当たったのに無反応」で
+    // 未経験者が一番混乱する）。自爆側は_onPlayerDownのガードが受ける
+    for (const e of this._shootables ?? this.director.active) {
       if (!e.alive) continue;
       const p = e.collider.start;
       _throwOrigin.set(p.x, p.y + 0.5, p.z);
@@ -3338,6 +3585,8 @@ class Game {
         // player側へ入れると、対戦の他人の描画やリスポーン処理まで巻き込む
         this._deathFall(dt);
         this.director.update(dt, this.player, {});
+        // チュートリアルの進行と的の面倒。ソロの一部として動く（modeは'solo'のまま）
+        if (this.tutorial) this._tutorialFrame(dt);
         this._stepSoloNades(dt);
         this.effects.update(dt, this.camera);
 
