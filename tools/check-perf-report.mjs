@@ -131,7 +131,9 @@ console.log('\n[5] 表への通り道: 受けた数字がlogs.addまで届く');
   // 実際にcalls/tris/scale/rungがここで落ちていた
   const m = indexSrc.match(/logs\.add\(rec\.kind,\s*\{([\s\S]*?)\}\);/);
   ok(!!m, 'logs.add()が見つかる');
-  for (const k of ['calls', 'tris', 'scale', 'rung', 'cap', 'fpsMins', 'lowMins']) {
+  for (const k of ['calls', 'tris', 'scale', 'rung', 'cap', 'fpsMins', 'lowMins',
+    // メモリも同じ道を通る。ここへ並べ忘れると、受けていても表に出ない
+    'mem', 'memMax', 'memLimit', 'memPct', 'geo', 'tex', 'memMins', 'objMins']) {
     ok((m?.[1] ?? '').includes(`${k}: rec.${k}`), `${k} が表へ渡っている`);
   }
 }
