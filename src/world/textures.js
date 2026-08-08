@@ -1813,12 +1813,20 @@ export function createSky(sunDirection) {
 
 export function buildMaterials(renderer) {
   // 420m角の地面に4m角のタイルを貼るので、視線が寝た所では8では足りず
-  // ミップが崩れてクロスハッチのモアレが出る。上限まで使う
+  // ミップが崩れてクロスハッチのモアレが出る。上限まで使う。
+  // **ただし上限が要るのは視線が寝る地面系（asphalt/dirt/concrete）だけ。**
+  // 壁や小物は視線がほぼ立って当たるので、異方性を16タップ踏む場面が無い。
+  // 前は36枚全部に上限を配っていて、壁のぶんまで帯域を16倍側で払っていた
   const aniso = renderer.capabilities.getMaxAnisotropy();
+  const ANISO_WALL = 4;
   const S = 512;
 
-  const mk = (fn, seed, strength, repeat, opts) => {
-    const baked = bake(S, seed, fn, strength, aniso);
+  const mk = (fn, seed, strength, repeat, opts = {}) => {
+    // anisoはテクスチャの設定であってMeshStandardMaterialの項目ではないので、
+    // materialFromへ流す前に抜き取る（restごとコンストラクタに撒かれるため）
+    const { aniso: anisoHere, ...rest } = opts;
+    opts = rest;
+    const baked = bake(S, seed, fn, strength, anisoHere ?? aniso);
     if (repeat) {
       baked.map.repeat.set(repeat, repeat);
       baked.normalMap.repeat.set(repeat, repeat);
@@ -1859,7 +1867,7 @@ export function buildMaterials(renderer) {
     // 明度のハシゴが「床」と「それ以外」の2段しか無くなる。
     // 少し寒色に振ってあるのは、暖色のヘイズに沈む床と色相でも離すため
     concreteDark: mk(concrete, 27, 2.2, 1, {
-      normalScale: 1.0, color: 0xc2c4c8, surf: { ...wall, macroRun: 0.42, warp: 0.08 },
+      aniso: ANISO_WALL, normalScale: 1.0, color: 0xc2c4c8, surf: { ...wall, macroRun: 0.42, warp: 0.08 },
     }),
     // 地面は視線が浅く入るぶんエイリアスが出やすい。骨材の粒を高さ場側で
     // 削ったので、法線の倍率もそれに合わせて落とす（0.92だと粒が
@@ -1867,16 +1875,16 @@ export function buildMaterials(renderer) {
     asphalt: mk(asphalt, 5, 2.6, 1, {
       normalScale: 0.60, surf: { ...ground, warp: 0.16, detail: [13.0, 0.45, 6.0] },
     }),
-    metal: mk(metalPanel, 3, 2.8, 1, { normalScale: 1.0, surf: wall }),
-    metalRed: mk(metalPanel, 19, 2.8, 1, { normalScale: 1.0, color: 0xa8524a, surf: wall }),
-    wood: mk(woodCrate, 7, 1.8, 1, { normalScale: 0.9, surf: prop }),
-    sandbag: mk(sandbag, 13, 1.5, 1, { normalScale: 1.2, surf: prop }),
-    brick: mk(brick, 23, 2.4, 1, { normalScale: 1.1, surf: wall }),
+    metal: mk(metalPanel, 3, 2.8, 1, { aniso: ANISO_WALL, normalScale: 1.0, surf: wall }),
+    metalRed: mk(metalPanel, 19, 2.8, 1, { aniso: ANISO_WALL, normalScale: 1.0, color: 0xa8524a, surf: wall }),
+    wood: mk(woodCrate, 7, 1.8, 1, { aniso: ANISO_WALL, normalScale: 0.9, surf: prop }),
+    sandbag: mk(sandbag, 13, 1.5, 1, { aniso: ANISO_WALL, normalScale: 1.2, surf: prop }),
+    brick: mk(brick, 23, 2.4, 1, { aniso: ANISO_WALL, normalScale: 1.1, surf: wall }),
     // 錆は発生源から下へ垂れる絵をテクスチャ側で作ったので、
     // シェーダー側の雨だれは重ねない
-    rustMetal: mk(rustMetal, 31, 2.4, 1, { normalScale: 1.05, surf: { ...prop, macroRun: 0.10 } }),
-    plaster: mk(plaster, 37, 2.2, 1, { normalScale: 1.05, surf: wall }),
+    rustMetal: mk(rustMetal, 31, 2.4, 1, { aniso: ANISO_WALL, normalScale: 1.05, surf: { ...prop, macroRun: 0.10 } }),
+    plaster: mk(plaster, 37, 2.2, 1, { aniso: ANISO_WALL, normalScale: 1.05, surf: wall }),
     dirt: mk(dirt, 41, 2.4, 1, { normalScale: 1.2, surf: { ...ground, macroRun: 0.0 } }),
-    corrugated: mk(corrugated, 43, 2.6, 1, { normalScale: 1.0, surf: wall }),
+    corrugated: mk(corrugated, 43, 2.6, 1, { aniso: ANISO_WALL, normalScale: 1.0, surf: wall }),
   };
 }

@@ -1727,7 +1727,15 @@ export function buildLevel(mats, { lamps = true } = {}) {
   // 当たり判定は場内だけを覆う見えない板に任せる。
   // 平らな板を1枚置くと、地平線が定規の直線になって世界が「トレイの底」に見える。
   // 場外だけ緩くうねらせる。場内(R<50)は完全に平らなままなので当たり判定はずれない
-  const groundGeo = new THREE.PlaneGeometry(420, 420, 96, 96);
+  /* 分割は48×48（4,608三角形）。前は96×96で18,432三角形あった。
+     この板は420m四方あってバウンディング球の半径が約300mになるので、
+     **視錐台カリングで一度も落ちず、毎フレーム必ず全部描かれる。**
+     どこを向いても背負う固定費なので、分割は要る最低限まで削る。
+     うねりを付けるのはR>50mの外側だけ（下のsstep）で、場内は完全に平ら。
+     細かい割りが要るのはうねりの起伏（波長10m前後）の所だけだが、
+     50m先の丘の起伏が少し鈍っても遊んでいて見分けは付かない。
+     一方この2/3の削りは、影以外の全パスから毎フレーム約14,000三角形を消す */
+  const groundGeo = new THREE.PlaneGeometry(420, 420, 48, 48);
   groundGeo.rotateX(-Math.PI / 2);
   scaleUV(groundGeo, 105, 105);
   {
@@ -1774,6 +1782,12 @@ export function buildLevel(mats, { lamps = true } = {}) {
   // alphaMapで外周をfbmに食い破らせ、頂点カラーで隅と物の足元を焼いて沈める。
   // 板は「置いた物の足跡」が全部出揃ってから作りたいので、生成は最後にまとめて回す
   const patchJobs = [];
+  /* 影を落とさせない材質の集まり。路面の貼り分け板は床から数cm浮いているだけなので、
+     影を落とすと広場一面に自己遮蔽の縞が出る。
+     下のflush()のコメントには最初からそう書いてあったのに、実装は
+     flush(propChunks, props, true)で板にも影を持たせていた（板はプロップと同じ
+     propChunksに入るため）。板は1枚ずつ材質をclone()するので、材質で名指しできる */
+  const noShadowMats = new Set();
   const patch = (w, d, mat, x, z, ry, y, uv = 6, order = 1) =>
     patchJobs.push({ w, d, mat, x, z, ry, y, uv, order });
 
@@ -1829,6 +1843,8 @@ export function buildLevel(mats, { lamps = true } = {}) {
     addGroundBlend(pm, 0.29, 0.05, mat === M.dirt ? 0.78 : 0.58);
     // 重なる板どうしで前後がちらつかないよう、上に乗せる板は描画順を明示する
     renderOrders.set(pm, order);
+    // 床から数cm浮いた板に影を落とさせない（宣言はnoShadowMatsの定義コメント）
+    noShadowMats.add(pm);
     emit(geo, pm, x, y, z, ry, 0, 0, false, false);
   };
 
@@ -3778,7 +3794,8 @@ export function buildLevel(mats, { lamps = true } = {}) {
       const order = renderOrders.get(mat) ?? 0;
       const put = (g) => {
         const m = new THREE.Mesh(g, mat);
-        m.castShadow = castShadow;
+        // 路面の貼り分け板だけ影から外す（noShadowMats）。プロップの影は保つ
+        m.castShadow = castShadow && !noShadowMats.has(mat);
         m.receiveShadow = true;
         m.renderOrder = order;
         // 雑草の板や120m先の遠景で弾が止まると理不尽なので、射線から外す

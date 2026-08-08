@@ -639,7 +639,12 @@ function decalTexture(kind, size = 128, variant = 0) {
 /* ------------------------------------------------------------ デカール */
 
 class Decals {
-  constructor(scene, max = 132, reserved = 18, splashes = 40) {
+  /* 枠は72に絞ってある（前は132）。デカールは1枚ずつ独立した材質のMeshなので、
+     枠の数がそのまま描画命令の数になる。血の寿命が40〜60秒あるため、
+     撃ち合いが1分も続くと枠は必ず埋まりきり、**132draw/フレームが定常化していた**
+     （PCが熱くなる件の調査で発覚。2026-08-08）。
+     72でも直近の戦闘の痕跡は十分残る。古い弾痕が早めに消えるだけ */
+  constructor(scene, max = 72, reserved = 12, splashes = 20) {
     this.max = max;
     this.pool = [];
     this.index = 0;
