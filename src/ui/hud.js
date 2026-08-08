@@ -37,6 +37,7 @@ export class HUD {
       achfeed: $('achfeed'),
       voice: $('voice'), voiceText: $('voiceText'),
       spectate: $('spectate'), specName: $('specName'), specHint: $('specHint'),
+      tutorial: $('tutorial'), tutMain: $('tutMain'), tutSub: $('tutSub'),
     };
     this.markerTimer = 0;
     this.crossHitTimer = 0;
@@ -45,6 +46,8 @@ export class HUD {
     this._lastGap = -1;
     // 観戦の札に今出ている中身。同じ値で毎フレーム書き込まないための控え
     this._specKey = '';
+    // チュートリアルの課題札も同じ（毎フレーム呼ばれる前提の作り）
+    this._tutKey = '';
     this._lastHealth = -1;
     this._lastAmmo = -1;
     this.mode = 'solo';
@@ -404,6 +407,27 @@ export class HUD {
    * @param name 見ている人の名前。nullで畳む
    * @param canSwitch 他にも生きている人がいるか。1人しかいない時は切り替えの案内を消す
    */
+  /** チュートリアル中の見た目（波・得点・地図を隠す。中身はCSSの#hud.tutorial） */
+  setTutorial(on) { this.el.hud.classList.toggle('tutorial', !!on); }
+
+  /**
+   * チュートリアルの課題札。mainにnullで畳む。
+   * 毎フレーム呼ばれる前提なので、同じ文なら2度目からDOMを触らない
+   * （tools/check-hud.mjsの[軽さ]の流儀。文言側も残り秒を整数で丸めていて、
+   * 値が変わるのは秒に1回程度＝この控えとちょうど噛み合う）
+   */
+  tutorial(main, sub = '') {
+    const el = this.el.tutorial;
+    if (!el) return;
+    const key = main === null || main === undefined ? '' : `${main}|${sub}`;
+    if (key === this._tutKey) return;
+    this._tutKey = key;
+    if (!key) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    this.el.tutMain.textContent = main;
+    this.el.tutSub.textContent = sub;
+  }
+
   spectating(name, canSwitch = false) {
     const el = this.el.spectate;
     if (!el) return;

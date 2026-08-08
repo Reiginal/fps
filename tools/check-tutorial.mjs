@@ -249,5 +249,81 @@ console.log('\n[3] 小ステージ: 実際に組んで寸法を測る');
   ok(hit === '', `server/がtutorial-levelを読んでいない（${hit || '無し'}）`);
 }
 
+console.log('\n[4] HUDの課題札: 軽さと畳み');
+{
+  /* 課題札は毎フレーム呼ばれる。同じ文で毎回DOMを書くと、
+     見えない所でレイアウト計算が走り続ける（check-hud.mjsの[軽さ]と同じ話）。
+     偽DOMの作りもcheck-hud.mjsと同じ（idごとに要素を作って配る） */
+  const mkEl = () => {
+    const classes = new Set();
+    return {
+      textContent: '', style: {}, children: [],
+      classList: {
+        add: (c) => classes.add(c),
+        remove: (c) => classes.delete(c),
+        toggle: (c, on) => (on ? classes.add(c) : classes.delete(c)),
+        contains: (c) => classes.has(c),
+      },
+      appendChild() {}, querySelectorAll: () => [],
+    };
+  };
+  const els = new Map();
+  globalThis.document = {
+    getElementById: (id) => {
+      if (!els.has(id)) els.set(id, mkEl());
+      return els.get(id);
+    },
+    createElement: () => mkEl(),
+    querySelectorAll: () => [],
+  };
+  globalThis.performance = globalThis.performance || { now: () => 0 };
+  const { HUD } = await import('../src/ui/hud.js');
+  const hud = new HUD();
+
+  // 書き込み回数を数える細工。mainとsubの両方に仕込む
+  const counted = (el) => {
+    let v = el.textContent;
+    let n = 0;
+    Object.defineProperty(el, 'textContent', {
+      get: () => v,
+      set: (x) => { v = x; n++; },
+    });
+    return () => n;
+  };
+  const mainWrites = counted(document.getElementById('tutMain'));
+  const subWrites = counted(document.getElementById('tutSub'));
+  const tut = document.getElementById('tutorial');
+  const hudEl = document.getElementById('hud');
+
+  for (let i = 0; i < 10; i++) hud.tutorial('WASDで歩く', 'あと3秒');
+  ok(mainWrites() === 1 && subWrites() === 1,
+    `同じ文を10回渡しても書き込みは1回（main${mainWrites()}/sub${subWrites()}）`);
+  hud.tutorial('WASDで歩く', 'あと2秒');
+  ok(subWrites() === 2, '文が変われば書く');
+  ok(!tut.classList.contains('hidden'), '出ている');
+  hud.tutorial(null);
+  ok(tut.classList.contains('hidden'), 'nullで畳む');
+  hud.setTutorial(true);
+  ok(hudEl.classList.contains('tutorial'), 'setTutorial(true)で#hudに印が付く');
+  hud.setTutorial(false);
+  ok(!hudEl.classList.contains('tutorial'), 'falseで外れる');
+}
+
+console.log('\n[5] 器の繋ぎ込み（HTML/CSS/メニュー）');
+{
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const netmenuSrc = readFileSync(new URL('../src/ui/netmenu.js', import.meta.url), 'utf8');
+  ok(/id="nmTutorial"/.test(html), 'ホームにチュートリアルのボタンがある');
+  ok(/id="tutorial"/.test(html) && /id="tutMain"/.test(html), '課題札のDOMがある');
+  ok(/#hud\.tutorial #waveBox, #hud\.tutorial #scoreBox, #hud\.tutorial #minimap \{ display: none; \}/.test(html),
+    'チュートリアル中は波・得点・地図が消えるCSSがある');
+  // setBusyへの足し忘れ＝対戦の接続中にチュートリアルへ入れてしまう
+  ok(/setBusy\(on\) \{[\s\S]{0,400}?tutorial\.disabled = this\.busy/.test(netmenuSrc),
+    '接続中はチュートリアルのボタンも止まる');
+  // e2e（デプロイ前の実ブラウザ検査）もボタンを見ている
+  const e2e = readFileSync(new URL('../e2e/boot.spec.mjs', import.meta.url), 'utf8');
+  ok(/'nmTutorial'/.test(e2e), 'e2eがボタンの実在を見ている');
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);
