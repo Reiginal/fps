@@ -165,5 +165,89 @@ console.log('\n[2] 文言とキーの整合');
     `1=ライフル・2=ピストルの並び（今: ${LOADOUT_IDS.join(',')}）`);
 }
 
+console.log('\n[3] 小ステージ: 実際に組んで寸法を測る');
+{
+  /* 文言と機械が正しくても、通路の寸法が身体能力と噛み合っていなければ
+     「Spaceを押しても越えられない」「しゃがんでも通れない」で詰む。
+     ここは断言でなく実測で見る（やり方はcheck-worldgeo.mjsと同じ） */
+  await import('../server/dom-stub.js');
+  const THREE = await import('three');
+  const { Capsule } = await import('three/addons/math/Capsule.js');
+  const { buildTutorialLevel } = await import('../src/world/tutorial-level.js');
+  const SHARED = new THREE.MeshStandardMaterial();
+  const mats = new Proxy({}, { get: () => SHARED });
+  const level = buildTutorialLevel(mats);
+
+  // 軽さ。ここが膨らむと「未経験者の非力な端末で動く」が崩れる
+  let meshes = 0, tris = 0, noColor = 0;
+  level.root.traverse((o) => {
+    if (!o.isMesh) return;
+    meshes++;
+    const g = o.geometry;
+    tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+    if (!g.attributes.color) noColor++;
+  });
+  ok(meshes <= 8, `メッシュは8枚まで（今${meshes}枚）`);
+  ok(tris < 2000, `三角形は2000未満（今${Math.round(tris)}）`);
+  ok(noColor === 0, `色属性の無いジオメトリが無い（真っ黒事故防止。今${noColor}枚）`);
+
+  // 湧き地点の真下に床がある
+  const down = new THREE.Vector3(0, -1, 0);
+  const spawnRay = level.octree.rayIntersect(
+    new THREE.Ray(level.playerSpawn.clone(), down),
+  );
+  ok(spawnRay && spawnRay.distance < 2, '湧き地点の真下に床がある');
+
+  // カプセルの実測。数字はprotocol.jsのHITBOXと同じ体格
+  const R = 0.34;
+  const capsule = (x, z, h) => new Capsule(
+    new THREE.Vector3(x, 0.05 + R, z),
+    new THREE.Vector3(x, h - R, z),
+    R,
+  );
+  // 梁(z=-4): 立ち姿(1.74)は当たる。しゃがみ(1.06)は通る
+  ok(!!level.octree.capsuleIntersect(capsule(0, -4, 1.74)),
+    'くぐり梁: 立ったままでは詰まる');
+  ok(!level.octree.capsuleIntersect(capsule(0, -4, 1.06)),
+    'くぐり梁: しゃがめば通れる');
+  // 段差(z=4): 歩いて登れず(0.58超)、跳べば越えられる(0.99未満)
+  const boxTop = (() => {
+    const hit = level.octree.rayIntersect(
+      new THREE.Ray(new THREE.Vector3(0, 3, 4), down),
+    );
+    return hit ? 3 - hit.distance : 0;
+  })();
+  ok(boxTop > 0.58, `段の高さ${boxTop.toFixed(2)}m > 自動乗り越え0.58m（歩いては登れない）`);
+  ok(boxTop < 0.99, `段の高さ${boxTop.toFixed(2)}m < 跳躍の頂点0.99m（跳べば越えられる）`);
+
+  // 射撃線(0, 目の高さ, -8)から的3点へ視線が通る（土嚢や梁で塞がっていない）
+  const eye = new THREE.Vector3(0, 1.58, -8.6);
+  for (const s of level.enemySpawns) {
+    const to = s.clone().setY(1.3);
+    const dir = to.clone().sub(eye);
+    const dist = dir.length();
+    const hit = level.octree.rayIntersect(new THREE.Ray(eye.clone(), dir.normalize()));
+    ok(!hit || hit.distance > dist,
+      `射撃線から的(${s.x}, ${s.z})へ視線が通る`);
+  }
+
+  // 決まりごとのソース検査。**コメントを外してから見る**
+  // （「呼ぶな」の理由コメントに名前が出ているので、生のまま見ると誤検知する。
+  //  check-deathcam.mjsで同じ誤検知を踏んだ）
+  const src = readFileSync(new URL('../src/world/tutorial-level.js', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/mg, '');
+  ok(!/addMacroVariation|addGroundBlend/.test(src),
+    '材質の混合層を二重適用していない（シェーダ破壊防止）');
+  ok(!/\.clone\(/.test(src), '材質をcloneしていない（着弾音・足音の引き当てが外れる）');
+  // サーバーが読んでいない（チュートリアルは通信しない決まり）
+  const { execSync } = await import('node:child_process');
+  const hit = execSync(
+    'grep -rl "tutorial-level" server/ || true',
+    { cwd: new URL('..', import.meta.url).pathname, encoding: 'utf8' },
+  ).trim();
+  ok(hit === '', `server/がtutorial-levelを読んでいない（${hit || '無し'}）`);
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);
