@@ -51,8 +51,12 @@ console.log('\n[1.5] ソロの倒れ込みは死んだ後も進む');
   // 倒れるとstateが'dead'になり、playingブロック（の中の_deathFall）は
   // 次のフレームから通らない。else側に無いと倒れ込みが1フレームで止まる
   // （実際に止まっていた。撃たれた後カメラが立ったまま結果画面まで固まる）
-  ok(/if \(this\.state === 'dead'\) this\._deathFall\(dt\);/.test(main),
-    'playingでないフレームでも倒れ込みを進めている');
+  /* **姿勢を決めてから倒れ込みを足す、の順番ごと見る。**
+     applyDeathは「_applyCameraが姿勢を決めた後に足す(+=)」約束なので、
+     _deathFallだけ呼ぶと傾きが毎フレーム積み上がってカメラがぐるぐる回る
+     （実際に回った。詳しくはtools/check-deathcam.mjs） */
+  ok(/if \(this\.state === 'dead'\) \{\s*this\.player\._applyCamera\(\);\s*this\._deathFall\(dt\);\s*\}/.test(main),
+    'playingでないフレームでも「姿勢を決める→倒れ込みを足す」を回している');
 }
 
 console.log('\n[2] 止めた絵の描き直し');

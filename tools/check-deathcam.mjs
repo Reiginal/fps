@@ -175,6 +175,60 @@ console.log('\n[6] 見回しがサーバーへ漏れていない');
   // 計算が main.js へ直書きで戻っていないか
   ok(/applyDeath\(/.test(src), 'main.js は deathcam.js の applyDeath を使っている');
   ok(!/const drop = 1 - \(1 - k\) \*\* 3/.test(src), '倒れ込みの式が main.js へ戻っていない');
+
+  /* **_deathFall を呼ぶ所は、必ず直前で _applyCamera() を呼んでいること。**
+     applyDeath は「姿勢を決めた後に倒れ込みぶんを足す(+=)」約束なので、
+     姿勢を決めずに回すと傾きが毎フレーム積み上がる。
+     実際に、倒れ込みを playing でないフレームへ移した時にこれを忘れて、
+     **カメラがぐるぐる回り続けた**（2026-08-08、遊んだ本人に「キモい」と言われた） */
+  /* コメントを外してから見る。**外さないと素通りする。**
+     このrepoは「なぜ」を長いコメントで残す作法なので、
+     生のソースで「直前○字」を見ると、その窓がコメントで埋まって
+     隣の無関係な_applyCameraを拾ってしまう（実際に拾って、
+     わざと壊しても落ちない検査になっていた） */
+  const bare = src
+    .replace(/\/\*[\s\S]*?\*\//g, '')      // ブロックコメント
+    .replace(/^\s*\/\/.*$/mg, '');          // 行コメント
+  const calls = [...bare.matchAll(/this\._deathFall\(dt\)/g)];
+  ok(calls.length >= 2, `_deathFall を呼ぶ所が ${calls.length} 箇所ある`);
+  for (const m of calls) {
+    // コメントを外した後の直前120字。同じ流れの中で呼ばれているかだけを見る
+    const before = bare.slice(Math.max(0, m.index - 120), m.index);
+    ok(/_applyCamera\(\);/.test(before),
+      `_deathFall の直前で _applyCamera() を呼んでいる（${m.index}文字目）`);
+  }
+}
+
+console.log('\n[倒れ込みは何フレーム回しても暴れない]');
+{
+  /* 上のソース突き合わせだけだと「呼び順が合っているか」しか見られない。
+     実際にカメラを何フレームも回して、傾きが決まった値へ収束することを測る。
+     倒れ切った後(t>=DEATH_FALL_S)は、何フレーム回しても同じ姿勢のままが正しい */
+  const cam = {
+    position: { x: 0, y: 1.7, z: 0 },
+    rotation: { x: 0, y: 0, z: 0 },
+  };
+  // 本物と同じ順番: 毎フレーム「姿勢を決める→倒れ込みを足す」
+  const frame = (t) => {
+    cam.position.y = 1.7;      // _applyCameraがやること（目の高さを入れ直す）
+    cam.rotation.x = 0; cam.rotation.y = 0; cam.rotation.z = 0;
+    applyDeath(cam, { t, height: 1.7 });
+  };
+  frame(DEATH_FALL_S);
+  const settled = { z: cam.rotation.z, x: cam.rotation.x, y: cam.position.y };
+  for (let i = 0; i < 600; i++) frame(DEATH_FALL_S);   // 10秒ぶん回す
+  ok(Math.abs(cam.rotation.z - settled.z) < 1e-9,
+    `10秒回しても傾きが変わらない（${settled.z.toFixed(3)} → ${cam.rotation.z.toFixed(3)}）`);
+  ok(Math.abs(cam.position.y - settled.y) < 1e-9,
+    `目の高さも変わらない（${settled.y.toFixed(3)} → ${cam.position.y.toFixed(3)}）`);
+  ok(cam.rotation.z < Math.PI, `傾きは半回転より小さい（${cam.rotation.z.toFixed(2)}rad＝横倒しであって回転ではない）`);
+
+  // 姿勢を決め直さずに回すと積み上がること自体は確かめておく。
+  // 「+=で足す作りだから、決め直しとセットで呼ぶ必要がある」の裏付け
+  const bad2 = { position: { y: 1.7 }, rotation: { x: 0, y: 0, z: 0 } };
+  for (let i = 0; i < 10; i++) applyDeath(bad2, { t: DEATH_FALL_S, height: 1.7 });
+  ok(bad2.rotation.z > settled.z * 5,
+    '姿勢を決め直さずに回すと傾きが積み上がる（だから直前の_applyCameraが要る）');
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
