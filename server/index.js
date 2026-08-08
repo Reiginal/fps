@@ -171,6 +171,11 @@ async function handleReport(req, res) {
     name: rec.name, message: rec.message, where: rec.where, ua: rec.ua,
     wave: rec.wave, kills: rec.kills, score: rec.score,
     fps: rec.fps, low: rec.low, players: rec.players,
+    /* 切り分け用の数字と1分ごとの列。**ここに並べないと表に出ない。**
+       reportRecordで受けていたのに、ここへ書き忘れていてcalls/tris/scale/rungが
+       表から落ちていた（perf自体が届かないバグの陰で気づけなかった。2026-08-08） */
+    calls: rec.calls, tris: rec.tris, scale: rec.scale, rung: rec.rung,
+    fpsMins: rec.fpsMins, lowMins: rec.lowMins,
   });
   res.writeHead(204).end();
 }
