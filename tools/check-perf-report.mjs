@@ -109,7 +109,7 @@ console.log('\n[4] 表への通り道: 受けた数字がlogs.addまで届く');
   // 実際にcalls/tris/scale/rungがここで落ちていた
   const m = indexSrc.match(/logs\.add\(rec\.kind,\s*\{([\s\S]*?)\}\);/);
   ok(!!m, 'logs.add()が見つかる');
-  for (const k of ['calls', 'tris', 'scale', 'rung', 'fpsMins', 'lowMins']) {
+  for (const k of ['calls', 'tris', 'scale', 'rung', 'cap', 'fpsMins', 'lowMins']) {
     ok((m?.[1] ?? '').includes(`${k}: rec.${k}`), `${k} が表へ渡っている`);
   }
 }
