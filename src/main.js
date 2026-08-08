@@ -22,6 +22,7 @@ import { AutoQuality } from './core/autoquality.js';
 import { MAX_RUNG, rungValues } from './core/gfxrungs.js';
 import { FrameGate } from './core/framegate.js';
 import { PerfSegments } from './core/perfsegments.js';
+import { MemoryWatch } from './core/memwatch.js';
 import { VoiceChat, PTT_CODE } from './net/voice.js';
 import { emptyTally, mergeTally, loadStats, saveStats, newlyUnlocked } from './core/stats.js';
 import { Lobby } from './ui/lobby.js';
@@ -509,6 +510,13 @@ class Game {
     this._infoAcc = 0;    // 1秒に1回だけ取るための積み
     // 1分ごとのfpsの束。上のリングが「最後の33秒」しか持てないのを補う
     this._perfSeg = new PerfSegments();
+    /* メモリの見張り。**遊び終わりを待たず、限界に近づいた時点で1行送る。**
+       2026-08-08に1人プレイの第3波でタブごと落ちた時、届いていたのは
+       「fpsは32で平ら」だけで、何が足りなくなったのかを示す数字が
+       どこにも無かった（落ちてからでは送れないので、遊び終わりの報告には乗らない）。
+       判定の中身は src/core/memwatch.js */
+    this._mem = new MemoryWatch();
+    this._memAcc = 0;     // 1秒に1回だけ見るための積み
     this.perfMeter = null;
     // メニューの間、既に1枚描いてあるか。描いてあれば描き直さない（_loop末尾を参照）
     this._idleDrawn = false;
@@ -2902,6 +2910,53 @@ class Game {
   }
 
   /**
+   * 使っているメモリを見る。**1秒に1回だけ。**
+   *
+   * 毎フレーム読まないのは、1秒の中では動かない数字だから。
+   * 頻度を上げても分かる事は増えず、読み出しのぶんだけ重くなる
+   * （測るための仕掛けが測られる物を重くしていた前例がある）。
+   *
+   * 見るのは2つ。**片方だけでは足りない。**
+   *   ・JSの山(performance.memory) … Chromeにしか無い。配列やオブジェクトが溜まる形
+   *   ・描く物の数(renderer.info.memory) … WebGLの物が溜まる形。**JSの山には載らない**
+   * メッシュを捨て忘れてもusedJSHeapSizeはほとんど動かないので、
+   * 山だけ見張っているとその形の漏れは最後まで気づけない
+   */
+  _watchMemory(dt) {
+    this._memAcc += dt;
+    if (this._memAcc < 1) return;
+    const every = this._memAcc;
+    this._memAcc = 0;
+
+    // performance.memoryはChromeにしか無い。無い環境では山の話だけ黙る
+    // （描く物の数はThreeJSが持っているので、そちらはどのブラウザでも見張れる）
+    const heap = performance.memory;
+    const gpu = this.renderer?.info.memory;
+    const geo = gpu?.geometries ?? 0;
+    const tex = gpu?.textures ?? 0;
+    const warn = this._mem.sample(
+      heap?.usedJSHeapSize ?? 0, heap?.jsHeapSizeLimit ?? 0, geo + tex, every,
+    );
+    if (!warn) return;
+
+    /* 落ちる前の1行。**ここが唯一「事故の最中に」届く報告になる。**
+       描く物が増えている方は、底(遊び始めの数)からいくつ増えたかを文に入れる。
+       数字を項目に散らすと、表を横に読まないと増えたかどうかが分からない */
+    this.diag?.memory(
+      warn.reason === 'heap'
+        ? `メモリが限界に近い（${warn.pct}%）`
+        : `描く物が増え続けている（${warn.base}→${warn.objects}）`,
+      {
+        mem: warn.used, memMax: warn.peak, memLimit: warn.limit, memPct: warn.pct,
+        geo, tex,
+        wave: this.mode === 'solo' ? this.director?.wave ?? null : null,
+        players: this.mode === 'versus' ? (this.net?.players.size | 0) : 1,
+        ...this._mem.series(),
+      },
+    );
+  }
+
+  /**
    * 描画の重さを1行送る。**遊び終わりに1回だけ。**
    *
    * 中央値と、遅かった5%の2つを出す。**平均を取らない。**
@@ -2919,6 +2974,7 @@ class Game {
       this._frameN = 0; this._frameAt = 0;
       this._infoAt = 0; this._infoN = 0; this._infoAcc = 0;
       this._perfSeg.reset();
+      this._mem.reset();
       return;
     }
     const sorted = Array.from(this._frames.subarray(0, n)).sort((a, b) => a - b);
@@ -2948,10 +3004,21 @@ class Game {
       rung: this.autoQ?.enabled ? this.autoQ.rung : null,
       // fps上限の設定値。これが無いと「fps30」が省エネ設定なのか不調なのか読めない
       cap: this._frameGate?.hz ?? null,
-      /* 1分ごとのfps中央値と遅かった5%の列（例: "60,58,52"）。
+      /* メモリ。**落ちなかった回もここで残す。**
+         警告(kind=mem)は限界に近づいた時しか出ないので、
+         それだけだと「普通の回はどれくらいだったのか」が分からず、
+         いざ警告が出ても多いのか少ないのか判断できない */
+      mem: this._mem.lastMB || null,
+      memMax: this._mem.peakMB || null,
+      memLimit: this._mem.limitMB || null,
+      geo: this.renderer?.info.memory.geometries ?? null,
+      tex: this.renderer?.info.memory.textures ?? null,
+      /* 1分ごとの列（例: "60,58,52"）。
          上のfps/lowは最後の33秒しか見ていないので、
-         「最初から重い」のか「だんだん重くなる」のかはこの列でしか分からない */
+         「最初から重い」のか「だんだん重くなる」のかはこの列でしか分からない。
+         memMins/objMinsは同じ形で、**頭打ちになるか上がり続けるか**を見る */
       ...this._perfSeg.series(),
+      ...this._mem.series(),
     });
     this._frameN = 0;
     this._frameAt = 0;
@@ -2959,6 +3026,7 @@ class Game {
     this._infoN = 0;
     this._infoAcc = 0;
     this._perfSeg.reset();
+    this._mem.reset();
   }
 
   /**
@@ -3157,6 +3225,9 @@ class Game {
     }
     // 1分ごとの束にも同じdtを積む（遊んでいる間だけ束の時計が進む）
     this._perfSeg.frame(dt, this.state === 'playing');
+    // 使っているメモリを見る。**遊んでいない間も止めない**（メニューに置いたまま
+    // 増え続ける形なら、そちらの方がたちが悪い）。判定はmemwatch.js
+    this._watchMemory(dt);
     // 自動画質。重ければ1段ずつ絵を軽くする（遊んでいる間だけ数える）
     this.autoQ?.frame(dt, this.state === 'playing');
 

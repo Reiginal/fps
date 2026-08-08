@@ -140,6 +140,7 @@ const KIND_LABEL = {
   net: '通信で例外',
   solo: '1人で遊んだ',
   perf: '描画の重さ',
+  mem: 'メモリ',
 };
 
 const two = (n) => String(n).padStart(2, '0');
@@ -174,6 +175,7 @@ export function renderPage(rows, now = Date.now(), bootAt = 0) {
  b{color:#68727e;font-weight:400}
  .k-error .k,.k-net .k{color:#ff6b5a}
  .k-boot .k{color:#7ddb8a}
+ .k-mem .k{color:#ffb454}
  .empty{color:#68727e;padding:20px 0}
 </style>
 <h1>BLACKOUT のログ</h1>

@@ -78,7 +78,11 @@ export class ReportLimiter {
 /* 受け取る種類。**perfは「重い」を感想でなく数字で見るための物。**
    「なんか重い」と言われても、こちらには何も分からなかった
    （端末も回線も人数も違うので、手元で再現しようが無い） */
-export const REPORT_KINDS = ['error', 'solo', 'perf'];
+/* memは「落ちる前に」届く唯一の種類。他は遊び終わりか例外の時にしか送られないので、
+   タブごと死ぬ事故では1件も残らない（2026-08-08に実際に何も残らなかった）。
+   perfと分けてあるのは連投止めの鍵が「送り元＋種類」だからで、
+   同じにすると遊び終わりのperfと潰し合う */
+export const REPORT_KINDS = ['error', 'solo', 'perf', 'mem'];
 
 /**
  * 受け取った本文を、扱える形へ直す。
@@ -135,16 +139,35 @@ export function reportRecord(bodyText) {
     rung: num(m.rung),
     // fps上限の設定値（60/30）。無いと「fps30」が省エネ設定なのか不調なのか読めない
     cap: num(m.cap),
-    /* 1分ごとのfps中央値と遅かった5%の列（例: "60,58,52"）。
-       上のfps/lowは最後の33秒だけなので、「だんだん重くなる」はこの列で見る。
-       数字とカンマ以外が混ざった物は丸ごと捨てる（文字列で受ける唯一の数字列なので、
-       ここから変な物がログ画面に流れ込まないよう形で縛る）。
-       上限200字＝60fpsでも1時間ぶんの束(60個×最大4字)が収まる長さ */
-    fpsMins: typeof m.fpsMins === 'string' && /^\d+(,\d+)*$/.test(m.fpsMins)
-      ? one(m.fpsMins, 200) : null,
-    lowMins: typeof m.lowMins === 'string' && /^\d+(,\d+)*$/.test(m.lowMins)
-      ? one(m.lowMins, 200) : null,
+    /* メモリ。memが使用量(MB)、memMaxがその回の最大、memLimitがブラウザの限界、
+       memPctが限界に対する割合。geo/texは描く物の数（ジオメトリとテクスチャ）。
+       **描く物を別に数えるのは、WebGLの物がJSの山に載らないため。**
+       メッシュを捨て忘れてもmemはほとんど動かず、増えるのはGPU側だけになる */
+    mem: num(m.mem),
+    memMax: num(m.memMax),
+    memLimit: num(m.memLimit),
+    memPct: num(m.memPct),
+    geo: num(m.geo),
+    tex: num(m.tex),
+    /* 1分ごとの列（例: "60,58,52"）。
+       fps/lowは最後の33秒だけなので、「だんだん重くなる」はこの列で見る。
+       memMins/objMinsも同じ形で、こちらは**漏れているかどうか**を見る列。
+       プールで回している物は必ず頭打ちになり、漏れている物は上がり続ける */
+    fpsMins: series(m.fpsMins, one),
+    lowMins: series(m.lowMins, one),
+    memMins: series(m.memMins, one),
+    objMins: series(m.objMins, one),
   };
+}
+
+/* 数字の列を受ける時の形の縛り。
+   数字とカンマ以外が混ざった物は丸ごと捨てる（文字列で受ける唯一の数字列なので、
+   ここが緩いとログ画面へ好きな文字を流し込める口になる）。
+   上限200字＝60fpsでも1時間ぶんの束(60個×最大4字)が収まる長さ。
+   **4本とも同じ縛りなので1箇所にまとめてある。** 4回書くと、
+   縛りを直す時に必ず1本だけ古いまま残る */
+function series(v, one) {
+  return typeof v === 'string' && /^\d+(,\d+)*$/.test(v) ? one(v, 200) : null;
 }
 
 /* 流れて消える方（flyctl logs）へ出す1行。人が目で追うためだけの形。
@@ -158,13 +181,17 @@ export function reportRecord(bodyText) {
 export function reportLine(bodyText) {
   const r = reportRecord(bodyText);
   if (!r) return null;
-  const tag = { solo: '[1人で遊んだ]', perf: '[描画の重さ]' }[r.kind] || '[画面のエラー]';
+  const tag = {
+    solo: '[1人で遊んだ]', perf: '[描画の重さ]', mem: '[メモリ]',
+  }[r.kind] || '[画面のエラー]';
   // 並べる順番は「まず結論(fps)、次に切り分け(何が多いか)、最後に設定」。
   // 1分ごとの列は長いので末尾に置く
-  const num = ['fps', 'low', 'calls', 'tris', 'scale', 'rung', 'cap', 'wave', 'kills', 'score']
+  const num = ['fps', 'low', 'calls', 'tris', 'scale', 'rung', 'cap',
+    'mem', 'memMax', 'memLimit', 'memPct', 'geo', 'tex',
+    'wave', 'kills', 'score']
     .filter((k) => r[k] !== null && r[k] !== undefined)
     .map((k) => `${k}=${r[k]}`);
-  for (const k of ['fpsMins', 'lowMins']) if (r[k]) num.push(`${k}=${r[k]}`);
+  for (const k of ['fpsMins', 'lowMins', 'memMins', 'objMins']) if (r[k]) num.push(`${k}=${r[k]}`);
   return `${tag} ${r.name}: ${r.message}`
     + (num.length ? ` ${num.join(' ')}` : '')
     + (r.where ? ` @ ${r.where}` : '')
