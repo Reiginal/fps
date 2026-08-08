@@ -231,5 +231,73 @@ console.log('\n[倒れ込みは何フレーム回しても暴れない]');
     '姿勢を決め直さずに回すと傾きが積み上がる（だから直前の_applyCameraが要る）');
 }
 
+console.log('\n[観戦カメラ] 生きている人の肩越しに置く');
+{
+  const { spectatePose, SPEC_BACK, SPEC_UP, SPEC_AIM_H, SPEC_PAD } =
+    await import('../src/core/deathcam.js');
+
+  // 北(-Z)を向いて立っている人。yaw=0がその向き（player._applyCameraと同じ約束）
+  const t = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 };
+  const p = spectatePose(t);
+  ok(Math.abs(p.rot.y - t.yaw) < 1e-9, '見ている人と同じ方を向く');
+  // 後ろへ下がっている＝相手より手前(+Z)に居る
+  ok(p.pos.z > SPEC_BACK - 0.01, `相手の後ろに置く（z=${p.pos.z.toFixed(2)}）`);
+  ok(Math.abs(p.pos.x) < 1e-9, '真後ろ（横にずれない）');
+  ok(p.pos.y > t.y + SPEC_AIM_H, `目より上から見下ろす（y=${p.pos.y.toFixed(2)}）`);
+  ok(p.rot.x < 0, '少し下を向く（相手が画面の下寄りに来る）');
+
+  // 向きを変えたらカメラも回り込む
+  const east = spectatePose({ ...t, yaw: Math.PI / 2 });
+  ok(Math.abs(east.pos.x - SPEC_BACK) < 0.01 && Math.abs(east.pos.z) < 0.01,
+    '相手が右を向けばカメラは左へ回り込む');
+
+  // 上を向いている人の後ろでも、カメラが地面へ潜らない
+  const up = spectatePose({ ...t, pitch: -0.8 });
+  ok(up.pos.y > t.y + SPEC_AIM_H, `上を撃っている人の後ろでも地面へ潜らない（y=${up.pos.y.toFixed(2)}）`);
+
+  /* 壁の手当て。**渡したレイの結果より必ず手前へ寄る。**
+     寄らないと、狭い通路で観戦した瞬間に壁の中へ入って真っ黒になる */
+  const near = spectatePose(t, () => 1.0);   // 1m先に壁
+  const dist = Math.hypot(near.pos.x - t.x, near.pos.z - t.z);
+  ok(dist < 1.0, `壁があれば手前で止まる（壁1.0m → カメラ${dist.toFixed(2)}m）`);
+  ok(dist >= 0.4 - 1e-9, '寄せすぎない（相手の中へ入らない下限がある）');
+  const far = spectatePose(t, () => null);   // 何にも当たらない
+  ok(Math.abs(Math.hypot(far.pos.x - t.x, far.pos.z - t.z) - SPEC_BACK) < 0.01,
+    '何も無ければ規定の距離まで下がる');
+  // ぴったり壁際でも余白ぶんは残す
+  const tight = spectatePose(t, () => SPEC_PAD * 0.5);
+  ok(Number.isFinite(tight.pos.x) && Number.isFinite(tight.pos.y),
+    '壁が目の前でも数字が壊れない');
+
+  // レイは1本だけ（毎フレーム飛ぶので、増えると効いてくる）
+  let rays = 0;
+  spectatePose(t, () => { rays++; return null; });
+  ok(rays === 1, `飛ばすレイは1本だけ（今${rays}本）`);
+}
+
+console.log('\n[観戦カメラ] main.jsの繋ぎ込み');
+{
+  const src = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  // 倒れ込みを見せ終わってから移る（撃たれた瞬間に視点が飛ぶと何が起きたか分からない）
+  ok(/deathT >= DEATH_FALL_S[\s\S]{0,80}?_spectate\(/.test(src),
+    '倒れ込みが終わってから観戦へ移る');
+  // 死んでいる人は候補に入れない
+  ok(/_spectate\(states, input\) \{[\s\S]{0,600}?st\.state & S\.DEAD\)+ continue;/.test(src),
+    '倒れている人は観戦の相手にしない');
+  // 自分自身も候補から外す（自分の死体の肩越しに回っても意味が無い）
+  ok(/_spectate\(states, input\) \{[\s\S]{0,600}?st\.id === this\.net\.id/.test(src),
+    '自分は観戦の相手にしない');
+  // 生き返ったら畳む。畳まないと生きているのに他人の肩越しのまま
+  ok(/player\.alive\) \{[\s\S]{0,200}?_specId = null;[\s\S]{0,120}?spectating\(null\)/.test(src),
+    '生き返ったら自分の視点へ戻す');
+  // 試合を抜けた時も畳む
+  ok(/setMode\('solo'\);[\s\S]{0,200}?spectating\(null\)/.test(src),
+    '試合を抜けたら札を畳む');
+  // クリックは押した瞬間だけ拾う（押しっぱなしで相手が回り続けない）
+  ok(/input\?\.clicked\(0\)/.test(src), '切り替えは押した瞬間だけ拾う');
+  // レイの受け口は使い回し（毎フレーム関数を作らない）
+  ok(/this\._specRay = \(/.test(src), '壁当たりの受け口を1つ作って使い回している');
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);

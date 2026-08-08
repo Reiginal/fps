@@ -347,6 +347,22 @@
   #zoneSub { font-size: 11px; letter-spacing: .22em; margin-top: 7px; color: var(--hud); }
   @keyframes zonepulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
 
+  /* ------------------------------------- 観戦中（対戦で倒れている間） */
+  /* 画面の下。倒れている間はクロスヘアも弾数も要らないので、
+     真ん中を空けて景色を見せる */
+  #spectate {
+    position: absolute; left: 50%; bottom: 13%;
+    transform: translateX(-50%);
+    text-align: center;
+    text-shadow: 0 2px 18px rgba(0,0,0,.9);
+    pointer-events: none;
+  }
+  #spectate.hidden { display: none; }
+  #specName { font-size: 15px; letter-spacing: .18em; color: var(--hud); }
+  #specName::before { content: '観戦中　'; color: #68727e; font-size: 11px; }
+  #specHint { font-size: 11px; letter-spacing: .16em; margin-top: 6px; color: #68727e; }
+  #specHint.hidden { display: none; }
+
   /* --------------------------------------------------- オーバーレイ */
   #overlay {
     display: flex; align-items: center; justify-content: center;
@@ -877,6 +893,12 @@
   <div id="zonewarn" class="hidden">
     <div id="zoneMain">戦域の外</div>
     <div id="zoneSub">中央へ戻れ</div>
+  </div>
+
+  <!-- 対戦で倒れている間、誰の肩越しに見ているか -->
+  <div id="spectate" class="hidden">
+    <div id="specName"></div>
+    <div id="specHint">クリックで次の人</div>
   </div>
 
   <div id="elim">

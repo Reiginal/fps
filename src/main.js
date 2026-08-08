@@ -7,7 +7,9 @@ import { Effects } from './world/effects.js';
 import { Input } from './core/input.js';
 import { AudioEngine } from './core/audio.js';
 import { createComposer } from './core/postfx.js';
-import { DEATH_FALL_S, startLook, turnLook, applyDeath } from './core/deathcam.js';
+import {
+  DEATH_FALL_S, startLook, turnLook, applyDeath, spectatePose,
+} from './core/deathcam.js';
 import { Capsule } from 'three/addons/math/Capsule.js';
 import { Player } from './player/player.js';
 import { WeaponSystem } from './player/weapons.js';
@@ -383,6 +385,9 @@ const _meshFrom = new THREE.Vector3();
 // 敵の発砲(_enemyShot)用の使い回し。発砲は敵14体の撃ち合いで毎秒30〜60回来るので、
 // 1発ごとにnewすると毎秒150個級のゴミになる（enemy.js側の_shootは先に使い回し化済み。
 // 受け側のここだけnewが残っていた）。effects.tracer/impactは同期で写し取るので渡してよい
+// 観戦カメラの壁当たり用。毎フレーム1本だけ飛ばすので使い回す
+const _specFrom = new THREE.Vector3();
+const _specDir = new THREE.Vector3();
 const _shotEye = new THREE.Vector3();
 const _shotEnd = new THREE.Vector3();
 const _shotNormal = new THREE.Vector3();
@@ -509,6 +514,16 @@ class Game {
     this._idleDrawn = false;
     // fpsの上限の升目（_loopの頭を参照）。設定「fps上限」で30へ落とせる
     this._frameGate = new FrameGate(FRAME_CAP_HZ);
+    /* 観戦カメラ（対戦で倒れている間）。今どの人の肩越しに居るか。
+       deathcam側へ渡す壁当たりの受け口はここで1つ作って使い回す
+       （毎フレーム関数を作ると、そのぶんゴミが出る） */
+    this._specId = null;
+    this._specRay = (from, dir, maxDist) => {
+      _specFrom.set(from.x, from.y, from.z);
+      _specDir.set(dir.x, dir.y, dir.z);
+      const hit = this._terrainRay(_specFrom, _specDir, maxDist);
+      return hit ? hit.distance : null;
+    };
     this._lastTime = 0;
     this._invQ = new THREE.Quaternion();
     // 倒れている間の見回し。生きている間はnullで、倒れた瞬間に
@@ -1348,6 +1363,9 @@ class Game {
     clearTimeout(this._endTimer);
     this.hud.setMode('solo');
     this.hud.show(false);
+    // 観戦の札を畳む。倒れたまま試合を抜けると出っぱなしになる
+    this._specId = null;
+    this.hud.spectating(null);
     // 一時停止から戻る時は一時停止の画面が、ロビーから戻る時はロビーが
     // 出たままなので、どちらも畳んでから選択画面を出す
     this.hud.hideOverlay();
@@ -1629,6 +1647,54 @@ class Game {
       // 見回しは対戦だけ。1人用は倒れたら結果画面へ移るので持たない
       look: this.deathLook,
     });
+  }
+
+  /**
+   * 倒れている間、生きている人の肩越しへカメラを移す（対戦だけ）。
+   *
+   * なぜ要るか: 倒れてから生き返るまで死体の目線のままで、地面に転がった絵を
+   * 数秒見せられる。「ずっと死体からの目線しかないのキツかった」と言われた所。
+   *
+   * **重さはほとんど増えない。** 見る相手の位置も向きも、他人を描くために
+   * 元々毎フレーム届いている（protocol.jsのpackPlayer）。ここは置き場所を
+   * 計算し直すだけで、描く物は1つも増えない。地形へのレイが1本だけ増えるが、
+   * 交戦中は毎フレーム90〜140本飛んでいるので誤差の範囲。
+   *
+   * 誰を見るかは左クリックで次の人へ回す。誰も生きていなければ死体の目線のまま
+   */
+  _spectate(states, input) {
+    if (!states || !this.net) return;
+    // 生きている他人だけを、idの順で並べる（毎フレーム同じ順に回るように）
+    const alive = [];
+    for (const st of states) {
+      if (st.id === this.net.id || (st.state & S.DEAD)) continue;
+      alive.push(st);
+    }
+    if (!alive.length) {
+      // 全滅している間は死体の目線のまま。ここで前の相手を掴んだままにすると、
+      // その人が倒れた場所を映し続けることになる
+      this._specId = null;
+      this.hud.spectating(null);
+      return;
+    }
+    alive.sort((a, b) => a.id - b.id);
+
+    let at = alive.findIndex((s) => s.id === this._specId);
+    // 見ていた人が倒れた（or 初めてここへ来た）なら先頭から
+    if (at < 0) at = 0;
+    // クリックで次の人へ。押しっぱなしで回り続けないよう、押した瞬間だけ拾う
+    if (input?.clicked(0)) at = (at + 1) % alive.length;
+    const target = alive[at];
+    this._specId = target.id;
+
+    const pose = spectatePose(target, this._specRay);
+    this.camera.position.set(pose.pos.x, pose.pos.y, pose.pos.z);
+    this.camera.rotation.set(pose.rot.x, pose.rot.y, 0, 'YXZ');
+    // 誰を見ているかを画面に出す。出さないと自分が生き返ったのかどうかも分からない
+    this.hud.spectating(
+      this.net.players.get(target.id)?.name || '味方',
+      alive.length > 1,
+    );
   }
 
   _showDeath() {
@@ -2509,6 +2575,15 @@ class Game {
 
     const states = net.stateAt();
     this._lastStates = states;
+    // 倒れている間は生きている人の肩越しへ移る（倒れ込みを見せ終わってから）
+    if (!player.alive && this.deathT !== null && this.deathT >= DEATH_FALL_S) {
+      this._spectate(states, input);
+    } else if (player.alive) {
+      // 生き返ったら見ていた相手を忘れる。覚えたままだと
+      // 次に倒れた時、いきなり前回の相手の肩越しから始まる
+      this._specId = null;
+      this.hud.spectating(null);
+    }
     // 誰がどの見た目かを渡す。姿を組むのは相手が初めて画面に出る時だけなので、
     // 毎フレーム作り直すことにはならない
     this._charMap ??= new Map();
