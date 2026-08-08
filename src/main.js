@@ -382,6 +382,12 @@ const _arcPrev = new THREE.Vector3();
 const _arcStep = new THREE.Vector3();
 // octreeの当たりから同じ面をメッシュ側で取り直す時の、短いレイの始点（_meshNear参照）
 const _meshFrom = new THREE.Vector3();
+// 敵の発砲(_enemyShot)用の使い回し。発砲は敵14体の撃ち合いで毎秒30〜60回来るので、
+// 1発ごとにnewすると毎秒150個級のゴミになる（enemy.js側の_shootは先に使い回し化済み。
+// 受け側のここだけnewが残っていた）。effects.tracer/impactは同期で写し取るので渡してよい
+const _shotEye = new THREE.Vector3();
+const _shotEnd = new THREE.Vector3();
+const _shotNormal = new THREE.Vector3();
 
 /**
  * 地形を真上から1枚だけ焼いて、2Dキャンバスとして返す。
@@ -1975,7 +1981,7 @@ class Game {
     this._markBlip(enemy, muzzle);
 
     const player = this.player;
-    const playerEye = new THREE.Vector3(
+    const playerEye = _shotEye.set(
       player.collider.start.x,
       player.feetY + player.height - 0.16,
       player.collider.start.z,
@@ -1987,13 +1993,17 @@ class Game {
     const ohit = this._terrainRay(muzzle, dir, Math.max(toPlayer + 4, 8));
     const blocked = !!(ohit && ohit.distance < toPlayer - 0.4);
 
-    this.effects.tracer(muzzle, muzzle.clone().addScaledVector(dir, Math.min(toPlayer + 6, 60)), 0.028, 0xffb066);
+    this.effects.tracer(
+      muzzle,
+      _shotEnd.copy(muzzle).addScaledVector(dir, Math.min(toPlayer + 6, 60)),
+      0.028, 0xffb066,
+    );
 
     if (blocked) {
       const h = this._meshNear(ohit, dir);
       const normal = h?.face
-        ? h.face.normal.clone().transformDirection(h.object.matrixWorld)
-        : dir.clone().negate();
+        ? _shotNormal.copy(h.face.normal).transformDirection(h.object.matrixWorld)
+        : _shotNormal.copy(dir).negate();
       const kind = h ? (this.kindOf.get(h.object.material) ?? 'concrete') : 'concrete';
       this.effects.impact(ohit.position, normal, kind);
       this.audio.impact(kind, ohit.position, this.camera);
@@ -2036,8 +2046,8 @@ class Game {
       if (mhit) {
         const h = this._meshNear(mhit, dir);
         const normal = h?.face
-          ? h.face.normal.clone().transformDirection(h.object.matrixWorld)
-          : dir.clone().negate();
+          ? _shotNormal.copy(h.face.normal).transformDirection(h.object.matrixWorld)
+          : _shotNormal.copy(dir).negate();
         const kind = h ? (this.kindOf.get(h.object.material) ?? 'concrete') : 'concrete';
         this.effects.impact(mhit.position, normal, kind);
         if (mhit.distance < 26) this.audio.impact(kind, mhit.position, this.camera);
@@ -3162,7 +3172,20 @@ class Game {
         input.endFrame();
       }
     } else {
-      this.effects.update(dt, this.camera);
+      /* ソロの倒れ込みはここで進める。倒れた瞬間にstateが'dead'になり、
+         上のplayingブロック（の中の_deathFall）は次のフレームから丸ごと
+         通らなくなるので、ここに無いと**倒れ込みが1フレームで止まる**
+         （実際に止まっていた。カメラが立ったまま結果画面まで固まる。2026-08-08発覚）。
+         対戦は倒れてもstateが'playing'のままなので、ここには来ない
+         （_versusFrameが自分の_deathFallを持っている） */
+      if (this.state === 'dead') this._deathFall(dt);
+      // 倒れ込みの最中はまだ画面が動くので効果も進める。
+      // それ以外（メニュー・ソロの一時停止・倒れ終わった後）は描かない画面なので
+      // 効果を進めても1粒も見えない。丸ごと見送る（進めない間は煙も止まるが、
+      // 世界ごと止まっている画面なので絵として矛盾しない）
+      if (this.state === 'dead' && (this.deathT ?? 0) < DEATH_FALL_S) {
+        this.effects.update(dt, this.camera);
+      }
       this.hud.update(dt);
       this.input.takeLook();
       this.input.endFrame();
@@ -3204,20 +3227,33 @@ class Game {
     // 試合の中かどうかも渡す。遠景の撃ち合いを試合の外で鳴らさないため。
     // 一時停止と死亡画面は試合の続きなので鳴らしたままにする
     this.audio.battle = this.state === 'playing' || this.state === 'paused' || this.state === 'dead';
-    this._updateEnvironment(dt);
 
-    // 影の箱はカメラの位置が決まった後でないと置けない
-    this._updateSunCascades();
-
-    /* メニュー・ロビーの間は毎フレーム描かない。
-       ホームもロビーもDOMの画面で、後ろの3Dはほぼ塗り潰されて見えないのに、
-       影・AO・ブルームまで全部の行程が毎フレーム回っていた
+    /* 動かない画面では毎フレーム描かない。
+       どれもDOMの画面が被さっていて、後ろの3Dは1ミリも動かないのに、
+       影・ブルームまで全部の行程が毎フレーム回っていた
        （閉じずに置いているだけでファンが回る、の原因の1つ）。
        1枚だけ描いて止める。キャンバスは最後に描いた絵を出し続けるので、
-       止めても画面は変わらない。窓の大きさが変わった時だけ描き直す（_resize参照）。
-       一時停止(paused)と死亡画面(dead)は後ろで試合が見えているので今まで通り描く */
-    const idle = this.state === 'menu';
-    if (!idle || !this._idleDrawn) this.fx.composer.render();
+       止めても画面は変わらない。窓の大きさや画質が変わった時だけ描き直す（_resize参照）。
+
+       止めるのは3つ:
+         ・メニュー・ロビー（前から）
+         ・ソロの一時停止（世界ごと止まっているので、動く物が無い）
+         ・ソロの死亡画面（倒れ込みが終わってから。倒れている間は描く）
+       **対戦は一時停止でも倒れていても止めない。** 裏で試合が動き続けていて、
+       「抜けている間も撃たれる」が見えることを隠さないため（_showPause参照） */
+    const solo = this.mode !== 'versus';
+    const idle = this.state === 'menu'
+      || (solo && this.state === 'paused')
+      || (solo && this.state === 'dead' && (this.deathT ?? 0) >= DEATH_FALL_S);
+    const willDraw = !idle || !this._idleDrawn;
+
+    // 残響の測り直しと影の箱は、描くフレームだけでよい
+    // （描かない画面では結果を誰も見ない。影の箱はカメラの位置が決まった後でないと置けない）
+    if (willDraw) {
+      this._updateEnvironment(dt);
+      this._updateSunCascades();
+      this.fx.composer.render();
+    }
     this._idleDrawn = idle;
 
     /* 描画命令と三角形は描き終わった後に読む（ここまでの合計がこのフレームの数）。
