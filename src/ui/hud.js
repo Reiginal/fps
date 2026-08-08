@@ -36,12 +36,15 @@ export class HUD {
       elim: $('elim'), elimName: $('elimName'), elimTag: $('elimTag'),
       achfeed: $('achfeed'),
       voice: $('voice'), voiceText: $('voiceText'),
+      spectate: $('spectate'), specName: $('specName'), specHint: $('specHint'),
     };
     this.markerTimer = 0;
     this.crossHitTimer = 0;
     this.bannerTimer = 0;
     this.dirIndicators = [];
     this._lastGap = -1;
+    // 観戦の札に今出ている中身。同じ値で毎フレーム書き込まないための控え
+    this._specKey = '';
     this._lastHealth = -1;
     this._lastAmmo = -1;
     this.mode = 'solo';
@@ -390,6 +393,29 @@ export class HUD {
    * @param name 倒した相手の名前。1人用は敵に名前が無いので空でよい
    * @param headshot 頭に当てて倒したか。色を青へ振って格を上げる
    */
+  /**
+   * 観戦中の札（対戦で倒れている間、誰の肩越しに見ているか）。
+   * nameにnullを渡すと畳む。
+   *
+   * **同じ値で呼ばれても2度目からDOMを触らない。** 倒れている間ずっと
+   * 毎フレーム呼ばれるので、そのたびに文字を書き込むと
+   * 見えない所でレイアウトを計算し直すことになる（tools/check-hud.mjsの[軽さ]）
+   *
+   * @param name 見ている人の名前。nullで畳む
+   * @param canSwitch 他にも生きている人がいるか。1人しかいない時は切り替えの案内を消す
+   */
+  spectating(name, canSwitch = false) {
+    const el = this.el.spectate;
+    if (!el) return;
+    const key = name === null || name === undefined ? '' : `${name}|${canSwitch ? 1 : 0}`;
+    if (key === this._specKey) return;
+    this._specKey = key;
+    if (!key) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    this.el.specName.textContent = name;
+    this.el.specHint.classList.toggle('hidden', !canSwitch);
+  }
+
   elim(name, headshot = false) {
     const el = this.el.elim;
     if (!el) return;
