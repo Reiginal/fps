@@ -1365,8 +1365,18 @@ class Game {
       this.input.requestLock();
     });
 
+    /* 掴むのを断られた時。**遊べなくなる失敗ではない**（もう一度クリックすれば掴める）ので、
+       赤い枠にブラウザの英語をそのまま出さず、次にやることだけを日本語で出す。
+       受けずに放っておくと、拾い手のいない失敗として赤い枠へ流れて、
+       読めない英語が消えないまま残る（2026-08-08に実際に出た） */
+    this.input.onLockFail(() => {
+      this.diag?.setState('lock', '画面をもう一度クリックすると操作を掴みます');
+    });
+
     this.input.onLockChange((locked) => {
       if (locked) {
+        // 掴めた時点でその案内は用済み。消さないと遊んでいる間ずっと残る
+        this.diag?.setState('lock', '');
         if (this.state === 'menu' || this.state === 'paused') {
           this.state = 'playing';
           this.hud.hideOverlay();
