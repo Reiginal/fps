@@ -78,6 +78,41 @@ ok(/npm run e2e/.test(noComment(deploy)), 'deploy.yml が本番へ出す前に n
 ok(noComment(deploy).indexOf('npm run e2e') < noComment(deploy).indexOf('flyctl deploy'),
   'flyctl deploy より前に呼んでいる');
 
+/* **仕事を分けたら、needsで繋いでいること。**
+   2026-08-09に deploy.yml を3つの仕事（検査・ブラウザ・本番へ出す）に分けて、
+   前の2つを同時に走らせるようにした（2.4分→1.9分）。
+   このやり方には、繋ぎ忘れると**赤くても本番へ出る**という戻り方がある。
+   昔まさにその形で、「別の仕事として横で走っていただけ」だった。
+   ファイルの並び順は実行の順番を1ミリも決めないので、needsを直接見る */
+{
+  const shipAt = deploy.indexOf('  ship:');
+  ok(shipAt > 0, '本番へ出す仕事(ship)がある');
+  // shipの中の needs: を読む。書いていなければ空文字になる
+  const needs = deploy.slice(shipAt).match(/needs:\s*\[([^\]]*)\]/)?.[1] ?? '';
+  for (const job of ['check', 'e2e']) {
+    ok(needs.includes(job), `本番へ出す前に ${job} の緑を待っている（needs: [${needs}]）`);
+  }
+  // 待つ相手が実在すること。名前を打ち間違えるとGitHubがその場で弾くが、
+  // 弾かれるのはmainへ入れた後（＝本番が止まる）なので、ここで拾う
+  for (const job of needs.split(',').map((s) => s.trim()).filter(Boolean)) {
+    ok(new RegExp(`^  ${job}:`, 'm').test(deploy), `${job} という仕事が実在する`);
+  }
+}
+
+console.log('\n[5-2] mainへ入った物を検査する所が、1つは残っている');
+/* 2026-08-09にci.ymlのpushの引き金からmainを外した（deploy.ymlと二重だったため）。
+   **これでmainを検査するのはdeploy.ymlだけになった。**
+   あちらから lint と check が消えると、mainは誰にも検査されないまま本番へ出る。
+   ci.ymlは pull_request でしか走らないので、消えても緑のまま気づけない */
+{
+  const onMain = /push:\s*\n\s*branches:\s*\[main\]/.test(noComment(ci));
+  const body = noComment(deploy);
+  for (const cmd of ['npm run lint', 'npm run check']) {
+    ok(onMain || body.includes(cmd),
+      `deploy.yml が ${cmd} を呼ぶ（ci.ymlはmainのpushで走らないので、ここが最後）`);
+  }
+}
+
 console.log('\n[6] このファイル自身も走る');
 ok(real.includes('check-meta.mjs'), 'check-meta.mjs 自身が tools/ にある');
 
