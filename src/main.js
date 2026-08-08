@@ -18,6 +18,7 @@ import { SettingsMenu } from './ui/settings.js';
 import { loadSettings, saveSetting, loadSavedRung, saveRung } from './core/settings.js';
 import { AutoQuality } from './core/autoquality.js';
 import { MAX_RUNG, rungValues } from './core/gfxrungs.js';
+import { FrameGate } from './core/framegate.js';
 import { PerfSegments } from './core/perfsegments.js';
 import { VoiceChat, PTT_CODE } from './net/voice.js';
 import { emptyTally, mergeTally, loadStats, saveStats, newlyUnlocked } from './core/stats.js';
@@ -48,15 +49,11 @@ const REJOIN_WAITS = [1000, 2000, 3000, 5000, 8000];
    「今どうだったか」が薄まる */
 const FRAME_SAMPLES = 2000;
 
-/* 描く速さの上限(毎秒)。
-   requestAnimationFrameは画面のリフレッシュレートで呼ばれるので、
+/* 描く速さの上限(毎秒)の既定。
    120Hzの画面(ProMotionのMacBook Pro等)では何もしないと全部の仕事が
-   毎秒120回走る＝60Hzの機械のちょうど2倍の熱になる。
-   このゲームは物理が60Hz固定・対戦の受信が毎秒20回なので、
-   60より速く描いても買える手触りがほとんど無い。上限で止める。
-   60Hzの画面では毎回升目に乗るので、何も変わらない */
+   毎秒120回走るので、60で止める（詳しくはsrc/core/framegate.js）。
+   設定「fps上限」で30（省エネ）へ落とせる */
 const FRAME_CAP_HZ = 60;
-const FRAME_MS = 1000 / FRAME_CAP_HZ;
 
 /* 描画命令(draw call)と三角形の数を覚えておく枚数。毎秒1回しか取らないので40秒ぶん。
    フレーム時間と違って毎フレーム取らないのは、この2つは1秒の中では
@@ -510,8 +507,8 @@ class Game {
     this.perfMeter = null;
     // メニューの間、既に1枚描いてあるか。描いてあれば描き直さない（_loop末尾を参照）
     this._idleDrawn = false;
-    // fpsの上限の升目。次に描いてよい時刻（_loopの頭を参照）
-    this._nextFrameAt = 0;
+    // fpsの上限の升目（_loopの頭を参照）。設定「fps上限」で30へ落とせる
+    this._frameGate = new FrameGate(FRAME_CAP_HZ);
     this._lastTime = 0;
     this._invQ = new THREE.Quaternion();
     // 倒れている間の見回し。生きている間はnullで、倒れた瞬間に
@@ -941,6 +938,13 @@ class Game {
       // ふちのギザギザ消し(MSAA)は描き先のバッファに焼き込むので起動時にしか効かない。
       // 表の作法（表に足した物は必ず効かせ先を持つ）を保つための空受け
       setMsaa: () => {},
+      /* fpsの上限（60/30）。升目と、自動画質の物差しの両方へ配る。
+         自動画質へ配り忘れると、上限30にした瞬間に「fpsが45を切っている＝重い」と
+         誤解して、軽いのに最低画質まで転げ落ちる */
+      setFpsCap: (hz) => {
+        this._frameGate.setCap(hz);
+        this.autoQ.setCap(hz);
+      },
       // 自動画質の入り切り（設定gfxAuto）
       setAuto: (v) => {
         if (v) { this.autoQ.enable(); return; }
@@ -2867,6 +2871,8 @@ class Game {
       scale: Math.round((this.renderer?.getPixelRatio() || 0) * 100),
       // 自動画質がどこまで下げて落ち着いたか。0=全部入り。自動を切っている人はnull
       rung: this.autoQ?.enabled ? this.autoQ.rung : null,
+      // fps上限の設定値。これが無いと「fps30」が省エネ設定なのか不調なのか読めない
+      cap: this._frameGate?.hz ?? null,
       /* 1分ごとのfps中央値と遅かった5%の列（例: "60,58,52"）。
          上のfps/lowは最後の33秒しか見ていないので、
          「最初から重い」のか「だんだん重くなる」のかはこの列でしか分からない */
@@ -3049,16 +3055,11 @@ class Game {
   /* ------------------------------------------------------- ループ */
 
   _loop() {
-    /* fpsの上限（FRAME_CAP_HZのコメント参照）。
-       16.67msの升目に乗った回だけ描き、乗らない回は何もせずに返す。
-       120Hzならちょうど1回おきになって60fpsで安定する。
-       時刻を進めない（_lastTimeを触らない）ので、次に描く回のdtには
-       飛ばした時間がそのまま入り、動きの速さは変わらない */
-    const tNow = performance.now();
-    if (tNow < this._nextFrameAt) return;
-    this._nextFrameAt += FRAME_MS;
-    // タブ復帰などで升目に大きく置いていかれたら、今へ引き直す
-    if (tNow - this._nextFrameAt > FRAME_MS * 3) this._nextFrameAt = tNow;
+    /* fpsの上限（判定の中身はsrc/core/framegate.js）。
+       升目に乗った回だけ描き、乗らない回は何もせずに返す。
+       120Hzで上限60ならちょうど1回おきになって60fpsで安定する。
+       設定「fps上限」を30にすると升目が倍の幅になる（省エネ） */
+    if (!this._frameGate.shouldDraw(performance.now())) return;
 
     // 描画命令の数を0へ戻す。ここから次のrender全部（影・AO・ポスト）を数える。
     // autoResetを切ってある理由はboot()のrenderer設定を参照

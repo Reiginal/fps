@@ -168,6 +168,21 @@ export const SETTINGS = [
       + '常に効いているので、切っても縁は破綻しません。入り切りは開き直してから効きます',
     apply: (v, t) => { t.gfx?.setMsaa?.(v); },
   },
+  {
+    key: 'fpsCap',
+    group: '画質',
+    /* gfxで始めない名前にしてある。gfx系は「既定の強制リセット」の消す対象で、
+       手で触ると自動画質が切れる扱い(main.jsのonChange)にもなる。
+       fps上限はどちらにも巻き込みたくない（省エネにしたい意思は既定が変わっても残す） */
+    store: 'blackout.fpscap',
+    name: 'fps上限',
+    kind: 'select',
+    options: ['60', '30'],
+    def: '60',
+    hint: '30にすると熱への効きはどの画質項目より大きい代わりに、'
+      + '狙いの滑らかさが目に見えて落ちます（省エネ）。動きの速さは変わりません',
+    apply: (v, t) => { t.gfx?.setFpsCap?.(parseInt(v, 10) || 60); },
+  },
 ];
 
 export const defOf = (key) => SETTINGS.find((s) => s.key === key) || null;

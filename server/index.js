@@ -175,7 +175,7 @@ async function handleReport(req, res) {
        reportRecordで受けていたのに、ここへ書き忘れていてcalls/tris/scale/rungが
        表から落ちていた（perf自体が届かないバグの陰で気づけなかった。2026-08-08） */
     calls: rec.calls, tris: rec.tris, scale: rec.scale, rung: rec.rung,
-    fpsMins: rec.fpsMins, lowMins: rec.lowMins,
+    cap: rec.cap, fpsMins: rec.fpsMins, lowMins: rec.lowMins,
   });
   res.writeHead(204).end();
 }

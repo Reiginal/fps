@@ -60,6 +60,25 @@ export class AutoQuality {
 
   enable() { this.enabled = true; }
 
+  /**
+   * fps上限に物差しを合わせる（設定「fps上限」から呼ばれる）。
+   * 既定の45/55/58は上限60が前提の値で、上限30のままだと
+   * 「常に45未満＝悪い窓」と誤解して、軽い端末でも最低画質まで転げ落ちる。
+   * 割合は 0.75 / 0.92 / 0.97（60の時に元の45/55/58へ一致するのが検算）。
+   * 数え途中の窓は捨てて仕切り直す（60の物差しで数えた分を30の判定に混ぜない）
+   */
+  setCap(hz) {
+    const h = Math.max(10, hz | 0);
+    this._badFps = Math.round(h * 0.75);
+    this._goodFps = Math.round(h * 0.92);
+    this._goodMedianFps = Math.round(h * 0.97);
+    this._n = 0;
+    this._sum = 0;
+    this._badStreak = 0;
+    this._goodFor = 0;
+    this._warm = this._warmupS;
+  }
+
   /** 毎フレーム呼ぶ。activeは「遊んでいる最中」（main.jsのstate==='playing'） */
   frame(dt, active) {
     if (!this.enabled) return;
