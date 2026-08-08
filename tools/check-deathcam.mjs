@@ -243,7 +243,9 @@ console.log('\n[観戦カメラ] 生きている人の肩越しに置く');
   // 後ろへ下がっている＝相手より手前(+Z)に居る
   ok(p.pos.z > SPEC_BACK - 0.01, `相手の後ろに置く（z=${p.pos.z.toFixed(2)}）`);
   ok(Math.abs(p.pos.x) < 1e-9, '真後ろ（横にずれない）');
-  ok(p.pos.y > t.y + SPEC_AIM_H, `目より上から見下ろす（y=${p.pos.y.toFixed(2)}）`);
+  // 高さは「胸の高さ＋肩越しの上げ幅」ちょうど（真後ろなので下がりぶんは効かない）
+  ok(Math.abs(p.pos.y - (t.y + SPEC_AIM_H + SPEC_UP)) < 1e-9,
+    `胸の高さ+${SPEC_UP}mから見下ろす（y=${p.pos.y.toFixed(2)}）`);
   ok(p.rot.x < 0, '少し下を向く（相手が画面の下寄りに来る）');
 
   // 向きを変えたらカメラも回り込む
