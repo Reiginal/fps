@@ -87,7 +87,57 @@ console.log('\n[7] main.jsが門番を通している');
   // 門番の返事を見てから立てる形だけを許す
   ok(/if \(g\.end\(\)\) c\.light\.shadow\.needsUpdate = true;/.test(main),
     '門番がうんと言った時だけ焼く');
-  ok(/deathSettled/.test(main), '落ち着いた死体を止まった物として数えている');
+  /* ソロで数えるのは落ち着いた死体だけ。生きた敵をここへ戻すと、
+     castShadowを切ってある（＝写りもしない）敵が歩くたびに
+     500枚超の焼き直しが走る元の形へ戻る */
+  ok(/if \(e\.alive \|\| !e\.deathSettled \|\| !e\.root\.visible\) continue;/.test(main),
+    'ソロは落ち着いた死体だけを数えている');
+}
+
+console.log('\n[8] 敵の影そのものが距離で入り切りする（実物を湧かせて測る）');
+{
+  // 門番が「生きた敵を数えない」で成り立つのは、
+  // 13mの外の敵がcastShadowを切っている時だけ。両方が揃って初めて安全なので、
+  // 敵側も実物のDirectorで湧かせて測る（やり方はcheck-swarm.mjsと同じ）
+  await import('../server/dom-stub.js');
+  const THREE = await import('three');
+  const { buildLevel } = await import('../src/world/level.js');
+  const { Director } = await import('../src/ai/enemy.js');
+  const SHARED = new THREE.MeshStandardMaterial();
+  const level = buildLevel(new Proxy({}, { get: () => SHARED }));
+  const scene = new THREE.Scene();
+  const player = {
+    collider: { start: new THREE.Vector3(0, 1.2, 0) },
+    feetY: 0.1, height: 1.7, alive: true, health: 100,
+    takeDamage: () => {},
+  };
+  const ctx = { octree: level.octree };
+  const director = new Director(scene, level);
+  director.betweenWaves = 0;
+  // 敵が湧いて最初のupdateが回るまで進める（湧きは0.55秒間隔）
+  for (let i = 0; i < 240; i++) director.update(1 / 60, player, ctx);
+  const alive = director.active.filter((e) => e.alive);
+  ok(alive.length >= 3, `敵が湧いた（${alive.length}体）`);
+
+  const far = alive.filter((e) => e._playerDist >= 14);
+  const farCasting = far.filter((e) => e.meshes.some((m) => m.castShadow));
+  ok(far.length >= 1 && farCasting.length === 0,
+    `13mの外の敵は影を落とさない（外${far.length}体中、落とすのは${farCasting.length}体）`);
+
+  // プレイヤーを1体の目の前へ置くと、その敵だけ影が点く
+  const target = far[0];
+  player.collider.start.set(target.collider.start.x + 2, 1.2, target.collider.start.z + 2);
+  director.update(1 / 60, player, ctx);
+  ok(target.meshes.every((m) => m.castShadow), '近づいた敵は影を落とす');
+
+  // 倒して落ち着かせると、死体として影が点く（遠くでも。遠い枚の住人になる）
+  player.collider.start.set(target.collider.start.x + 40, 1.2, target.collider.start.z + 40);
+  director.update(1 / 60, player, ctx);
+  ok(!target.meshes.some((m) => m.castShadow), '離れたら消える');
+  target.hit(9999, 'chest');
+  for (let i = 0; i < 300; i++) director.update(1 / 60, player, ctx);   // 5秒=倒れ切る
+  ok(!target.alive && target.deathSettled, '倒れ切った');
+  ok(target.meshes.every((m) => m.castShadow), '落ち着いた死体は遠くでも影を落とす');
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
