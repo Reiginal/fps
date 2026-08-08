@@ -133,6 +133,15 @@ export function reportRecord(bodyText) {
     // 自動画質がどこまで下げて落ち着いたか（0=全部入り、大きいほど軽い絵）。
     // fpsが良く見えても、rungが深ければ「下げたから保てている」と読める
     rung: num(m.rung),
+    /* 1分ごとのfps中央値と遅かった5%の列（例: "60,58,52"）。
+       上のfps/lowは最後の33秒だけなので、「だんだん重くなる」はこの列で見る。
+       数字とカンマ以外が混ざった物は丸ごと捨てる（文字列で受ける唯一の数字列なので、
+       ここから変な物がログ画面に流れ込まないよう形で縛る）。
+       上限200字＝60fpsでも1時間ぶんの束(60個×最大4字)が収まる長さ */
+    fpsMins: typeof m.fpsMins === 'string' && /^\d+(,\d+)*$/.test(m.fpsMins)
+      ? one(m.fpsMins, 200) : null,
+    lowMins: typeof m.lowMins === 'string' && /^\d+(,\d+)*$/.test(m.lowMins)
+      ? one(m.lowMins, 200) : null,
   };
 }
 

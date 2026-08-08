@@ -17,6 +17,7 @@ import { NetMenu, NET_MSG } from './ui/netmenu.js';
 import { SettingsMenu } from './ui/settings.js';
 import { loadSettings, saveSetting } from './core/settings.js';
 import { AutoQuality } from './core/autoquality.js';
+import { PerfSegments } from './core/perfsegments.js';
 import { VoiceChat, PTT_CODE } from './net/voice.js';
 import { emptyTally, mergeTally, loadStats, saveStats, newlyUnlocked } from './core/stats.js';
 import { Lobby } from './ui/lobby.js';
@@ -497,6 +498,8 @@ class Game {
     this._infoAt = 0;
     this._infoN = 0;
     this._infoAcc = 0;    // 1秒に1回だけ取るための積み
+    // 1分ごとのfpsの束。上のリングが「最後の33秒」しか持てないのを補う
+    this._perfSeg = new PerfSegments();
     this.perfMeter = null;
     // メニューの間、既に1枚描いてあるか。描いてあれば描き直さない（_loop末尾を参照）
     this._idleDrawn = false;
@@ -1335,8 +1338,8 @@ class Game {
     this._tally('matches');
     if (rank[0]?.me) this._tally('wins');
     this._checkAchievements();
+    // 重さの報告は_flushStatsの中で送られる（先に送ってから標本を捨てる順）
     this._flushStats();
-    this._reportPerf();
     this.hud.matchEnd(rows, true, `${MATCH.ROUND_WINS}本先取で決着`);
     // 次の試合が始まったら畳む。サーバーはINTERMISSION後に0点を配って再開する。
     // 前のタイマーが残っていると、続けて2試合終わった時に早い方が新しい順位を消す
@@ -1521,25 +1524,18 @@ class Game {
    * 毎回書き出すと、遊んでいないのに書き込みが走る
    */
   _flushStats() {
+    /* 重さの報告は**戦績を書き出す前に、必ずここで**送る。
+       前は「_flushStats()の後に_reportPerf()」の順で別々に呼んでいて、
+       _flushStatsがfpsの標本を先に捨てるので、_reportPerfは毎回
+       「標本が少なすぎる」で帰っていた。**つまり重さの数字は一度も
+       /logsへ届いていなかった**（2026-08-08、軽量化を測ろうとして発覚）。
+       ここに入れておけば、死んだ時・試合終了・ホームへ戻る・タブを閉じる、
+       どの締めの経路でも送り忘れない。標本の捨て直しは_reportPerfが持つ */
+    this._reportPerf();
     if (!Object.values(this.session).some((v) => v > 0)) return;
     this.stats = saveStats(mergeTally(this.stats, this.session));
     this.session = emptyTally();
     this._seen = this.stats;
-
-    /* 描いた1枚ごとの秒数。**遊び終わりに1回だけ数字にして送る。**
-       毎フレーム送ったら、その通信でさらに重くなる。
-
-       **輪にして使い回す。** 最初は普通の配列に push して、溢れたら shift していたが、
-       shift は先頭を抜いて残り全部を1つずつ前へ詰める処理で、
-       2000件の配列を**毎フレーム**ずらすことになる。
-       測るための仕掛けが測られる物を重くしていたら本末転倒 */
-    this._frames = new Float64Array(FRAME_SAMPLES);
-    this._frameAt = 0;    // 次に書く場所
-    this._frameN = 0;     // 溜まった数（上限はFRAME_SAMPLES）
-    // 描画命令・三角形の数も同じ区切りで捨てる。前の試合の数字を混ぜない
-    this._infoAt = 0;
-    this._infoN = 0;
-    this._infoAcc = 0;
   }
 
   /* 自分が倒れた。撃たれた・爆風・落下の3経路から同じ形で入る。
@@ -1569,8 +1565,7 @@ class Game {
       this.diag?.event('力尽きた', {
         wave: this.director.wave, kills: this.kills, score: this.score,
       });
-      // 1人用はここが遊び終わり。対戦は試合が終わった時に送る
-      this._reportPerf();
+      // 重さの報告は上の_flushStatsの中で送られている（先に送ってから標本を捨てる順）
     }
     // すぐ結果を出さない。倒れる間を見せてから出す。
     // 260msで切り替えていた頃は、撃たれた次の瞬間に文字が出ていて、
@@ -2800,8 +2795,15 @@ class Game {
    */
   _reportPerf() {
     const n = this._frameN;
-    // 短すぎる回は数字にならない（湧いた直後に落ちた等）
-    if (n < 120) { this._frameN = 0; this._frameAt = 0; return; }
+    // 短すぎる回は数字にならない（湧いた直後に落ちた等）。
+    // 捨てる時も全部捨てる。fpsの標本だけ捨てて描画命令や1分の束を残すと、
+    // 次の回の数字に前の回が混ざる
+    if (n < 120) {
+      this._frameN = 0; this._frameAt = 0;
+      this._infoAt = 0; this._infoN = 0; this._infoAcc = 0;
+      this._perfSeg.reset();
+      return;
+    }
     const sorted = Array.from(this._frames.subarray(0, n)).sort((a, b) => a - b);
     const at = (q) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))];
     const fps = (dt) => (dt > 0 ? Math.round(1 / dt) : 0);
@@ -2827,12 +2829,17 @@ class Game {
       scale: Math.round((this.renderer?.getPixelRatio() || 0) * 100),
       // 自動画質がどこまで下げて落ち着いたか。0=全部入り。自動を切っている人はnull
       rung: this.autoQ?.enabled ? this.autoQ.rung : null,
+      /* 1分ごとのfps中央値と遅かった5%の列（例: "60,58,52"）。
+         上のfps/lowは最後の33秒しか見ていないので、
+         「最初から重い」のか「だんだん重くなる」のかはこの列でしか分からない */
+      ...this._perfSeg.series(),
     });
     this._frameN = 0;
     this._frameAt = 0;
     this._infoAt = 0;
     this._infoN = 0;
     this._infoAcc = 0;
+    this._perfSeg.reset();
   }
 
   /**
@@ -3034,6 +3041,8 @@ class Game {
       this._frameAt = (this._frameAt + 1) % FRAME_SAMPLES;
       if (this._frameN < FRAME_SAMPLES) this._frameN++;
     }
+    // 1分ごとの束にも同じdtを積む（遊んでいる間だけ束の時計が進む）
+    this._perfSeg.frame(dt, this.state === 'playing');
     // 自動画質。重ければ1段ずつ絵を軽くする（遊んでいる間だけ数える）
     this.autoQ?.frame(dt, this.state === 'playing');
 
