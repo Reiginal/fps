@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { muzzleFlashTexture, radialTexture, smokeTexture } from '../world/textures.js';
 import { tryModelOverride } from './glbview.js';
+import { applySkin, loadSkin } from './skins.js';
 // 持ち物の決まりだけ取り込む。protocol.jsはこちらを読まないので輪にならない
 import { loadoutOf, NADE } from '../net/protocol.js';
 
@@ -197,9 +198,22 @@ function bakeWear(surf, repeat, color, metalness, roughness, w) {
   return { a, p };
 }
 
+/* **作った時の材料を覚えておく。** スキン（同じ銃の色違い）を作る時に、
+   色と擦れだけ差し替えた物を作り直せるようにするため。
+
+   ここに覚えさせるのが一番安い。銃の組み立てはプリミティブを手で並べる形で、
+   材質は MATS.enamel のように**直に書かれている所が274箇所**ある。
+   そこへ「どのスキンか」を配って回ると、274箇所を書き換えたうえに
+   武器を1本足すたびに同じ配線が要る。
+
+   材質を作る関数がこの1本しかないので、ここで控えを取れば全部拾える。
+   後から色を変えたい時は recolor() が控えを見て作り直す */
+const RECIPES = new WeakMap();
+
 function mat(color, metalness, roughness, surf, repeat, nscale, extra, wear) {
   const m = new THREE.MeshStandardMaterial(
     Object.assign({ color, metalness, roughness }, extra || {}));
+  RECIPES.set(m, [color, metalness, roughness, surf, repeat, nscale, extra, wear]);
   if (surf) {
     const n = surf.n.clone(); n.repeat.set(repeat, repeat);
     m.normalMap = n;
@@ -223,7 +237,64 @@ function mat(color, metalness, roughness, surf, repeat, nscale, extra, wear) {
   return m;
 }
 
-const MATS = {
+/**
+ * 材質を、色と擦れだけ変えて作り直す。**スキンはこれ1本で作る。**
+ *
+ * 表面の凹凸（SURF_*）・繰り返しの細かさ・法線の強さは引き継ぐ。
+ * そこまで変えると「同じ銃の色違い」ではなく別の銃になってしまうし、
+ * 凹凸は焼くのに時間がかかるので使い回したい。
+ *
+ * @param base 元の材質（MATSのどれか）
+ * @param over { color, metalness, roughness, wear:{amount,color,dust,dustColor,metal,rough} }
+ * @returns 新しい材質。元が控えに無ければ null
+ */
+export function recolor(base, over = {}) {
+  const r = RECIPES.get(base);
+  if (!r) return null;
+  const [color, metalness, roughness, surf, repeat, nscale, extra, wear] = r;
+  /* 擦れは**混ぜる**。amount だけ変えたい時に、色や埃まで既定へ戻ってしまうと
+     スキンの表に元の値を全部書き写すことになる（そして必ずずれる） */
+  const w = (wear || over.wear) ? { ...(wear || {}), ...(over.wear || {}) } : null;
+  return mat(
+    over.color ?? color,
+    over.metalness ?? metalness,
+    over.roughness ?? roughness,
+    surf, repeat, nscale, extra, w,
+  );
+}
+
+/**
+ * 面に貼ってある材質から、色違いを1つ作る。**スキンはこれを呼ぶ。**
+ *
+ * 面に実際に貼られているのは、接触影(AO)を焼く時に作った複製のことが多い
+ * （bakeStatic参照）。複製には控えが無いので、元を辿ってから作り直して、
+ * 複製に掛かっていた設定（頂点カラー・縁光のシェーダー）を掛け直す。
+ *
+ * @param m    面に貼ってある材質
+ * @param over 色や擦れの差し替え（recolorと同じ形）
+ */
+export function skinnedFrom(m, over) {
+  const base = m.userData?.skinBase || m;
+  const made = recolor(base, over);
+  if (!made) return null;
+  if (m.vertexColors) {
+    made.vertexColors = true;
+    // cloneと同じで、ここも写さないと縁光が消える
+    made.onBeforeCompile = m.onBeforeCompile;
+    made.customProgramCacheKey = m.customProgramCacheKey;
+  }
+  return made;
+}
+
+/** 面に貼ってある材質の、元の名前（MATSの鍵）。知らない物はnull */
+export function matNameOf(m) {
+  const base = m?.userData?.skinBase || m;
+  for (const [k, v] of Object.entries(MATS)) if (v === base) return k;
+  return null;
+}
+
+/** 銃の材質。**スキンはこの名前を指して色を差し替える** */
+export const MATS = {
   // 焼入れ鋼。擦れて地金が出ている明るい部分。
   // 磨き鋼のまま金属度1.0で置くと、白飛びした空のenvMapをほぼ全反射で返して
   // 機関部上面だけが純白の板になる（未着色のプレースホルダーに見える）。
@@ -1011,6 +1082,10 @@ function bakeStatic(group) {
         mm.vertexColors = true;
         mm.onBeforeCompile = m.onBeforeCompile;
         mm.customProgramCacheKey = m.customProgramCacheKey;
+        /* **元が誰かを覚えさせる。** 面に実際に貼られるのはこの複製の方なので、
+           スキン（色違い）を被せる時に「これは元々どの材質か」を辿れないと、
+           何も差し替わらない（実際そうなって0面しか変わらなかった） */
+        mm.userData.skinBase = m;
         _aoMat.set(m, mm);
       }
     }
@@ -2869,6 +2944,12 @@ class Weapon {
        （待つと、素材を持たないこのゲームで起動が素材待ちになる） */
     tryModelOverride(this, def.id).catch(() => {});
 
+    /* 選んだスキン（同じ銃の色違い）を被せる。**組み上がった後で材質だけ差し替える。**
+       ここで被せるのは、持ち替えのたびに作り直される物なので
+       （武器は試合ごとに組み直す）、覚えている選択をその都度反映する。
+       焼いた材質はスキンごとに1回しか作らないので、持ち替えで引っかからない */
+    applySkin(this.inner, loadSkin());
+
     this.ammo = def.mag;
     this.reserve = def.reserve;
     this.spread = def.spreadHip;
@@ -3229,6 +3310,17 @@ export class WeaponSystem {
 
   get current() { return this.weapons[this.index]; }
   get def() { return this.current.def; }
+
+  /**
+   * スキンを掛け直す。**組んである全部の武器に掛ける。**
+   *
+   * 今持っている物だけに掛けると、持ち替えた瞬間に前の色へ戻る
+   * （武器は起動時に全部組んであって、持ち替えは見せる物を替えているだけ）。
+   * 焼いた材質はスキンごとに1回しか作らないので、全部に掛けても安い
+   */
+  applySkin(id) {
+    for (const w of this.weapons) applySkin(w.inner, id);
+  }
 
   // 持ち替えが通ったかを返す。対戦では通った時だけサーバーへ知らせないと、
   // 弾かれた持ち替えまで送ってサーバー側だけ別の銃を構えることになる

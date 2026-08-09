@@ -21,6 +21,7 @@ import { Director, Enemy } from './ai/enemy.js';
 import { HUD } from './ui/hud.js';
 import { NetMenu, NET_MSG } from './ui/netmenu.js';
 import { AccountMenu } from './ui/account.js';
+import { LookMenu } from './ui/look.js';
 import { SettingsMenu } from './ui/settings.js';
 import { loadSettings, saveSetting, loadSavedRung, saveRung } from './core/settings.js';
 import { AutoQuality } from './core/autoquality.js';
@@ -1097,6 +1098,13 @@ class Game {
     this.account.onChange = (user) => menu.setAccountName(user ? user.name : null);
     this.account.refresh();
 
+    /* 見た目（武器のスキン）。**今持っている銃にもその場で反映する。**
+       次に構えるまで変わらないと、押した手応えが無くて
+       「効いていない」と読まれる（実際そう見える） */
+    this.look = new LookMenu();
+    this.look.onChange = (id) => this.weapons?.applySkin?.(id);
+    menu.onLook = () => this.look.show();
+
     // 戦績の画面はここにあったが消した（2026-08-07、「誰も見ない」）。
     // 記録そのもの(stats.js)は死亡画面の自己ベストと実績の解除通知が使うので残っている
     menu.onQuit = () => this._quitGame();
@@ -1218,6 +1226,7 @@ class Game {
     this.menu.hide();
     this.settings?.hide();
     this.account?.hide();
+    this.look?.hide();
     this.hud.show(false);
     this.hud.hideOverlay();
     this.chat.hide();
@@ -1868,7 +1877,7 @@ class Game {
       // 会員証も同じ。メアドとパスワードを打っている最中にロックを取られると、
       // 打った文字がゲームの操作として吸われる
       if (this.menu?.isOpen || this.lobby?.isOpen
-        || this.settings?.isOpen || this.account?.isOpen) return;
+        || this.settings?.isOpen || this.account?.isOpen || this.look?.isOpen) return;
       this.audio.init();
       this.audio.resume();
       if (this.state === 'dead') this._restart();
@@ -4059,6 +4068,9 @@ class Game {
     this.chat?.update(dt);
     // ロビーの3D。start()されている間だけ描く
     this.charView?.update(dt);
+    // 見た目の画面の3D。**開いている間だけ描く。**
+    // 畳み忘れると、ホームの裏で2つ目の場面が回り続けてパソコンが熱くなる
+    this.look?.update(dt);
 
     /* 空はscene.backgroundに焼いてあるので、ここでやることは無い。
        前は球をカメラへ毎フレーム追従させていた（背景のキューブは勝手に付いてくる） */
