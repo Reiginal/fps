@@ -521,6 +521,61 @@ console.log('\n[5.5] 手榴弾は押した瞬間ではなく離した瞬間に�
   ok(ws._throwCharging === false, '持ち替えると構えの印が消える');
 }
 
+console.log('\n[5.7] 手榴弾を使い切ったら手から下ろす');
+/* 遊んで「2発使い切ったら手榴弾持つのやめて。無くなってんだから」と言われた所。
+   それまでは0本になっても構え続けていて、左クリックのたびに
+   空撃ちのカチッだけが鳴っていた（＝無い物を握っている絵） */
+{
+  const nadeIdx = ws.weapons.findIndex((w) => w.def.thrown);
+  const gunIdx = ws.weapons.findIndex((w) => !w.def.melee);
+  ws.carry = [gunIdx, nadeIdx];
+  ws.resetAll();
+  ws.index = nadeIdx;
+  ws.switching = 0;
+  ws._pendingIndex = null;
+  const max = ws.nades;
+  // main.js の _throwNadeSolo と同じ繋ぎ方。投げた時に1つ減らす
+  ws.onThrow = () => ws.takeNade();
+
+  // 押して離すと1つ飛ぶ。次の1つまで間が空くので、その間は空回しする
+  const lob = () => {
+    ws.update(0.016, idle, player, {});
+    ws.update(0.016, held, player, {});
+    ws.update(0.016, idle, player, {});    // 離した瞬間に飛ぶ
+  };
+
+  ok(max > 0, `出撃時に${max}個持っている`);
+  lob();
+  ok(ws.nades === max - 1, `1個目が減った（残り${ws.nades}）`);
+  for (let i = 0; i < 120; i++) ws.update(0.016, idle, player, {});
+  ok(ws.index === nadeIdx, '残っているうちは握ったまま');
+
+  lob();
+  ok(ws.nades === 0, '2個目で残り0個');
+  // **投げる動作の途中では替わらない。** ここで替えると、
+  // 玉だけ飛んで手は動かない（振りの状態が持ち替えで消える）
+  ws.update(0.016, idle, player, {});
+  ok(ws.index === nadeIdx && ws.swing > 0, '投げている最中はまだ手榴弾');
+  // 振りが終わってから持ち替わる（持ち替え自体も0.42秒かかる）
+  for (let i = 0; i < 90; i++) ws.update(0.016, idle, player, {});
+  ok(ws.index === gunIdx, '投げ終わったら勝手に銃へ戻る');
+  ok(ws.takeNade() === false, '無い物は投げられない');
+  ok(ws.switchTo(nadeIdx) === false, '数字を押しても握り直せない');
+
+  // 拾えば戻る（対戦で落ちている物を拾った時）
+  ok(ws.addNades(1) === 1, '1個拾うと1個増える');
+  ok(ws.switchTo(nadeIdx) === true, '拾えばまた握れる');
+  ws.switching = 0; ws.index = nadeIdx; ws._pendingIndex = null;
+  ok(ws.addNades(9) === max - 1, `上限を超えて増えない（${max}個まで）`);
+
+  // 出撃し直すと満タンに戻る
+  ws.resetAll();
+  ok(ws.nades === max, `湧き直しで${max}個へ戻る`);
+  ws.carry = ws.weapons.map((_, i) => i);
+  ws.index = 0;
+  ws.switching = 0;
+}
+
 /* ------------------------------------------ 重い画面でもばねが発散しない */
 
 console.log('\n[5.6] 重い画面(dt=0.1)でも弾倉のばねが発散しない');
