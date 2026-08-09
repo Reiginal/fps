@@ -228,9 +228,11 @@ console.log('\n[8] 撃つたびに端末へ書かない');
   ok(/_flushStats\(\)\s*\{[\s\S]{0,800}?saveStats\(/.test(main),
     'その1箇所が _flushStats の中にある');
 
-  // 流し込む区切りが揃っているか。どれか1つ抜けると、その道で抜けた回だけ記録が消える
+  // 流し込む区切りが揃っているか。どれか1つ抜けると、その道で抜けた回だけ記録が消える。
+  // 窓は1100字。_onPlayerDownの頭に訓練場のガードとその理由コメントが入った
+  // (2026-08-09)ので、900では先頭から_flushStatsまで届かなくなった
   for (const at of ['_onPlayerDown', '_onMatchEnd', '_leaveMatch', '_goHome', 'visibilitychange']) {
-    ok(new RegExp(`${at}[\\s\\S]{0,900}?_flushStats\\(\\)`).test(main), `${at} で流し込む`);
+    ok(new RegExp(`${at}[\\s\\S]{0,1100}?_flushStats\\(\\)`).test(main), `${at} で流し込む`);
   }
 }
 
