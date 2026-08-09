@@ -3148,6 +3148,10 @@ class Game {
     const added = next.filter((i) => !before.includes(i));
     this.weapons.carry = next;
     if (added.length === 0) return null;
+    /* **支給された物をQの行き先にしておく。** これが無いと、5番を一度押すまで
+       Qがスナイパーを指さない。「5は指が遠い」から往復キーを足したのに、
+       最初の1回だけ5を押させるのでは半分しか解けていない */
+    this.weapons.lastIndex = added[0];
     const d = WEAPONS[added[0]];
     return { name: d.nick || d.name, slot: next.indexOf(added[0]) + 1 };
   }
@@ -3791,6 +3795,17 @@ class Game {
         this.player.cancelHeal();
         this.weapons.holsterBandage();
         if (this.weapons.switchTo(i) && this.mode === 'versus') this.net?.sendWeapon(i);
+      }
+      /* Qで直前の武器と往復する。**数字キーの代わりではなく、往復のための道具。**
+         遊んで「5を押すのは指的に遠い」と言われた所で、Qは指を浮かせずに届く。
+         実際の遊び方が「近い敵はライフル、遠い敵はスナイパー」の往復なので、
+         その2挺の行き来だけならもう数字を押さなくてよくなる。
+         中身（どこへ戻るか）は武器側が持つ（weapons.swapLast） */
+      if (canAct && input.pressed('KeyQ')) {
+        this.player.cancelHeal();
+        this.weapons.holsterBandage();
+        const to = this.weapons.swapLast();
+        if (to != null && this.mode === 'versus') this.net?.sendWeapon(to);
       }
 
       if (this.mode === 'versus') {
