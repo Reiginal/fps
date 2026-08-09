@@ -80,6 +80,19 @@ export const TUTORIAL_STEPS = [
     sub: '押している間だけしゃがむ',
     goalZ: -6,   // 梁(z=-4)の奥。しゃがまないと通れない
   },
+  /* 滑り込み。**走りとしゃがみの両方を教えた後に置く。**
+     押すキーはしゃがみと同じで、走っている時だけ意味が変わる操作なので、
+     どちらか片方しか知らない状態で出しても「なぜ今だけ違うのか」が伝わらない。
+
+     位置ではなく「1回滑れたか」で見る。梁の先(z=-6)から通路の端(z=-30)まで
+     24mあるので走る場所には困らないが、**どこで滑ってもよい**ことにしておくと、
+     引き返して助走を付け直すのも正解になる（位置で縛ると詰む人が出る） */
+  {
+    id: 'slide',
+    main: '走りながら Ctrl か C でスライディング',
+    sub: 'トップスピードに乗っている時だけ出る。低い姿勢のまま前へ滑り込む',
+    goal: 1,     // 回
+  },
   {
     id: 'shoot',
     main: '左クリックで撃ってみる',
@@ -159,7 +172,7 @@ export class TutorialMachine {
   /**
    * 毎フレーム呼ぶ。達成して次へ進んだフレームだけ 'advance' を返す。
    * snapは全部プリミティブ:
-   *   { dt, yaw, pitch, z, speed, onFloor, sprinting, crouching,
+   *   { dt, yaw, pitch, z, speed, onFloor, sprinting, crouching, sliding,
    *     keyA, keyS, keyD, shots, kills, adsFactor, reloading,
    *     weaponIndex, nadeKilled, healed }
    * zは通路のどこまで進んだか（移動系の課題は位置で判定する）。
@@ -219,6 +232,11 @@ export class TutorialMachine {
         // 進まなければ「走れた」ことにならないため（speedは実際の移動速度）
         if (snap.sprinting) this._progress += snap.speed * snap.dt;
         hit = this._progress >= s.goal;
+        break;
+      case 'slide':
+        // 滑り出した瞬間だけ立つ印。滑っている間ずっと立つので、
+        // 見えた時点で達成でよい（何度も滑らせる意味は無い）
+        if (snap.sliding) hit = true;
         break;
       case 'knife':
         // ナイフを持ったまま動けた距離。持っただけでは速さの違いが分からない
