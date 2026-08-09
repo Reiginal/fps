@@ -566,6 +566,15 @@
   #account.hidden { display: none; }
   /* 送信中はボタンを止める。連打されると同じ登録が2回飛ぶ */
   #account .netbtn:disabled { opacity: .35; cursor: default; pointer-events: none; }
+  /* ログインと新規登録の行き来。**押しボタンに見せない。**
+     枠付きのボタンで並べると、送る物と同じ重さに見えて選べなくなる */
+  .swaplink {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+    color: var(--accent); background: none; border: none;
+    padding: 4px 0; cursor: pointer; text-decoration: underline;
+  }
+  .swaplink:hover { color: var(--hud); }
+  .swaplink:disabled { opacity: .35; cursor: default; pointer-events: none; }
 
   /* --------------------------------------------------------- 設定 */
   /* 接続画面と同じ見た目にする。開ける場所が2つ（ホームと一時停止）あるので、
@@ -1152,10 +1161,13 @@
     <div class="title">BLACKOUT</div>
     <div class="subtitle">市街地掃討戦</div>
 
-    <!-- 会員証。台帳を持たないサーバーでは account.js がこの行ごと消す -->
+    <!-- 会員証。台帳を持たないサーバーでは account.js がこの行ごと消す。
+         **入口を2つ置く。** 「ログイン」だけを出していた頃は、
+         初めて来た人に「まず登録が要る」がどこにも書いていなかった -->
     <div id="acctRow" class="acctrow hidden">
       <div class="who" id="acctWho"></div>
       <button id="acctOpen" class="linkbtn" type="button">ログイン</button>
+      <button id="acctNew" class="linkbtn" type="button">新規登録</button>
       <button id="acctOut" class="linkbtn hidden" type="button">ログアウト</button>
     </div>
 
@@ -1208,10 +1220,16 @@
 
     <div id="acStatus"></div>
 
+    <!-- **押す物は2つだけ。** 前は「閉じる／新規登録／ログイン」の3つが
+         同じ見た目で並んでいて、真ん中だけが画面を切り替えるボタンだった。
+         送る物なのか切り替える物なのかが読めないと言われたので、
+         切り替えは下の文字リンクへ落として、ここは「閉じる」と「送る」だけにする -->
     <div class="netbtns">
       <button id="acClose" class="netbtn" type="button">閉じる</button>
-      <button id="acSwap" class="netbtn" type="button">新規登録</button>
       <button id="acGo" class="netbtn main" type="button">ログイン</button>
+    </div>
+    <div class="hint">
+      <button id="acSwap" class="swaplink" type="button">アカウントを作る</button>
     </div>
     <div class="hint">
       預かるのはメールアドレスと名前だけです。<a href="/privacy.html" target="_blank" rel="noopener">個人情報の扱い</a>
