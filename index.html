@@ -383,6 +383,16 @@
   #tutorial.hidden { display: none; }
   #tutMain { font-size: 16px; letter-spacing: .14em; color: var(--accent); }
   #tutSub { font-size: 12px; letter-spacing: .12em; margin-top: 7px; color: var(--hud); }
+  /* クリアの瞬間の合図（doneはhud.jsのtutorialDoneが一瞬だけ付ける）。
+     ✓が上から降りて止まり、札ごと緑に光る。バナーと小さい音だけでは
+     できたかどうか分からない、と言われて足した(2026-08-09) */
+  #tutCheck { display: none; font-size: 32px; line-height: 1; color: #7dffa0; margin-bottom: 8px; }
+  #tutorial.done #tutCheck { display: block; animation: tutpop .45s ease-out; }
+  #tutorial.done #tutMain, #tutorial.done #tutSub { color: #7dffa0; }
+  @keyframes tutpop {
+    from { transform: scale(2.4); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
 
   /* --------------------------------------------------- オーバーレイ */
   #overlay {
@@ -924,8 +934,10 @@
     <div id="specHint">クリックで次の人</div>
   </div>
 
-  <!-- チュートリアルの課題。今なにをすればいいかを常に出しておく -->
+  <!-- チュートリアルの課題。今なにをすればいいかを常に出しておく。
+       ✓はクリアの瞬間だけ出る（CSSの#tutorial.done） -->
   <div id="tutorial" class="hidden">
+    <div id="tutCheck">✓</div>
     <div id="tutMain"></div>
     <div id="tutSub"></div>
   </div>

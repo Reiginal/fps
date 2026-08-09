@@ -373,6 +373,10 @@ const MAP_PIXELS = 512;
 // 長くすると常時レーダーに近づいて、待ち伏せも回り込みも成立しなくなる
 const BLIP_FADE_S = 2.2;
 
+// チュートリアルの課題をクリアした瞬間、✓と緑を見せたまま文言を止める秒数。
+// HUD側(tutorialDone)の消えるタイミングにも同じ値を渡す（別々に持つと必ずずれる）
+const TUT_DONE_HOLD_S = 0.85;
+
 // 投げる時に前方へ足す上向き成分。真っ直ぐ投げると足元へ落ちて自爆する
 const NADE_LOFT = 0.34;
 const _throwOrigin = new THREE.Vector3();
@@ -1283,6 +1287,7 @@ class Game {
     });
     this._tutMachine.reset();
     this._tutFlags = { threw: false, healed: false };
+    this._tutDoneHold = 0;
     this._tutKills = 0;
     this._spawnTutorialTargets();
   }
@@ -1400,8 +1405,14 @@ class Game {
     this._tutFlags.threw = false;
     this._tutFlags.healed = false;
     if (res === 'advance') {
-      this.hud.banner('達成', '', 1.2);
-      this.audio.click(1400, 0.35, 0.2);
+      /* できた合図。前は中央のバナー(達成)と小さいカチッだけで、
+         「できたかどうかわかりづらい」と言われた(2026-08-09)。
+         読んでいる札そのものに✓と緑を出し、上がる2音（ロビー入室と同じ
+         lobbyJoin。ソロでは他に鳴る場面が無いので混ざらない）を鳴らして、
+         文言が次の課題へ変わるのを少しだけ待つ（すぐ変わると読めない） */
+      this.hud.tutorialDone(TUT_DONE_HOLD_S);
+      this.audio.lobbyJoin();
+      this._tutDoneHold = TUT_DONE_HOLD_S;
       const s = this._tutMachine.step;
       if (!s) { this._finishTutorial(); return; }
       // 包帯の課題は、体力が満タンだと巻き始め自体を断られる(startHeal)。
@@ -1411,10 +1422,15 @@ class Game {
       // 投げてしまうと、握ることさえできなくなって課題が詰む
       if (s.id === 'nade') this.weapons.addNades(NADE.PER_ROUND);
     }
-    const l = this._tutMachine.done
-      ? { main: '自由練習', sub: 'ESCを押して「ホームへ戻る」で終了' }
-      : this._tutMachine.label();
-    this.hud.tutorial(l.main, l.sub);
+    if ((this._tutDoneHold ?? 0) > 0) {
+      // ✓を見せている間は文言を書き換えない（クリアした課題の文のまま光らせる）
+      this._tutDoneHold -= dt;
+    } else {
+      const l = this._tutMachine.done
+        ? { main: '自由練習', sub: 'ESCを押して「ホームへ戻る」で終了' }
+        : this._tutMachine.label();
+      this.hud.tutorial(l.main, l.sub);
+    }
   }
 
   /* -------------------------------------------------- 射撃訓練場 */
