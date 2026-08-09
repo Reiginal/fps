@@ -483,6 +483,21 @@ export class HUD {
     this.el.tutSub.textContent = sub;
   }
 
+  /**
+   * 課題をクリアした瞬間の一発合図。札に✓と緑を出して、少し置いて自分で消す。
+   * 文言の書き換え(tutorial)と別口なのは、こちらがクリアの瞬間にしか呼ばれない
+   * 一発物だから（毎フレーム物の「同じ値なら触らない」ガードとは性質が違う）。
+   * holdSはmain.js側の文言を止める秒数と同じ値が渡ってくる（ずれると
+   * 緑が消えた後も前の課題の文が残る、の中途半端な見た目になる）
+   */
+  tutorialDone(holdS = 0.85) {
+    const el = this.el.tutorial;
+    if (!el) return;
+    el.classList.add('done');
+    clearTimeout(this._tutDoneTimer);
+    this._tutDoneTimer = setTimeout(() => el.classList.remove('done'), holdS * 1000);
+  }
+
   spectating(name, canSwitch = false) {
     const el = this.el.spectate;
     if (!el) return;

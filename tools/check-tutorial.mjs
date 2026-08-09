@@ -326,6 +326,11 @@ console.log('\n[4] HUDの課題札: 軽さと畳み');
   ok(!tut.classList.contains('hidden'), '出ている');
   hud.tutorial(null);
   ok(tut.classList.contains('hidden'), 'nullで畳む');
+  // クリアの瞬間の一発合図。付いて、少し置いて自分で消える
+  hud.tutorialDone(0.01);
+  ok(tut.classList.contains('done'), 'tutorialDone()で✓の印(done)が付く');
+  await new Promise((r) => setTimeout(r, 40));
+  ok(!tut.classList.contains('done'), '✓の印は少し置いて自分で消える');
   hud.setTutorial(true);
   ok(hudEl.classList.contains('tutorial'), 'setTutorial(true)で#hudに印が付く');
   hud.setTutorial(false);
@@ -338,6 +343,8 @@ console.log('\n[5] 器の繋ぎ込み（HTML/CSS/メニュー）');
   const netmenuSrc = readFileSync(new URL('../src/ui/netmenu.js', import.meta.url), 'utf8');
   ok(/id="nmTutorial"/.test(html), 'ホームにチュートリアルのボタンがある');
   ok(/id="tutorial"/.test(html) && /id="tutMain"/.test(html), '課題札のDOMがある');
+  ok(/id="tutCheck"/.test(html) && /#tutorial\.done/.test(html),
+    'クリアの✓の器と見た目のCSSがある');
   ok(/#hud\.tutorial #waveBox, #hud\.tutorial #scoreBox, #hud\.tutorial #minimap \{ display: none; \}/.test(html),
     'チュートリアル中は波・得点・地図が消えるCSSがある');
   // setBusyへの足し忘れ＝対戦の接続中にチュートリアルへ入れてしまう
@@ -380,6 +387,13 @@ console.log('\n[6] 本編との縁切り（戦績・波・死・当たり先）'
   // 修了はstateを先に立ててから掴みを離す（逆だと一時停止画面に化ける）
   ok(/_finishTutorial\(\) \{[\s\S]{0,200}?state = 'paused';\s*document\.exitPointerLock/.test(src),
     '修了はstateを先に立てる');
+  /* クリアの瞬間の合図（✓＋緑＋上がる2音）。バナーと小さいカチッだけでは
+     「できたかどうかわかりづらい」と言われた(2026-08-09)。
+     どちらか片方だけ残って片方が消える、を防ぐため両方の呼び出しを見る */
+  const adv = src.match(/res === 'advance'\) \{[\s\S]{0,600}/)?.[0] ?? '';
+  ok(/tutorialDone\(/.test(adv), 'クリアの瞬間に✓の合図を出す');
+  ok(/lobbyJoin\(\)/.test(adv), 'クリアの瞬間に音を鳴らす');
+  ok(/_tutDoneHold/.test(adv), '文言を少し止めてから次の課題へ変える');
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
