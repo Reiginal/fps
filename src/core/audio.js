@@ -867,6 +867,103 @@ export class AudioEngine {
     this._step(Math.min(1.4, intensity * 1.3), surface, position, camera, 2.1);
   }
 
+  /**
+   * 滑り込み。**足音の連打ではなく、1本の長い擦れ。**
+   *
+   * 足音を速く鳴らして代用してはいけない。足音は「踏む・離す」の打点の集まりで、
+   * 滑りは打点が1つも無い連続音。速く鳴らすと機関銃のような足音になるだけで、
+   * 「体が地面に接している」に絶対に聞こえない。
+   *
+   * 組み方は3層。
+   *   1. 体が路面へ落ちる低音（1回だけ。無いと何もない所から急に擦り始める）
+   *   2. 擦れ本体。帯域を下へ落としながら減っていく。減速がそのまま音になる
+   *   3. 砂利や小石が弾ける粒（素材のgritをそのまま使う）
+   *
+   * 長さは player.js の SLIDE_TIME_S(0.78秒) に合わせてある。
+   * 途中で滑りが終わる（跳んで抜ける等）ことはあるが、鳴っている音を
+   * 途中で止める仕組みは持たせていない。0.2秒ぶんの尻尾が残るだけで、
+   * そのために毎回ノードの参照を持ち回るほうが割に合わない
+   */
+  slide(surface = 'dirt', position = null, camera = null) {
+    if (!this.ready || !this.enabled) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const s = SURFACES[surface] ?? SURFACES.dirt;
+    const dur = 0.78;
+
+    const bus = ctx.createGain();
+    bus.gain.value = 1;
+
+    // 1. 体が落ちる低音。着地(land)より深く、余韻を長めに取る
+    const th = ctx.createOscillator();
+    th.type = 'sine';
+    th.frequency.setValueAtTime(s.thump * 0.9, t);
+    th.frequency.exponentialRampToValueAtTime(s.thump * 0.42, t + 0.16);
+    const thg = ctx.createGain();
+    th.connect(thg); thg.connect(bus);
+    this._env(thg, t, 0.52 * s.vol, 0.005, 0.15);
+    th.start(t); th.stop(t + 0.5);
+
+    // 2. 体が路面を引きずる唸り。**ここが「重さ」の正体。**
+    // 低い所だけを残したノイズを、滑っている間ずっと鳴らす。
+    // 最初これを入れずに擦れだけで組んだら、重心が5.2kHzまで上がって
+    // 「シャー」というただの雑音になった（足音は2.2kHz）。
+    // 体が地面に接している音は、擦れる高い成分より先にこの唸りが要る
+    const low = this._noiseSource(rnd(0.55, 0.7));
+    const lf = ctx.createBiquadFilter();
+    lf.type = 'lowpass';
+    lf.frequency.setValueAtTime(s.thump * 2.6, t);
+    lf.frequency.exponentialRampToValueAtTime(s.thump * 1.3, t + dur);
+    lf.Q.value = 1.1;
+    const lg = ctx.createGain();
+    low.connect(lf); lf.connect(lg); lg.connect(bus);
+    lg.gain.setValueAtTime(0.0001, t);
+    lg.gain.linearRampToValueAtTime(1.35 * s.vol, t + 0.05);
+    lg.gain.setTargetAtTime(0.0001, t + 0.05, dur * 0.30);
+    low.start(t, Math.random() * 1.5);
+    low.stop(t + dur + 0.3);
+
+    // 3. 擦れ本体。帯域が下がりながら細くなる＝速さが落ちていく音になる。
+    // **上に蓋(lowpass)を必ず被せる。** bandpassのQを下げると帯が広くなり、
+    // 蓋が無いと7kHz超が全体の27%を占めて、布ではなく砂嵐の音になる
+    const src = this._noiseSource(rnd(0.8, 1.0));
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.setValueAtTime(s.gritFreq * 0.34, t);
+    f.frequency.exponentialRampToValueAtTime(s.gritFreq * 0.11, t + dur);
+    f.Q.value = 0.7;
+    const cap = ctx.createBiquadFilter();
+    cap.type = 'lowpass';
+    cap.frequency.value = 1500;
+    const g = ctx.createGain();
+    src.connect(f); f.connect(cap); cap.connect(g); g.connect(bus);
+    // 立ち上がりだけ速く、そこから滑りの減速と同じ形で減らす。
+    // _envだと減り方が固定なので、ここは直に書く
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.55 * s.vol * s.grit + 0.16, t + 0.045);
+    g.gain.setTargetAtTime(0.0001, t + 0.045, dur * 0.30);
+    src.start(t, Math.random() * 1.5);
+    src.stop(t + dur + 0.3);
+
+    // 4. 弾ける粒。土や砂利ほど強い。舗装の上ではほとんど鳴らない。
+    // 最初の1/4秒だけ。滑り出しの瞬間に小石が跳ねて、あとは擦れだけが残る
+    const grit = this._noiseSource(rnd(1.1, 1.4));
+    const gf = ctx.createBiquadFilter();
+    gf.type = 'bandpass';
+    gf.frequency.value = s.gritFreq * 0.9;
+    gf.Q.value = 0.8;
+    const gg = ctx.createGain();
+    grit.connect(gf); gf.connect(gg); gg.connect(bus);
+    gg.gain.setValueAtTime(0.0001, t);
+    gg.gain.linearRampToValueAtTime(0.05 * s.vol * s.grit, t + 0.03);
+    gg.gain.setTargetAtTime(0.0001, t + 0.03, 0.07);
+    grit.start(t, Math.random() * 1.5);
+    grit.stop(t + 0.6);
+
+    const out = this._place(bus, position, camera, 6);
+    this._out(out, surface === 'metal' ? 0.34 : 0.20, 0.14);
+  }
+
   _step(intensity, surface, position, camera, weight) {
     if (!this.ready || !this.enabled) return;
     const ctx = this.ctx;

@@ -66,6 +66,8 @@ node tools/map.mjs 発砲    # 「発砲」を含む区切りがどのファイ�
 | 弾が当たらない・当たり判定 | 対戦は `server/sim.js` の `resolveShot`、ソロは `src/main.js` の `_resolveShot`。**別物が2つある** | weapons, hitbox, rays |
 | 撃ち味・反動・構え・持ち替え | `src/player/weapons.js`（「実装」より下） | weapons, loadout, reload |
 | 動きが変・位置が引き戻される | `src/player/player.js`。**両側で同じ物が走る** | parity, doors |
+| 滑り込み・しゃがみが変 | `src/player/player.js` の「スライディング」 | slide, parity |
+| 体力・固さ・何発で倒れる | `src/net/protocol.js` の `HP`。**1人用と対戦で違う** | hp, heal |
 | 弾痕・火花・煙・薬莢 | `src/world/effects.js` | — |
 | 音 | `src/core/audio.js` | sound（`npm run sounds`で先に測る） |
 | 画面の数字・撃破表示・順位表 | `src/ui/hud.js` | hud |

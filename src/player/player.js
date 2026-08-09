@@ -7,7 +7,7 @@
 // バネの結果は絶対にcolliderへ戻さない。当たり判定が揺れると撃ち合いが壊れる。
 import * as THREE from 'three';
 import { Capsule } from 'three/addons/math/Capsule.js';
-import { HEAL } from '../net/protocol.js';
+import { HEAL, HP } from '../net/protocol.js';
 
 const GRAVITY = 22;
 const STAND_H = 1.74;
@@ -65,6 +65,42 @@ const JUMP_VEL = 6.6;
 // しゃがみジャンプの倍率。縮こまった姿勢から伸び上がるので立ち跳びより低い。
 // 0.82だと段差の乗り越えには足りるが、立ち跳びの代わりにはならない
 const CROUCH_JUMP_MUL = 0.82;
+
+/* ------------------------------------------------------ スライディング */
+
+/* 走ってトップスピードに乗っている時にしゃがみを押すと、前へ滑り込む。
+   Valorantのネオンの動きが元ネタ。
+
+   **これは「速い移動手段」ではなく「速さを一度だけ現金化する操作」。**
+   滑っている間は加速も方向転換もほぼ効かず、行き先を先に決めて飛び込む形になる。
+   だから曲がり角へ体を投げ込む・遮蔽の裏へ滑り込む、のような使い方に寄る。
+   もし「歩くより滑るほうが速い」状態にすると、走りに息を付けた時と同じで
+   常に滑るのが最適解になって、また選択が消える。だから息を消費させて、
+   終わった後にしばらく滑れない時間を置いてある。
+
+   数字の根拠:
+   ・滑り出し10.2は走り7.4の1.38倍。速いのは一瞬だけなので、
+     移動距離では走り続けたほうが速い（下の摩擦で0.78秒しか保たない）
+   ・摩擦1.2は「0.78秒で10.2→4.0まで落ちる」量。進む距離はおよそ5.2mで、
+     ちょうど通路1本ぶん飛び込める。ここを上げると滑らずに転ぶだけになる */
+
+// 滑り出せる最低速度。歩き(4.7)からは絶対に出ない。走りの最高速7.4の85%
+const SLIDE_MIN_SPEED = 6.3;
+// 滑り出しの速さ
+const SLIDE_SPEED = 10.2;
+// 滑っていられる最長。過ぎたら普通のしゃがみへ戻る
+const SLIDE_TIME_S = 0.78;
+// ここまで遅くなったら終わる。止まりかけを滑りと呼ばない
+const SLIDE_END_SPEED = 4.0;
+// 滑っている間の摩擦。走りの摩擦(9.5*0.42)より桁で弱い
+const SLIDE_FRICTION = 1.2;
+// 滑りながら向きを変えられる強さ。速さは変えずに向きだけ寄せる。
+// 大きいと滑りながら自由に曲がれてしまい、行き先を先に決める操作でなくなる
+const SLIDE_STEER = 2.2;
+// 終わってから次に滑れるまで
+const SLIDE_COOLDOWN_S = 1.1;
+// 1回ぶんの息。3回続けて滑ると息が切れる量
+const SLIDE_STAMINA = 0.34;
 
 /* ------------------------------------------------------------ 落下ダメージ */
 
@@ -151,6 +187,14 @@ export class Player {
     this.stamina = 1;
     this.staminaLock = false;
     this._sprintRest = SPRINT_REST_S;
+    /* 滑り込み。slidingが今まさに滑っているか、_slideTが残り秒数、
+       _slideCdが次に滑れるまでの待ち。_slideLeanは見た目の傾きだけに使う */
+    this.sliding = false;
+    this._slideT = 0;
+    this._slideCd = 0;
+    this._slideLean = 0;
+    // 滑り出した瞬間に1回だけ呼ぶ。音を鳴らすのは呼ばれた側の仕事
+    this.onSlide = null;
     this.adsFactor = 0;      // 外から武器が書き込む 0..1
     // 持っている武器から入る移動速度の倍率。武器側が毎フレーム書き込む
     this.moveMul = 1;
@@ -158,12 +202,15 @@ export class Player {
     // 既定の0.45は「覗くと感度55%」の意味で、狙撃銃だけここが大きい
     this.adsSlow = 0.45;
 
-    // 体力を100から130へ。武器のダメージ表は触らない。
-    // ライフルは胴27なので4発→5発、SMGは18で6発→8発になり、
-    // 撃ち合いが「先に当てたほうが勝ち」から「当て続けたほうが勝ち」へ寄る。
-    // 頭は倍率が乗るので、狙える人の速さは落としすぎない
-    this.health = 130;
-    this.maxHealth = 130;
+    /* 体力を100から130へ。武器のダメージ表は触らない。
+       ライフルは胴27なので4発→5発、SMGは18で6発→8発になり、
+       撃ち合いが「先に当てたほうが勝ち」から「当て続けたほうが勝ち」へ寄る。
+       頭は倍率が乗るので、狙える人の速さは落としすぎない。
+
+       ここに入るのは1人用の値。**対戦は倍**で、入る時に外から書き換える
+       （main.jsの_joinMatchとserver/sim.jsのSimPlayer）。理由はprotocol.jsのHP */
+    this.health = HP.SOLO;
+    this.maxHealth = HP.SOLO;
     this.alive = true;
     // 包帯。巻いている残り秒数と、持っている数
     this.healing = 0;
@@ -246,6 +293,11 @@ export class Player {
     this._accZ = 0;
     this._sprintHold = 0;
     this._sprintLean = 0;
+    // 滑っている最中に湧き直したら、湧いた先で滑り続けないように畳む
+    this.sliding = false;
+    this._slideT = 0;
+    this._slideCd = 0;
+    this._slideLean = 0;
     this._wasMoving = false;
     this._prevSpeed = 0;
     this._fallSpeed = 0;
@@ -430,6 +482,50 @@ export class Player {
     return false;
   }
 
+  /**
+   * 滑れるなら滑り出す。しゃがみを押し下げた瞬間にだけ呼ばれる。
+   *
+   * 条件を絞っているのは、**しゃがみが今まで通り使えることのほうが大事**だから。
+   * 立ち止まってしゃがむ・歩きながらしゃがむ・覗きながらしゃがむは全部これまで通りで、
+   * 「走ってトップスピードに乗っている時」だけが滑りに化ける。
+   * 条件をどれか1つでも緩めると、隠れようとしてしゃがんだのに前へ飛び出す事故が起きる
+   */
+  _trySlide() {
+    if (!this.alive || this.sliding) return false;
+    if (this._slideCd > 0) return false;
+    // 前のフレームの走り。しゃがみを押した瞬間はまだ身長が縮んでいないので、
+    // この時点のsprintingは「押す直前まで走っていたか」を正しく表している
+    if (!this.sprinting) return false;
+    if (!this.onFloor && this._airTime >= COYOTE) return false;
+    const sp = this.horizontalSpeed;
+    // 走りのキーを押した直後の、まだ加速中の状態では滑らせない。
+    // 走り出しと同時にしゃがめる形にすると、走る意味そのものが薄くなる
+    if (sp < SLIDE_MIN_SPEED) return false;
+    if (this.stamina < SLIDE_STAMINA) return false;
+
+    this.sliding = true;
+    this._slideT = SLIDE_TIME_S;
+    this.stamina = Math.max(0, this.stamina - SLIDE_STAMINA);
+    // 今進んでいる向きへそのまま加速する。視点の向きではなく速度の向きに乗せるのは、
+    // 滑り出しで体が横へワープしたように見えるのを避けるため
+    const k = SLIDE_SPEED / sp;
+    this.velocity.x *= k;
+    this.velocity.z *= k;
+    // 腰を落として前へ突っ込む。当たり判定には一切効かない見た目だけの衝撃
+    this._dip.kick(-2.4);
+    this._sStep.kick(-0.8);
+    this.onSlide?.();
+    return true;
+  }
+
+  /** 滑りを畳んで、次に滑れるまでの待ちを置く */
+  _endSlide() {
+    if (!this.sliding) return;
+    this.sliding = false;
+    this._slideT = 0;
+    this._slideCd = SLIDE_COOLDOWN_S;
+  }
+
   // バネは硬いので重いフレームで一気に積むと発散する。0.02秒ずつに割って解く
   _stepSprings(dt) {
     const n = Math.min(5, Math.max(1, Math.ceil(dt / 0.02)));
@@ -468,11 +564,20 @@ export class Player {
     // MetaはMacのCommand。対戦側の割り当て(protocol.jsのKEY_CODES)と揃えてある
     const wantCrouch = this.alive && (input.down('ControlLeft') || input.down('KeyC')
       || input.down('MetaLeft') || input.down('MetaRight'));
+    this._slideCd = Math.max(0, this._slideCd - dt);
     if (wantCrouch !== this._wantCrouch) {
       this._wantCrouch = wantCrouch;
       this._postureArm = wantCrouch ? -1 : 1;   // 到着した時に行き過ぎさせる向き
+      /* しゃがみを押し下げた瞬間だけ、滑れるかを見る。
+         押し下がりをここで拾うのは、しゃがみのキーが4つ(Ctrl/C/Command左右)あって、
+         input.pressed()を1つずつ見ると押し方によって取りこぼすため。
+         この_wantCrouchの立ち上がりなら、どのキーで押しても同じ1回になる。
+         **サーバー側も同じ判定を通る**（ServerInputもdown()を返すので） */
+      if (wantCrouch) this._trySlide();
     }
-    const targetH = wantCrouch ? CROUCH_H : STAND_H;
+    // 滑っている間はしゃがみの姿勢に固定する。キーを離しても滑りは続く
+    // （離した瞬間に立ち上がると、滑り終わりが毎回ぶれて操作の手応えが読めない）
+    const targetH = (wantCrouch || this.sliding) ? CROUCH_H : STAND_H;
     if (Math.abs(this.height - targetH) > 0.001) {
       // 沈むのは速く、立つのは遅い。左右対称だと機敏すぎて体重が消える
       const rate = targetH < this.height ? 20 : 12;
@@ -496,6 +601,10 @@ export class Player {
       && !this.crouching && this.adsFactor < 0.5;
     if (this.staminaLock && this.stamina >= 1) this.staminaLock = false;
     this.sprinting = wantSprint && !this.staminaLock;
+    // 滑っている間は「走り」ではない。ここを立てたままにすると、
+    // 画面の走りの印も画角も武器の下げ方も走り扱いのままになり、
+    // 滑っているのに走って見える（撃てるのに撃てない絵になる）
+    if (this.sliding) this.sprinting = false;
 
     if (this.sprinting) {
       this._sprintRest = 0;
@@ -515,6 +624,11 @@ export class Player {
       : Math.max(0, this._sprintHold - dt * 1.6);
     // 前傾は狙いに直接響くので、こちらは素早く戻す
     this._sprintLean = THREE.MathUtils.damp(this._sprintLean, this.sprinting ? 1 : 0, 8, dt);
+    // 滑りの傾き。入るのは速く、戻るのは遅い。滑り終わってからも
+    // 少しだけ体が起き上がりきらない残り方をするほうが、立ち上がりに重さが出る
+    this._slideLean = THREE.MathUtils.damp(
+      this._slideLean, this.sliding ? 1 : 0, this.sliding ? 14 : 6, dt,
+    );
 
     // 武器ごとの倍率。短剣は銃を下ろすぶん身軽で速い。
     // 持たない武器はmoveMulを書いていないので、その時は1として扱う
@@ -546,7 +660,38 @@ export class Player {
     // 跳んだ瞬間は_airTimeがCOYOTEで埋まるので、跳躍の慣性はここに入らない
     const grounded = this.onFloor || this._airTime < COYOTE;
 
-    if (grounded) {
+    if (this.sliding) {
+      /* 滑っている間は、摩擦も加速も普段と別物にする。
+         普段の摩擦は「押している間は弱く、離した瞬間に強い」だが、
+         滑りは押していようがいまいが同じ速さで減っていくのが正しい
+         （体が地面を擦っているだけで、足で踏ん張っていないので） */
+      this._slideT -= dt;
+      const speed = this.horizontalSpeed;
+      const drop = speed * SLIDE_FRICTION * dt;
+      const factor = Math.max(speed - drop, 0) / Math.max(speed, 1e-6);
+      this.velocity.x *= factor;
+      this.velocity.z *= factor;
+      /* 向きだけ少し寄せる。速さは変えないので、曲がっても得はしない。
+         **ここで使う速さは摩擦をかけた後の値。** 上のspeedを使い回すと、
+         向きを直した後に摩擦をかける前の長さへ戻してしまい、
+         滑りが1ミリも減速しなくなる（実際そう書いて、10.2m/sのまま
+         8m滑り続けた。走るより速い移動手段になっていた） */
+      const now = this.horizontalSpeed;
+      if (moving && now > 0.5) {
+        const t = Math.min(1, SLIDE_STEER * dt);
+        const nx = this.velocity.x + (wish.x * now - this.velocity.x) * t;
+        const nz = this.velocity.z + (wish.z * now - this.velocity.z) * t;
+        const nl = Math.hypot(nx, nz);
+        if (nl > 1e-4) {
+          this.velocity.x = (nx / nl) * now;
+          this.velocity.z = (nz / nl) * now;
+        }
+      }
+      // 遅くなりきった／時間切れ／床から離れた／死んだ、のどれかで終わる。
+      // 床から離れた時に切るのは、崖から滑り落ちながら空中で滑り続けないため
+      if (this._slideT <= 0 || this.horizontalSpeed < SLIDE_END_SPEED
+        || !grounded || !this.alive) this._endSlide();
+    } else if (grounded) {
       const speed = this.horizontalSpeed;
       if (speed > 0.01) {
         // 入力を離した瞬間だけ強い方に切り替える。押している間は弱いままなので
@@ -585,7 +730,9 @@ export class Player {
     // 壁沿いに伸びる（肩を当てて走ると速い）。どちらも総速度で押さえる。
     // まっすぐ走っている間は投影＝総速度なので、開けた場所の最高速には触らない
     add = Math.min(add, wishSpeed - this.horizontalSpeed);
-    if (add > 0) {
+    // 滑っている間は加速しない。ここを通すと、滑りながらWを押しっぱなしにすれば
+    // しゃがみの速さまで自分で足せることになり、滑りが減速しなくなる
+    if (add > 0 && !this.sliding) {
       const step = Math.min(accel * wishSpeed * dt, add);
       this.velocity.x += wish.x * step;
       this.velocity.z += wish.z * step;
@@ -647,6 +794,20 @@ export class Player {
     // 跳ぶ勢いだけ落とす（縮こまった姿勢から伸び上がるぶん低い）
     if (this._jumpBuffer > 0 && this._airTime < COYOTE
       && this.alive && this.velocity.y < 4) {
+      /* 滑っている最中に跳ぶと、滑りを打ち切って跳ぶ。
+         **ただし持ち出せる速さは走りの最高速まで。** 空中は摩擦が効かないので、
+         滑り出しの10.2m/sのまま跳ぶと着地まで一切減速せず、
+         「滑る→跳ぶ」を繰り返すのが一番速い移動になって走りが要らなくなる。
+         7.4までは残すので、勢いを切らさずに跳べる手応えは残る */
+      if (this.sliding) {
+        this._endSlide();
+        const sp = this.horizontalSpeed;
+        if (sp > SPEED_SPRINT) {
+          const k = SPEED_SPRINT / sp;
+          this.velocity.x *= k;
+          this.velocity.z *= k;
+        }
+      }
       this.velocity.y = this.crouching ? JUMP_VEL * CROUCH_JUMP_MUL : JUMP_VEL;
       this.onFloor = false;
       this._airTime = COYOTE;     // 猶予を使い切って二重跳びを止める
@@ -744,9 +905,13 @@ export class Player {
     /* ----------------------------------------------- 頭の揺れと傾き */
     const speed = this.horizontalSpeed;
     const speedRatio = clamp(speed / SPEED_WALK, 0, 1.6);
-    const targetBob = grounded ? speedRatio * (this.crouching ? 0.45 : 1) : 0;
+    // 滑っている間は足が地面を蹴っていないので揺れも足音も止める。
+    // 止めないと、進んだ距離で刻んでいる歩調が10m/sぶん回って、
+    // 滑っているのに全力疾走の足音が鳴る
+    const walking = grounded && !this.sliding;
+    const targetBob = walking ? speedRatio * (this.crouching ? 0.45 : 1) : 0;
     this.bobAmount = THREE.MathUtils.damp(this.bobAmount, targetBob, 9, dt);
-    if (grounded) {
+    if (walking) {
       const prev = this.bobPhase;
       // 姿勢で歩幅を変える。切り替わる瞬間に歩幅が飛ぶと位相が跳ねて足がもつれるので、
       // 元から滑らかに動く_sprintHoldと身長そのものを混ぜ具合に使う
@@ -776,7 +941,9 @@ export class Player {
     /* ------------------------------------------- 踏み出し・停止・転換 */
     // ここも接地の猶予付きで見る。壁に触れた1フレームだけonFloorが落ちると
     // 「歩き出した／止まった」が交互に立って、踏み出しの前のめりが延々と鳴り続ける
-    const nowMoving = moving && grounded;
+    // 滑っている間も「動いている」に数える。数えないと、滑り出した瞬間に
+    // 「急に止まった」と見なされて前のめりの衝撃が入る（実際は加速している）
+    const nowMoving = grounded && (moving || this.sliding);
     if (nowMoving && !this._wasMoving) {
       // 体が先に出て頭が置いていかれる。加速が硬くなったぶん置いていかれ方も強い
       this._sPitch.kick(0.11 * (this.sprinting ? 1.3 : 1));
@@ -810,7 +977,10 @@ export class Player {
     const accF = -(this._accX * sin + this._accZ * cos);
     const accR = this._accX * cos - this._accZ * sin;
     // 加速で後ろに反り、減速で前へ突っ込む。走っている間は常に前傾させる
-    this._sPitch.target = clamp(accF * 0.00042, -0.014, 0.014) - this._sprintLean * 0.005;
+    // 滑っている間は顔が路面へ寄る。0.030は約1.7度で、
+    // 「体が低い」ことが視界の端で分かる程度。これ以上倒すと狙えなくなる
+    this._sPitch.target = clamp(accF * 0.00042, -0.014, 0.014)
+      - this._sprintLean * 0.005 - this._slideLean * 0.030;
     // 体に対してカメラが遅れる。前後は壁に頭を突っ込みやすいので控えめに
     this._sOffF.target = clamp(-accF * 0.0013, -0.036, 0.036);
     this._sOffR.target = clamp(-accR * 0.0018, -0.05, 0.05);
@@ -820,8 +990,12 @@ export class Player {
 
     this._stepSprings(dt);
 
-    // ストレイフの傾きは入力に対する体重移動なので、バネではなく素直に寄せる
-    this._strafeRoll = THREE.MathUtils.damp(this._strafeRoll, -m.x * 0.028, 8, dt);
+    /* ストレイフの傾きは入力に対する体重移動なので、バネではなく素直に寄せる。
+       滑っている間は2.4倍に増やす。滑りは体を倒して路面へ落とす動作なので、
+       左右に振った時の傾きが立っている時と同じだと、姿勢が変わって見えない */
+    this._strafeRoll = THREE.MathUtils.damp(
+      this._strafeRoll, -m.x * 0.028 * (1 + this._slideLean * 1.4), 8, dt,
+    );
     this.roll = (this._strafeRoll + this._sRoll.x) * (1 - this.adsFactor * 0.7);
 
     // 反動は毎フレーム自然減衰。武器側から加算される

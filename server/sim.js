@@ -472,6 +472,7 @@ export class SimPlayer {
     let s = 0;
     if (p.crouching) s |= S.CROUCH;
     if (p.sprinting) s |= S.SPRINT;
+    if (p.sliding) s |= S.SLIDE;
     if (!p.onFloor) s |= S.AIR;
     if (this.adsFactor > 0.5) s |= S.ADS;
     if (!p.alive) s |= S.DEAD;

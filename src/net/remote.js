@@ -18,6 +18,7 @@ import { preloadCharModel, charModelReady, spawnCharModel } from '../ai/glbchar.
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const lerp = (a, b, t) => a + (b - a) * t;
 const wrapPi = (a) => {
   while (a > Math.PI) a -= TAU;
   while (a < -Math.PI) a += TAU;
@@ -265,6 +266,7 @@ export class RemotePlayers {
       phase: Math.random() * TAU,
       dirSign: 1,
       crouch: 0,
+      slide: 0,
       ready: 0,
       reload: 0,
       dead: false,
@@ -412,13 +414,20 @@ export class RemotePlayers {
     // 真横に近いとcosの符号が暴れる。前後がはっきりしている時だけ向きを決める
     if (Math.abs(fwd) > 0.25) slot.dirSign = fwd >= 0 ? 1 : -1;
     const strafe = -Math.sin(moveRel) * amp;
-    if (moving) {
+    // 滑っている間は歩行の位相を止める。足が地面を蹴っていないので、
+    // ここを回したままだと滑る姿勢の上で足だけが回り続ける
+    if (moving && slot.slide < 0.5) {
       slot.phase += dt * (0.62 + slot.speed * 0.30) * e.gaitRate * TAU * slot.dirSign;
       slot.phase = ((slot.phase % TAU) + TAU) % TAU;
     }
 
     const wantCrouch = (st.state & S.CROUCH) ? 1 : 0;
     slot.crouch += (wantCrouch - slot.crouch) * Math.min(1, dt * 9);
+    /* 滑り込み。入るのは速く、抜けるのはゆっくり（立ち上がるほうが時間がかかる）。
+       滑っている間はしゃがみの印も一緒に立っているので、これが無いと
+       「しゃがんだまま毎秒10mで歩く人」になる */
+    const wantSlide = dead ? 0 : (st.state & S.SLIDE) ? 1 : 0;
+    slot.slide += (wantSlide - slot.slide) * Math.min(1, dt * (wantSlide ? 16 : 7));
     // 覗いている時だけ肩に付ける。走っている間は胸の前へ寝かせる
     const wantReady = dead ? 0 : (st.state & S.RELOAD) ? 0 : (st.state & S.ADS) ? 1 : (run > 0.5 ? 0.35 : 0.8);
     slot.ready += (wantReady - slot.ready) * Math.min(1, dt * (wantReady > slot.ready ? 6 : 3));
@@ -432,6 +441,7 @@ export class RemotePlayers {
 
     const t = slot.phase;
     const cr = slot.crouch;
+    const sl = slot.slide;
 
     /* ---------------------------------------------------------- 脚 */
     legPose(t, amp, run, _pose, fwd, strafe, -1);
@@ -452,11 +462,27 @@ export class RemotePlayers {
       p.shinL.rotation.x = -0.72; p.shinR.rotation.x = -0.34;
       p.footL.rotation.x = 0.22; p.footR.rotation.x = 0.16;
     }
+    /* 滑り込みの脚。前の足を投げ出して、後ろの足を畳んで膝で乗る。
+       左右の役割を固定してあるのは、進行方向から決めようとすると
+       滑っている最中に視点を振っただけで足が入れ替わって見えるため */
+    if (sl > 0.001) {
+      p.legL.rotation.x = lerp(p.legL.rotation.x, 1.15, sl);
+      p.shinL.rotation.x = lerp(p.shinL.rotation.x, -0.30, sl);
+      p.footL.rotation.x = lerp(p.footL.rotation.x, 0.30, sl);
+      p.legR.rotation.x = lerp(p.legR.rotation.x, 0.30, sl);
+      p.shinR.rotation.x = lerp(p.shinR.rotation.x, -2.05, sl);
+      p.footR.rotation.x = lerp(p.footR.rotation.x, 0.55, sl);
+      p.legL.rotation.z = lerp(p.legL.rotation.z, -0.10, sl);
+      p.legR.rotation.z = lerp(p.legR.rotation.z, 0.16, sl);
+    }
 
     /* -------------------------------------------------------- 骨盤 */
     const bobA = (0.035 + run * 0.045) * amp;
     const sink = Math.max(0, Math.sin(t * 2 - 0.9)) * 0.012 * amp;
-    p.hips.position.y = 0.92 - bobA * 0.5 + Math.cos(t * 2) * bobA * 0.5 - sink - cr * 0.30;
+    // 滑っている間は腰をさらに落とす。しゃがみと同じ高さだと、
+    // 姿勢だけ滑りで高さが立ち姿のままになり、宙に浮いて滑って見える
+    p.hips.position.y = 0.92 - bobA * 0.5 + Math.cos(t * 2) * bobA * 0.5 - sink
+      - cr * 0.30 - sl * 0.16;
     const hipYaw = -Math.sin(t) * (0.09 + run * 0.10) * amp;
     // 銃を斜めに構えるぶん腰も半分開く。上体だけで作ると腰から上だけ捻れて立つ
     const still = 1 - clamp(amp * 2, 0, 1);
@@ -469,7 +495,9 @@ export class RemotePlayers {
     // 骨盤と逆に回す。同じ向きに回ると全身が板に見える
     const chestYaw = Math.sin(t) * (0.08 + run * 0.07) * amp;
     p.chest.rotation.y = twist - slot.gunBlade + chestYaw - hipYaw - bladeHip;
-    p.chest.rotation.x = -run * 0.16 * amp + st.pitch * 0.25 - cr * 0.22 + e.variant.slouch;
+    // 滑りは上体を後ろへ倒す。前傾のまま滑ると土下座しながら進んでいる絵になる
+    p.chest.rotation.x = -run * 0.16 * amp + st.pitch * 0.25 - cr * 0.22
+      + sl * 0.34 + e.variant.slouch;
     p.chest.rotation.z = -Math.sin(t) * 0.03 * amp;
 
     /* ---------------------------------------------------------- 頭 */

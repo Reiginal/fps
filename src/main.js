@@ -871,6 +871,8 @@ class Game {
     // 足元の材質で足音を変える。コンテナの上と地面で同じ音が鳴ると一気に嘘くさい
     this.player.onFootstep = (i) => this.audio.footstep(i, this._footSurface());
     this.player.onLand = (i) => this.audio.land(Math.min(1, i * 1.4), this._footSurface());
+    // 滑り出した瞬間。足音と同じで、擦っている路面の材質で音が変わる
+    this.player.onSlide = () => this.audio.slide(this._footSurface());
     this.weapons.onShot = (s) => this._resolveShot(s);
     // shortは右クリックで放った時（手前投げ）。武器側が押された物を見て決める
     this.weapons.onThrow = (short) => this._throwNade(short);
@@ -3144,7 +3146,10 @@ class Game {
 
   /* 1人用と対戦で共通の表示。視野・クロスヘア・体力・弾数 */
   _commonHud(dt) {
-    const sprintT = this.player.sprinting ? 1 : 0;
+    /* 走ると画角が広がる。滑りはそれより1段広げる（1.25で約86度）。
+       滑っている間だけ景色が外へ引っ張られるので、同じ速度でも速く見える。
+       滑りで画角を戻してしまうと、一番速い瞬間に画面が締まって減速して見える */
+    const sprintT = this.player.sliding ? 1.25 : this.player.sprinting ? 1 : 0;
     this._fovBlend = THREE.MathUtils.damp(this._fovBlend ?? 0, sprintT, 6, dt);
     const targetFov = THREE.MathUtils.lerp(75, 84, this._fovBlend)
       - this.weapons.adsFactor * (75 - this.weapons.def.adsFov);
