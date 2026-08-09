@@ -2971,10 +2971,22 @@ class Game {
     list.length = 0;
     for (const st of states) {
       if (st.state & S.DEAD) continue;
-      // 名札は撃った直後だけ出す。常時出していると、遮蔽の陰から動く名前が
-      // 先に見えて奇襲が一切成立しない（壁の裏の相手の居場所まで分かってしまう）。
-      // ミニマップの点と同じ_blipsを見るので、画で光る条件と名前が出る条件が揃う
-      if (!this._blips.has(st.id)) continue;
+      /* **見えている味方には必ず札を出す。ただし壁の向こうは出さない。**
+
+         敵の札は「撃った直後」かつ「見えている時」だけにしてある（常時出すと
+         遮蔽の陰から動く名前が先に見えて奇襲が成立しない）。
+         味方にも同じ決まりを当てていたので、2対2で遊んで最初に出た感想が
+         **「どれが味方か分からない」**だった。見た目は敵と同じ兵士なので、
+         相手が撃っていない限り、撃たない理由が画面のどこにも無い。
+
+         なので味方だけ「撃った直後」の条件を外す。**壁抜けの条件は外さない。**
+         外すと味方の居場所が常に壁越しに分かって、2人で挟む・別々に回るという
+         組み立てがそもそも要らなくなる（そこはミニマップの点が受け持つ）。
+         見えた瞬間に色付きの名前が出れば、撃つ前に必ず分かる */
+      const mate = this._isMate(st.id);
+      // 敵は撃った直後だけ。ミニマップの点と同じ_blipsを見るので、
+      // 画で光る条件と名前が出る条件が揃う
+      if (!mate && !this._blips.has(st.id)) continue;
       const r = this.remotes?.get(st.id);
       if (!r) continue;
       this._toRemote.subVectors(r.headPos, cam.position);
@@ -2994,10 +3006,10 @@ class Game {
         name: this.net.nameOf(st.id),
         hp: st.hp,
         dist,
-        // 発砲からの残り具合。点と同じ速さで消えていく
-        fade: this._blips.get(st.id).t,
+        // 発砲からの残り具合。点と同じ速さで消えていく。味方は薄れさせない
+        fade: mate ? 1 : this._blips.get(st.id).t,
         // 味方かどうか。札の色を変えるのに使う（2対2でだけ立つ）
-        mate: this._isMate(st.id),
+        mate,
       });
     }
     this.hud.nameplates(list);
@@ -3748,6 +3760,25 @@ class Game {
     this._mapAcc = (this._mapAcc ?? 0) + dt;
     if (this._mapAcc < 1 / MAP_HZ) return;
     this._mapAcc = 0;
+
+    /* **味方はいつでも点を出す。撃っていなくても出す。**
+       上の点は「撃った人」だけで、しかも時間で消える。2対2でそれだけだと、
+       味方が今どこにいるのかを知る手段が画面のどこにも無い。
+
+       壁越しの居場所を教えるのはここだけにしてある。名札の側は
+       見えている時しか出さない（そちらまで通すと、2人で挟む・別々に回るという
+       組み立てが要らなくなる）。168pxの地図の点はおおよその場所しか分からないので、
+       「味方はあっちに居る」までは分かって「今どの物陰か」は分からない。
+
+       塗り直す時にだけ足すので、毎フレームの仕事は増えない
+       （_blipListは毎フレーム頭で空にしているので、溜まることもない） */
+    if (this.mode === 'versus' && this.net?.mode === 'team') {
+      for (const st of this._lastStates || []) {
+        if (st.state & S.DEAD) continue;
+        if (!this._isMate(st.id)) continue;
+        this._blipList.push({ x: st.x, z: st.z, t: 1, mate: true });
+      }
+    }
 
     const p = this.player.collider.start;
     const versus = this.mode === 'versus';
