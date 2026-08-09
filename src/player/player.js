@@ -7,7 +7,7 @@
 // バネの結果は絶対にcolliderへ戻さない。当たり判定が揺れると撃ち合いが壊れる。
 import * as THREE from 'three';
 import { Capsule } from 'three/addons/math/Capsule.js';
-import { HEAL, HP } from '../net/protocol.js';
+import { HEAL, HP, healAmount } from '../net/protocol.js';
 
 const GRAVITY = 22;
 const STAND_H = 1.74;
@@ -769,7 +769,8 @@ export class Player {
         if (this.healing <= 0) {
           this.healing = 0;
           this.bandages = Math.max(0, this.bandages - 1);
-          this.health = Math.min(this.maxHealth, this.health + HEAL.AMOUNT);
+          // 戻る量は体力に対する割合。対戦(260)では1人用(130)の倍が戻る
+          this.health = Math.min(this.maxHealth, this.health + healAmount(this.maxHealth));
           // 巻き終わってからも0.5秒だけ「巻いている」印を残す。
           // 対戦では自分の入力をサーバーへ送って向こうでも同じ回復を走らせるが、
           // 向こうは通信の遅れぶん遅れて始まって遅れて終わる。こちらが

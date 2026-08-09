@@ -17,7 +17,7 @@
 import { readFileSync } from 'node:fs';
 import '../server/dom-stub.js';
 import * as THREE from 'three';
-import { HP, HEAL } from '../src/net/protocol.js';
+import { HP, HEAL, NADE, healAmount, blastDamage } from '../src/net/protocol.js';
 
 const { Player } = await import('../src/player/player.js');
 const { SimPlayer } = await import('../server/sim.js');
@@ -119,16 +119,45 @@ console.log('\n[5] 撃ち合いの長さがどう変わったか');
       : '弾倉1つで倒しきれる武器ばかり');
 }
 
-console.log('\n[6] 包帯が対戦で意味のある量か');
-/* 包帯は固定の量(HEAL.AMOUNT)なので、体力を倍にすると効きが半分になる。
-   1ラウンドぶん全部使って何割戻るかを出しておく。
-   ここも線を引く所ではないが、**気づかないうちに空気になっている**のが一番まずい */
+console.log('\n[6] 包帯の効きが1人用と対戦で同じか');
+/* **これが固定の数だと、体力を倍にした瞬間に効きが半分になる。**
+   35のままだと対戦では13%しか戻らず、2回全部巻いても4分の1。
+   持っていることを忘れる道具になる（そして誰も壊れたとは言わない）。
+   割合で持っているので、体力をいくつに変えても効きは変わらないはず */
 {
-  const total = HEAL.AMOUNT * HEAL.PER_ROUND;
-  const soloPct = (total / HP.SOLO) * 100;
-  const versusPct = (total / HP.VERSUS) * 100;
-  console.log(`    1ラウンド分を全部巻いて戻るのは 1人用 ${soloPct.toFixed(0)}% / 対戦 ${versusPct.toFixed(0)}%`);
-  ok(versusPct > 20, `対戦でも1発ぶん以上は取り返せる (${versusPct.toFixed(0)}%)`);
+  const soloPct = (healAmount(HP.SOLO) * HEAL.PER_ROUND / HP.SOLO) * 100;
+  const versusPct = (healAmount(HP.VERSUS) * HEAL.PER_ROUND / HP.VERSUS) * 100;
+  console.log(`    1回で戻る量は 1人用 ${healAmount(HP.SOLO)} / 対戦 ${healAmount(HP.VERSUS)}`);
+  ok(Math.abs(soloPct - versusPct) < 1.5,
+    `1ラウンド分を全部巻いて戻る割合が同じ (1人用 ${soloPct.toFixed(0)}% / 対戦 ${versusPct.toFixed(0)}%)`);
+  // ライフル1発ぶん(27)より小さいと、巻く2.4秒を払う価値が無くなる
+  ok(healAmount(HP.VERSUS) > 27, `対戦の1回がライフル1発より大きい (${healAmount(HP.VERSUS)})`);
+  const player = readFileSync(new URL('../src/player/player.js', import.meta.url), 'utf8');
+  ok(/healAmount\(this\.maxHealth\)/.test(player), 'player.jsが割合から量を出している');
+}
+
+console.log('\n[7] 手榴弾の効きが1人用と対戦で同じか');
+/* 包帯と同じ話。爆風の威力(170)は固定なので、体力が倍になると
+   **中心で当てても一撃で倒せない**（170 < 260）。
+   置きにいく道具から、削るだけの道具に静かに変わる */
+{
+  const soloCenter = blastDamage(0) / HP.SOLO;
+  const versusCenter = blastDamage(0, true) / HP.VERSUS;
+  const soloEdge = blastDamage(NADE.BLAST_R * 0.99) / HP.SOLO;
+  const versusEdge = blastDamage(NADE.BLAST_R * 0.99, true) / HP.VERSUS;
+  console.log(`    中心の威力は 1人用 ${blastDamage(0)} / 対戦 ${blastDamage(0, true)}`);
+  ok(Math.abs(soloCenter - versusCenter) < 0.01,
+    `中心で持っていく割合が同じ (1人用 ${(soloCenter * 100).toFixed(0)}% / 対戦 ${(versusCenter * 100).toFixed(0)}%)`);
+  ok(Math.abs(soloEdge - versusEdge) < 0.01,
+    `端でも同じ (1人用 ${(soloEdge * 100).toFixed(0)}% / 対戦 ${(versusEdge * 100).toFixed(0)}%)`);
+  ok(blastDamage(0, true) > HP.VERSUS, '対戦でも足元に落とせば一撃');
+  // 1人用は倍にしない。敵の体力は波で増える別の作りなので、巻き添えにしない
+  ok(blastDamage(0) === NADE.BLAST_DMG, `1人用は今まで通り (${blastDamage(0)})`);
+  // 式が1か所にまとまっているか。手で3回書いていた頃は、片方だけ直る事故が起きる
+  const room = readFileSync(new URL('../server/room.js', import.meta.url), 'utf8');
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  ok(/blastDamage\(d, true\)/.test(room), 'サーバーは対戦の威力で解く');
+  ok(!/BLAST_DMG/.test(room) && !/BLAST_DMG/.test(main), '爆風の式が手で書き写されていない');
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);

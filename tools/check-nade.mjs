@@ -18,7 +18,7 @@
 //
 //   node tools/check-nade.mjs
 import { readFileSync } from 'node:fs';
-import { NADE } from '../src/net/protocol.js';
+import { NADE, HP, blastDamage } from '../src/net/protocol.js';
 
 let bad = 0;
 const ok = (c, msg) => { console.log(`  ${c ? '○' : '× 失敗:'} ${msg}`); if (!c) bad++; };
@@ -100,12 +100,17 @@ console.log('\n[4.5] 右クリックの手前投げ');
   ok(s.landAt > 3, `足元すぎない（${s.landAt.toFixed(1)}m先）`);
   ok(s.rise > 0.9, `山なりに放っている（目より${s.rise.toFixed(2)}m上）`);
 
-  /* **自爆の量を見る。** 爆風は max(MIN_DMG, BLAST_DMG*(1-距離/半径)) なので、
-     下限(18)で止まる距離まで離れていれば「手前へ置いた」で済む。
-     そこを割ると、手前投げが「自分に投げる」に変わる（0.55倍だと45喰らう） */
-  const dmg = Math.max(NADE.MIN_DMG, NADE.BLAST_DMG * (1 - s.end / NADE.BLAST_R));
+  /* **自爆の量を見る。** 爆風は中心から線形に落ちて下限(MIN_DMG)で止まるので、
+     そこまで離れていれば「手前へ置いた」で済む。
+     割ると、手前投げが「自分に投げる」に変わる（0.55倍だと45喰らう）。
+     式は protocol.js の blastDamage が持つ。ここで書き写すと、
+     向こうを直した日にこの検査だけが古い式で通り続ける */
+  const dmg = blastDamage(s.end);
   ok(dmg <= NADE.MIN_DMG,
     `遮蔽が無くても被害は下限で止まる（${s.end.toFixed(1)}m先で${dmg.toFixed(0)}）`);
+  // 対戦は威力が倍なので、下限も倍になる。それでも体力に対する割合は同じ
+  ok(blastDamage(s.end, true) / HP.VERSUS - dmg / HP.SOLO < 0.01,
+    `対戦でも自爆の割合は同じ（${(blastDamage(s.end, true) / HP.VERSUS * 100).toFixed(0)}%）`);
 }
 
 console.log('\n[5] 手元とサーバーが同じ式で飛ばしているか');

@@ -4,7 +4,7 @@
 //   node tools/check-heal.mjs
 import '../server/dom-stub.js';
 import * as THREE from 'three';
-import { HEAL, HP } from '../src/net/protocol.js';
+import { HEAL, HP, healAmount } from '../src/net/protocol.js';
 
 const { Player } = await import('../src/player/player.js');
 const { buildWorld } = await import('../server/world.js');
@@ -47,7 +47,8 @@ run(b, HEAL.TIME_S * 0.5);
 ok(b.health === hpBefore, '巻き終わるまで体力は増えない');
 run(b, HEAL.TIME_S * 0.6);
 ok(b.healing === 0, '巻き終わった');
-ok(b.health === hpBefore + HEAL.AMOUNT, `体力が${HEAL.AMOUNT}戻った (${hpBefore} → ${b.health})`);
+const back = healAmount(b.maxHealth);
+ok(b.health === hpBefore + back, `体力が${back}戻った (${hpBefore} → ${b.health})`);
 ok(b.bandages === HEAL.PER_ROUND - 1, `数が1つ減った (${b.bandages})`);
 
 console.log('\n[3] 上限を超えない');
@@ -142,7 +143,7 @@ ws.onShot = () => {};
 console.log('\n[10] 巻き終わったら勝手にしまう');
 for (let i = 0; i < 60 * 3; i++) { g.update(1 / 60, input, false); ws.update(1 / 60, idle, g, ctx); }
 ok(g.healing === 0, '巻き終わっている');
-ok(g.health === hpBefore8 + HEAL.AMOUNT, `体力が戻った (${hpBefore8} → ${g.health})`);
+ok(g.health === hpBefore8 + healAmount(g.maxHealth), `体力が戻った (${hpBefore8} → ${g.health})`);
 ok(ws.bandageOut === false, '手放して武器へ戻る');
 step(g, idle, 30);
 ok(ws.bandage.visible === false, '包帯が画面から消えている');
@@ -220,7 +221,8 @@ console.log('\n[13] 最後まで巻いた時、サーバー側も同じだけ回
   const { me, srv } = runNet(null);
   ok(me.health === srv.health, `体力が一致する (自分 ${me.health} / サーバー ${srv.health})`);
   ok(me.bandages === srv.bandages, `残数が一致する (${me.bandages} / ${srv.bandages})`);
-  ok(me.health === HP.VERSUS - 80 + HEAL.AMOUNT, `ちゃんと回復している (${me.health})`);
+  ok(me.health === HP.VERSUS - 80 + healAmount(HP.VERSUS),
+    `ちゃんと回復している (${me.health} / 対戦は1回 ${healAmount(HP.VERSUS)} 戻る)`);
 }
 
 console.log('\n[14] 途中でやめた時、サーバー側も回復しない');

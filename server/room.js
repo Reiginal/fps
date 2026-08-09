@@ -8,7 +8,7 @@ import './dom-stub.js';
 import * as THREE from 'three';
 import { Capsule } from 'three/addons/math/Capsule.js';
 import {
-  TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS, MATCH, PHASE, ZONE, NADE, outsideZone,
+  TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS, MATCH, PHASE, ZONE, NADE, blastDamage, outsideZone,
   Sv, EV, packPlayer, SEATS, SEAT_SPAWN, CHARACTERS, MODE_IDS, LOBBY_ROW, LOBBY_ROW_LEN, DROP,
   TEAM_OF_SEAT, TEAM_NAMES,
 } from '../src/net/protocol.js';
@@ -1108,8 +1108,8 @@ export class Room {
       // 爆心と相手の間に地形があるなら入らない。壁越しの爆風を作らない
       if (!originVisible(this.world.octree, g.pos, _nadeTo)) continue;
 
-      const t = 1 - d / NADE.BLAST_R;
-      const dmg = Math.max(NADE.MIN_DMG, NADE.BLAST_DMG * t);
+      // 対戦は体力が倍なので、爆風も同じ倍率で持ち上げる（protocol.jsのblastDamage）
+      const dmg = blastDamage(d, true);
       if (sim.protectIn > 0) continue;
       this.push({
         e: EV.HIT, id: s.id, by: g.by,
