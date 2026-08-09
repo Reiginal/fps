@@ -52,6 +52,12 @@ targets.push({
   name: 'land', label: '着地', seconds: 1.0,
   play: (a) => a.land(1.1, 'concrete', null, null),
 });
+for (const sf of ['dirt', 'concrete']) {
+  targets.push({
+    name: `slide-${sf}`, label: `滑り込み(${sf})`, seconds: 1.4,
+    play: (a) => a.slide(sf, null, null),
+  });
+}
 targets.push({ name: 'reload', label: 'リロード', play: (a) => a.reload(2), seconds: 2.6 });
 
 const filter = process.argv[2] || '';

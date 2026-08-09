@@ -329,5 +329,35 @@ console.log('\n[6] 刃が当たった音が材質で分かれているか');
   ok(worst < 0.7, `金属が銃声より大きくならない (4回のうち一番大きい回で ${worst.toFixed(2)})`);
 }
 
+console.log('\n[7] 滑り込みが「擦れ」に聞こえるか');
+/* 滑り込みの音を最初に組んだ時、ノイズを帯域で切って鳴らしただけで出したら
+   重心が5184Hz・低音11%になった（足音は2200Hz・48%）。**これは砂嵐の音で、
+   体が地面に接している音ではない。** 人が「擦っている」と感じるのは、
+   高い擦れの成分より先に、引きずる低い唸りが鳴っているから。
+
+   なので見るのは2つ。低音がちゃんと入っていること、
+   そして足音より高い所へ行っていないこと。
+   足音を基準にするのは、同じ路面を同じ体が触っている音だから。
+   ここが足音より高い＝地面ではなく空気を擦っている音になっている */
+{
+  const slide = await capture((a) => a.slide('dirt', null, null), { seconds: 1.4 });
+  const step = await capture((a) => a.footstep(0.8, 'dirt', null, null), { seconds: 1.0 });
+  ok(
+    slide.lowPct > 25,
+    `引きずる低音が入っている (${slide.lowPct.toFixed(1)}% / 25%より上)`,
+  );
+  ok(
+    slide.centroid < step.centroid,
+    `足音より高い所へ行っていない (滑り${slide.centroid.toFixed(0)}Hz < 足音${step.centroid.toFixed(0)}Hz)`,
+  );
+  // 打点が並ぶと足音の早回しに聞こえる。滑りは打点が1つ（落ちる所）だけ
+  ok(
+    slide.hits <= 1,
+    `打点が並んでいない (${slide.hits}回 / 1回まで)`,
+  );
+  // 撃ち合いの最中に自分が滑るたび銃声を食うと、相手の足音が聞こえなくなる
+  ok(slide.peak < 0.7, `銃声より大きくならない (${slide.peak.toFixed(2)})`);
+}
+
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);
 process.exit(bad === 0 ? 0 : 1);

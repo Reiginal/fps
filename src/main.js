@@ -38,7 +38,7 @@ import { RemotePlayers } from './net/remote.js';
 import { preloadCharModel, SOLO_MODEL } from './ai/glbchar.js';
 import { FarShadowGate } from './world/shadowgate.js';
 import {
-  K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, outsideZone, CHARACTERS,
+  K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, HP, outsideZone, CHARACTERS,
   TEAM_NAMES, soloUnlocksAt,
 } from './net/protocol.js';
 
@@ -871,6 +871,8 @@ class Game {
     // 足元の材質で足音を変える。コンテナの上と地面で同じ音が鳴ると一気に嘘くさい
     this.player.onFootstep = (i) => this.audio.footstep(i, this._footSurface());
     this.player.onLand = (i) => this.audio.land(Math.min(1, i * 1.4), this._footSurface());
+    // 滑り出した瞬間。足音と同じで、擦っている路面の材質で音が変わる
+    this.player.onSlide = () => this.audio.slide(this._footSurface());
     this.weapons.onShot = (s) => this._resolveShot(s);
     // shortは右クリックで放った時（手前投げ）。武器側が押された物を見て決める
     this.weapons.onThrow = (short) => this._throwNade(short);
@@ -1649,6 +1651,10 @@ class Game {
     this.shotsFired = 0; this.shotsHit = 0;
     this.damageFlash = 0;
     this.weapons.resetAll();
+    // 対戦の体力は1人用の倍。**サーバー側(SimPlayer)と同じ値を入れる。**
+    // 入れ忘れると、画面の体力の棒だけ130を上限に描かれて、
+    // 満タンなのに半分減っているように見える（落下ダメージの量もずれる）
+    this.player.maxHealth = HP.VERSUS;
     this.player.health = this.player.maxHealth;
     this.player.alive = true;
     this._acc = 0;
@@ -1777,6 +1783,10 @@ class Game {
     // 残さないと「勝てないから抜ける」と記録が消えるのが同じ操作になる
     this._flushStats();
     this.mode = 'solo';
+    // 体力を1人用へ戻す。戻さないと、対戦から抜けた後の1人用が倍の体力のままになる。
+    // 今の値も上限まで詰める（130を超えた値が残ると棒がはみ出す）
+    this.player.maxHealth = HP.SOLO;
+    this.player.health = Math.min(this.player.health, HP.SOLO);
     this.net = null;
     // 落ちている物も片付ける。残すと、1人用に戻った後の街に光る箱が浮いたままになる
     this._clearDrops();
@@ -3137,7 +3147,10 @@ class Game {
 
   /* 1人用と対戦で共通の表示。視野・クロスヘア・体力・弾数 */
   _commonHud(dt) {
-    const sprintT = this.player.sprinting ? 1 : 0;
+    /* 走ると画角が広がる。滑りはそれより1段広げる（1.25で約86度）。
+       滑っている間だけ景色が外へ引っ張られるので、同じ速度でも速く見える。
+       滑りで画角を戻してしまうと、一番速い瞬間に画面が締まって減速して見える */
+    const sprintT = this.player.sliding ? 1.25 : this.player.sprinting ? 1 : 0;
     this._fovBlend = THREE.MathUtils.damp(this._fovBlend ?? 0, sprintT, 6, dt);
     const targetFov = THREE.MathUtils.lerp(75, 84, this._fovBlend)
       - this.weapons.adsFactor * (75 - this.weapons.def.adsFov);
