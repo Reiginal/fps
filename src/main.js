@@ -377,8 +377,12 @@ const BLIP_FADE_S = 2.2;
 // HUD側(tutorialDone)の消えるタイミングにも同じ値を渡す（別々に持つと必ずずれる）
 const TUT_DONE_HOLD_S = 0.85;
 
-// 投げる時に前方へ足す上向き成分。真っ直ぐ投げると足元へ落ちて自爆する
-const NADE_LOFT = 0.34;
+/* 投げる時に前方へ足す上向き成分。真っ直ぐ投げると足元へ落ちて自爆する。
+   0.34（約19度）から0.50（約27度）へ。**下手投げで放る角度に寄せた。**
+   重力を落としただけだと弧は高くならず飛距離だけ伸びるので、
+   protocol.jsのGRAVITYとセットで動かすこと（片方だけ触ると
+   「ふわふわ飛んで遠くまで行く」になる）。数字は tools/check-nade.mjs が測る */
+const NADE_LOFT = 0.50;
 const _throwOrigin = new THREE.Vector3();
 const _throwDir = new THREE.Vector3();
 
