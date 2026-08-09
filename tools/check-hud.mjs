@@ -167,10 +167,10 @@ hud.bandage(1, 0, 2.4, false, 2);
 ok(pips.children.length === 2, `玉が2つに戻る (${pips.children.length}個)`);
 
 console.log('\n[11] 武器の札 … 数が変わる');
-/* 札はもう固定の4枚ではない。ソロは第2波で狙撃銃が増えて5枚になり、
-   ガンゲームは今の段の1本しか持たないので1枚になる。
+/* 札はもう固定の4枚ではない。ガンゲームは今の段の1本しか持たないので1枚になる。
    手榴弾を投げ切った時は**枚数を変えずに薄くする**（消すと後ろの番号が繰り上がって、
-   押し慣れた数字と出てくる武器が変わってしまう） */
+   押し慣れた数字と出てくる武器が変わってしまう）。
+   数字キーに載らない武器（Qの狙撃銃）はこの行には入らない（下の[11.5]） */
 {
   const box = document.getElementById('slots');
   const h3 = new HUD();
@@ -187,23 +187,45 @@ console.log('\n[11] 武器の札 … 数が変わる');
   h3.ammo(15, 75, 'P-9 サイドアーム', 1, 0, false);
   ok(!box.children[0]._classes.has('on') && box.children[1]._classes.has('on'), '印が2枚目へ移る');
 
-  // 増える（第2波の支給）
-  h3.weaponSlots(items('ライフル', 'ピストル', 'ナイフ', '手榴弾', 'スナイパー'));
-  ok(box.children.length === 5, `5枚に増える (${box.children.length}枚)`);
-  ok(box.children[4].textContent === '5 スナイパー', `5番が出る (${box.children[4].textContent})`);
-  ok(box.children[1]._classes.has('on'), '増やしても印は残る');
-
   // 使い切った札は薄くする（枚数は変えない）
-  const withOut = items('ライフル', 'ピストル', 'ナイフ', '手榴弾', 'スナイパー');
+  const withOut = items('ライフル', 'ピストル', 'ナイフ', '手榴弾');
   withOut[3].out = true;
   h3.weaponSlots(withOut);
-  ok(box.children.length === 5, '薄くしても枚数は変わらない');
+  ok(box.children.length === 4, '薄くしても枚数は変わらない');
   ok(box.children[3]._classes.has('out'), '手榴弾の札が薄くなる');
   ok(box.children[3].textContent === '4 手榴弾', '番号も文字もそのまま');
 
   // 減る（ガンゲームは1本だけ）
   h3.weaponSlots(items('ライフル'));
   ok(box.children.length === 1, `1枚まで減らせる (${box.children.length}枚)`);
+}
+
+console.log('\n[11.5] Qの札 … 2行目（包帯と同じ行）');
+/* 番号の続きに並べると「5」に見えるのに5では出ない、という嘘になるので、
+   数字キーに載らない武器は行を分けてある。支給されるまでは畳んでおく */
+{
+  const el = document.getElementById('slotQuick');
+  const h4 = new HUD();
+
+  h4.quickSlot(null, false);
+  ok(el._classes.has('hide'), '支給される前は畳んである');
+
+  h4.quickSlot('スナイパー', false);
+  ok(!el._classes.has('hide'), '支給されると出る');
+  ok(el.textContent === 'Q スナイパー', `押すキーが名前に付く (${el.textContent})`);
+  ok(!el._classes.has('on'), '持っていなければ印は付かない');
+
+  h4.quickSlot('スナイパー', true);
+  ok(el._classes.has('on'), '持つと印が付く');
+
+  // 1行目の札とは別扱い。Qの武器を持っている間は1行目のどれも光らない
+  const box = document.getElementById('slots');
+  h4.weaponSlots(['ライフル', 'ピストル'].map((n) => ({ name: n, out: false })));
+  h4.ammo(5, 5, 'SR-12 マークスマン', -1, 0, false);
+  ok(![...box.children].some((c) => c._classes.has('on')), '1行目の印は全部消える');
+
+  h4.quickSlot(null, false);
+  ok(el._classes.has('hide'), '出撃し直すとまた畳む');
 }
 
 console.log('\n[軽さ] 毎フレームの無駄をしていない');

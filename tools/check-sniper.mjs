@@ -53,8 +53,13 @@ console.log('\n[2.5] Qで出し入れできる繋ぎ込み');
   ok(/input\.pressed\('KeyQ'\)/.test(main), 'Qを見ている');
   ok(/KeyQ[\s\S]{0,400}?quickSwap\(\)/.test(main), 'Qで出し入れを呼んでいる');
   ok(/quickIndex = now/.test(main), '波で解放された物がQの武器になる');
-  // 数字キーの4本の後ろに、押すキーを名前にした札を足す
-  ok(/key: 'Q'/.test(main), '画面の札にQと出る');
+  // 札は2行目（包帯と同じ行）。1〜4の続きに並べると「5」に見えるのに5では出ない
+  ok(/hud\.quickSlot\(/.test(main), '画面の札へ渡している');
+  ok(/id="slotQuick"/.test(html), '2行目に札のDOMがある');
+  ok(html.indexOf('id="slotQuick"') > html.indexOf('id="slots2"'),
+    '札が2行目（slots2）の中にある');
+  ok(html.indexOf('id="slotQuick"') < html.indexOf('id="slotHeal"'),
+    '包帯より左（ライフルの真下）に出る');
   ok(/<b>Q<\/b>/.test(html), '起動画面の操作説明にQがある');
   ok(!/<b>5<\/b>/.test(html), '5番の行はもう出していない');
 }

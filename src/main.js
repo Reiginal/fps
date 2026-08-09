@@ -3156,9 +3156,9 @@ class Game {
     this.hud.stamina(this.player.stamina, this.player.staminaLock);
     /* 画面の札に印を付ける位置は「並びの何番目か」。武器の番号そのものだと、
        持って出ない武器のぶんずれて、別の札が光る。
-       支給品(Qの武器)は数字キーの4本の後ろに置いてあるので、その位置を指す */
+       支給品(Qの武器)は2行目にいるので、ここでは-1にして1行目を全部消す */
     const slotAt = this.weapons.index === this.weapons.quickIndex
-      ? this.weapons.carry.length
+      ? -1
       : this.weapons.carry.indexOf(this.weapons.index);
     this._weaponSlotsHud();
     this.hud.ammo(
@@ -3190,11 +3190,10 @@ class Game {
       // 使い切った投げ物は薄く。札そのものは残す（消すと後ろの番号がずれる）
       items.push({ name: d.nick || d.name, out: !!d.thrown && w.nades <= 0 });
     }
-    // 数字キーに載らない武器（支給された狙撃銃）は最後に、押すキーを名前にして出す。
-    // 番号の続きにすると「5」に見えて、実際には5では出ないことになる
-    const q = WEAPONS[w.quickIndex];
-    if (q) items.push({ name: q.nick || q.name, key: 'Q' });
     this.hud.weaponSlots(items);
+    // 数字キーに載らない武器（支給された狙撃銃）は2行目、包帯と同じ行へ
+    const q = WEAPONS[w.quickIndex];
+    this.hud.quickSlot(q ? q.nick || q.name : null, w.index === w.quickIndex);
   }
 
   /**

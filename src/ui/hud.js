@@ -38,6 +38,7 @@ export class HUD {
       rosterRows: $('rosterRows'),
       healWrap: $('healWrap'), healBar: $('healBar'), healFill: $('healFill'),
       healPips: $('healPips'), healState: $('healState'), slotHeal: $('slotHeal'),
+      slotQuick: $('slotQuick'),
       elim: $('elim'), elimName: $('elimName'), elimTag: $('elimTag'),
       achfeed: $('achfeed'),
       voice: $('voice'), voiceText: $('voiceText'),
@@ -59,6 +60,7 @@ export class HUD {
     // 武器の札。今出ている並びと、印が付いている位置
     this._slotKey = '';
     this._slotOn = -1;
+    this._lastQuick = '';
     this.mode = 'solo';
     // 名札は毎フレーム作り直すと1秒に60回DOMを捨てることになるので、idで使い回す
     this.plateEls = new Map();
@@ -277,6 +279,25 @@ export class HUD {
     }
   }
 
+  /**
+   * 数字キーに載らない武器の札（Qで出す狙撃銃）。**2行目、包帯と同じ行に置く。**
+   * 1〜4の続きに並べると「5」に見えるのに5では出ない、という嘘になるので、
+   * 番号の行とは分けてある。
+   *
+   *   name … 呼び名。nullで畳む（支給される前・対戦）
+   *   on   … 今それを持っているか
+   */
+  quickSlot(name, on) {
+    const el = this.el.slotQuick;
+    if (!el) return;
+    const key = `${name || ''}/${on ? 1 : 0}`;
+    if (key === this._lastQuick) return;
+    this._lastQuick = key;
+    if (name) el.textContent = `Q ${name}`;
+    el.classList.toggle('hide', !name);
+    el.classList.toggle('on', !!on);
+  }
+
   /** 今持っている札に印を付ける。札を組み直した時と、持ち替えた時だけ呼ぶ */
   _markSlot() {
     const box = this.el.slotBox;
@@ -289,21 +310,21 @@ export class HUD {
   /**
    * 武器の札を組み直す。**持ち物が変わった時だけ**触る（毎フレーム呼ばれる）。
    *
-   * 札の数が動くのは3つの場面:
-   *   ・ソロで波が進んで狙撃銃が増えた（4枚→5枚）
+   * 札の数が動くのは2つの場面:
    *   ・ガンゲームで今の段の1本だけになる（1枚）
    *   ・手榴弾を使い切った（枚数はそのままで、その1枚が薄くなる）
+   *
+   * 数字キーに載らない武器（Qの狙撃銃）はここには入らない。あちらは quickSlot が持つ
    *
    * 最後のを「札を消す」にしないのは、消すと後ろの番号が繰り上がって、
    * 押し慣れた数字と出てくる武器が変わってしまうため。
    *
-   * items … [{ name:'ライフル', out:false }, ...] 並びがそのまま1,2,3…になる。
-   *   key を持つ物だけは数字ではなくその文字が出る（Qで出す支給品）
+   * items … [{ name:'ライフル', out:false }, ...] 並びがそのまま1,2,3…になる
    */
   weaponSlots(items) {
     const box = this.el.slotBox;
     if (!box) return;
-    const key = items.map((it) => `${it.key || ''}${it.name}${it.out ? '/x' : ''}`).join('|');
+    const key = items.map((it) => `${it.name}${it.out ? '/x' : ''}`).join('|');
     if (key === this._slotKey) return;
     this._slotKey = key;
     // lastChildではなくchildrenで消す。本物のDOMではタグの間の改行が
@@ -318,9 +339,7 @@ export class HUD {
     }
     for (let i = 0; i < items.length; i++) {
       const el = box.children[i];
-      // keyがある物は数字ではなくそのキーを出す（Qで出す狙撃銃など）。
-      // 番号の続きにすると「5」に見えるのに5では出ない、という嘘になる
-      const text = `${items[i].key || i + 1} ${items[i].name}`;
+      const text = `${i + 1} ${items[i].name}`;
       if (el.textContent !== text) el.textContent = text;
       el.classList.toggle('out', !!items[i].out);
     }
