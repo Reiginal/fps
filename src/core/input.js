@@ -23,6 +23,15 @@ const LOCK_KEYS = [
   'Digit6', 'Digit7', 'Digit8', 'Digit9',
 ];
 
+/* 修飾キー。**Commandを離した時に落とさない側。**
+   macOSがkeyupを送らないのは修飾キー以外なので、取りこぼすのもそちらだけ。
+   ここに走り(Shift)としゃがみ(Ctrl)が入っているのが大事で、
+   落としてしまうと走りながらCommandでしゃがんだ瞬間に棒立ちになる */
+const MODIFIERS = [
+  'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight',
+  'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight',
+];
+
 export class Input {
   constructor(domElement) {
     this.dom = domElement;
@@ -62,8 +71,14 @@ export class Input {
       const typing = e.target instanceof HTMLElement
         && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable);
       if (this.locked && !typing) e.preventDefault();
-      if (e.repeat) return;
+      /* **押している集合は、キーリピートでも入れ直す。**
+         下のkeyupでCommandを離した時に文字キーを落としているので、
+         本当に押し続けているキーはここで戻ってくる（押しっぱなしのキーは
+         OSが数十msごとにkeydownを送り続けるため）。
+         入れ直すのは集合だけで、「押した瞬間」の印は下へ置いたまま。
+         あれをリピートで立てると、跳躍も装填も押しっぱなしで連射になる */
       this.keys.add(e.code);
+      if (e.repeat) return;
       this._pressedThisFrame.add(e.code);
       // 掴んでいない間も、これだけは止める。
       // スペースでページがスクロールしたりタブが移動すると台無しになる
@@ -71,19 +86,22 @@ export class Input {
     });
     addEventListener('keyup', (e) => {
       this.keys.delete(e.code);
-      // MacはCommandを押している間、他のキーのkeyupを一切よこさない。
-      // 「Wで走る → Commandでしゃがむ → Wを離す → Commandを離す」と辿ると、
-      // Wのkeyupがどこにも来ないまま押しっぱなし扱いで残り、手を離しているのに
-      // 前へ走り続ける（戦域の外へ出て力尽きる）。
-      // Commandが離れた時点で全部落とす。取りこぼした物がここで必ず消える。
-      // 本当に押し続けていたキーまで落ちるが、押し直せば戻る。
-      // 「勝手に走り続ける」より「一瞬止まる」のほうが被害が小さい。
-      //
-      // **だからCommandはゲームの操作に割り当てない。** 一時期しゃがみに入れていたが、
-      // 走りながらしゃがんだ瞬間にここが走って、手を離していないのに棒立ちになった
-      // （実測で速度が0まで落ちる）。しゃがみはCtrlとCだけにしてある
-      // （protocol.jsのKEY_CODES）。ここは「Cmd+Tabで抜けた時の後始末」専用
-      if (e.code === 'MetaLeft' || e.code === 'MetaRight') this.keys.clear();
+      /* MacはCommandを押している間、他のキーのkeyupを一切よこさない。
+         「Wで走る → Commandでしゃがむ → Wを離す → Commandを離す」と辿ると、
+         Wのkeyupがどこにも来ないまま押しっぱなし扱いで残り、手を離しているのに
+         前へ走り続ける（戦域の外へ出て力尽きる）。だからCommandが離れた時に落とす。
+
+         **落とすのは文字キーだけ。修飾キーは残す。** 前は keys.clear() で
+         全部落としていて、Shiftまで落ちるので**走りながらCommandでしゃがむと、
+         離した瞬間に棒立ちになった**（実測で速度が0）。
+         keyupが来ないのは修飾キー以外なので、落とす相手もそちらだけでよい。
+
+         落とした文字キーのうち、本当に押し続けている物は上のkeydownが
+         キーリピートで入れ直す。離していた物はリピートが来ないので落ちたまま。
+         **どちらの取りこぼしも自動で正しくなる**のがこの形の要点 */
+      if (e.code === 'MetaLeft' || e.code === 'MetaRight') {
+        for (const k of this.keys) if (!MODIFIERS.includes(k)) this.keys.delete(k);
+      }
     });
     addEventListener('blur', () => { this.keys.clear(); this.buttons.fill(false); });
 
