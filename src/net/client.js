@@ -647,6 +647,12 @@ export class NetClient {
     this._send({ t: C.SEAT, st: seat | 0 });
   }
 
+  /** 空席にCPUを座らせる／その席のCPUを立たせる。同じ電文でどちらもやる（protocol.js参照） */
+  sendBot(seat) {
+    if (!this.connected) return;
+    this._send({ t: C.BOT, st: seat | 0 });
+  }
+
   /** 準備完了の入り切り。全員が立てた時にサーバーが試合を始める */
   sendReady(on) {
     if (!this.connected) return;

@@ -13,6 +13,7 @@ import {
   TEAM_OF_SEAT, TEAM_NAMES,
 } from '../src/net/protocol.js';
 import { SimPlayer, resolveShot, rewindMs, originVisible, WEAPONS } from './sim.js';
+import { Bot, forwardOf } from './bot.js';
 import { modeOf } from './modes.js';
 import { logs } from './logs.js';
 
@@ -38,6 +39,19 @@ const nowMs = () => performance.now();
 
 // 爆発の距離を測る時の使い回し。1回ごとに作ると毎爆発でごみが出る
 const _nadeTo = new THREE.Vector3();
+// CPUが撃つ時の使い回し。CPUは毎刻み考えるので、ここで作ると60Hz×体数ぶんのごみが出る
+const _botOrigin = new THREE.Vector3();
+const _botDir = new THREE.Vector3();
+
+/* CPUの席が持つ、繋がっていない受け口。
+   **本物のWebSocketと同じ顔（send と rtt）だけ持たせてある。**
+   こうしておくと、全員へ配っている11箇所（スナップショット・ロビー・順位表…）に
+   「CPUかどうか」の分岐を1つも足さずに済む。分岐を足す形にすると、
+   後から配る物が増えるたびに書き忘れて、そこだけCPUで落ちる */
+const BOT_CONN = { send() {}, rtt: 0 };
+
+// CPUの名前。席の番号で選ぶので、同じ席には毎回同じ名前が座る
+const BOT_NAMES = ['CPU アルファ', 'CPU ブラボー', 'CPU チャーリー', 'CPU デルタ'];
 
 // 巻き戻しが本当に効いているかを確かめるための逃げ道。
 // 普段は有効。NO_REWIND=1で切ると「当てたのに抜ける」が再現する
@@ -108,6 +122,13 @@ export class Room {
     }
     if (!Number.isInteger(seat) || seat >= SEATS) return;
     if (slot.seat === seat) return;   // 今いる席
+    /* 人が座りたい席にCPUが居たら、CPUが立つ。
+       CPUは「人が足りない時の埋め合わせ」なので、人より優先されることは無い。
+       CPU同士では譲らない（押した人の意図が「そこに2体目」なら困る） */
+    if (!slot.bot) {
+      const sitting = this._whoSits(seat);
+      if (sitting && sitting.bot) this._dropBot(sitting);
+    }
     if (this._seatTaken(seat, slot)) return;   // 埋まっている
     slot.seat = seat;
     // 座った時点で、見た目が先客とかぶっていたら空いている物へ寄せる。
@@ -435,6 +456,8 @@ export class Room {
       row[LOBBY_ROW.SEAT] = s.seat === null ? -1 : s.seat;
       row[LOBBY_ROW.READY] = s.ready ? 1 : 0;
       row[LOBBY_ROW.CHR] = s.chr | 0;
+      // CPUか。画面側が席に「CPU」と出して、押したら外せるようにするために要る
+      row[LOBBY_ROW.BOT] = s.bot ? 1 : 0;
       rows.push(row);
     }
     return rows;
@@ -483,6 +506,10 @@ export class Room {
     const seated = this._seated();
     if (seated.length === 0) return '席に着いてください';
     if (seated.length < 2) return 'あと1人来れば始められます';
+    /* CPUだけでは始めない。**これが無いと、CPUを2体入れた瞬間に、
+       まだ席に着いていない本人を置いて試合が始まる**（実際に始まった）。
+       試合は人のためにあるので、席に人が1人も居なければ待つ */
+    if (!seated.some((s) => !s.bot)) return '席に着いてください（CPUだけでは始まりません）';
     /* チーム戦は両側に人が要る。片側だけに全員が座っていると、
        始まった瞬間に「相手が全員倒れている」状態になって即決着する */
     if (this.rules.teams) {
@@ -503,6 +530,135 @@ export class Room {
       if (s !== except && s.seat === seat) return true;
     }
     return false;
+  }
+
+  /** その席に座っている人。誰も居なければnull */
+  _whoSits(seat) {
+    for (const s of this.slots.values()) if (s.seat === seat) return s;
+    return null;
+  }
+
+  /* ------------------------------------------------------------ CPU */
+
+  /**
+   * 席のCPUを入れ替える。空いていれば座らせ、CPUが居れば立たせる。
+   *
+   * **なぜCPUが要るか:** 対戦は2人揃わないと始まらないので、1人だと
+   * 撃たれる・倒れる・生き返る・観戦カメラ・キルログを一度も確かめられない。
+   * CPUは「入力を自分で作る席」として人とまったく同じ道を通るので、
+   * 人でしか通らない道が残らない（詳しくは server/bot.js）。
+   *
+   * 押した1つの口で足すも外すもやるのは、画面側が席のボタン1つで済むから。
+   * 別々の口にすると、押した時の席の状態を画面側が持つことになり、
+   * 配られた絵と食い違った瞬間に「押しても何も起きない」が生まれる
+   */
+  toggleBot(seat) {
+    // 席が動かせるのはロビーにいる間だけ（人と同じ決まり）
+    if (this.phase !== PHASE.WAIT) return;
+    if (!Number.isInteger(seat) || seat < 0 || seat >= SEATS) return;
+    const sitting = this._whoSits(seat);
+    if (sitting) {
+      // CPUなら立たせる。人が座っている席は触らない
+      if (sitting.bot) this._dropBot(sitting);
+      return;
+    }
+    this._addBot(seat);
+  }
+
+  _addBot(seat) {
+    if (this.full) return null;
+    const slot = this.join(BOT_CONN, BOT_NAMES[seat % BOT_NAMES.length], null);
+    if (!slot) return null;
+    slot.bot = new Bot();
+    // 抜けた記録を取らない。CPUに「回線が切れて戻ってくる」は無いので、
+    // 記録を残すと誰にも使われない物が溜まるだけ（_parkはtokenが無ければ何もしない）
+    slot.token = null;
+    // 敵を数え直す入れ物。毎刻み作らないよう席に持たせる
+    slot._foes = [];
+    slot._botFire = false;
+    this.takeSeat(slot, seat);
+    // CPUは常に準備完了。押す人がいないので、ここで立てないと永久に始まらない
+    this.setReady(slot, true);
+    logs.add('bot', { seat, count: this.slots.size });
+    return slot;
+  }
+
+  /** CPUを1体片付ける。人のleave()と違い、戦績も席も残さない */
+  _dropBot(slot) {
+    if (!slot.bot) return;
+    if (!this.slots.delete(slot.id)) return;
+    this.push({ e: EV.LEAVE, id: slot.id });
+    this._sendLobby();
+  }
+
+  /**
+   * 席が全部埋まっていて、そのどれかにCPUが居るなら1体立たせる。
+   * 入ってきた人が座れる席を作るためだけの物なので、空席が1つでもあれば何もしない。
+   * 試合中は席が動かないので触らない（次のロビーで空く）
+   */
+  _freeSeatForHuman() {
+    if (this.phase !== PHASE.WAIT) return;
+    for (let seat = 0; seat < SEATS; seat++) if (!this._seatTaken(seat)) return;
+    for (let seat = SEATS - 1; seat >= 0; seat--) {
+      const s = this._whoSits(seat);
+      if (s && s.bot) { this._dropBot(s); return; }
+    }
+  }
+
+  /** 今いる人（CPUでない席）の数 */
+  _humanCount() {
+    let n = 0;
+    for (const s of this.slots.values()) if (!s.bot) n++;
+    return n;
+  }
+
+  /**
+   * 人が1人もいなくなったらCPUを全部片付ける。
+   *
+   * **これが無いと、誰も見ていない部屋で60Hzの撃ち合いが永久に続く。**
+   * 本番は常時起動の512MBなので、CPUだけが残った試合が回り続けると
+   * 何も遊んでいない時間帯にずっと計算し続けることになる
+   */
+  _sweepBots() {
+    if (this._humanCount() > 0) return;
+    for (const s of [...this.slots.values()]) if (s.bot) this._dropBot(s);
+    if (this.slots.size === 0) {
+      this._stop();
+      this.phase = PHASE.WAIT;
+      this.timeLeft = 0;
+      this.round = 0;
+    }
+  }
+
+  /**
+   * CPUの入力を1刻みぶん作って、人の入力と同じ所（pending）へ置く。
+   * こうしておくと _feed も sim.tick も撃った時の巻き戻しも、
+   * 人が送ってきた時と1行も違わない道を通る
+   */
+  _botInput(slot) {
+    const foes = slot._foes;
+    foes.length = 0;
+    for (const s of this.slots.values()) {
+      if (s === slot || this._sameTeam(s, slot)) continue;
+      foes.push(s.sim);
+    }
+    const f = slot.bot.think(
+      slot.sim, foes, this.world.octree, TICK_DT, this.phase === PHASE.LIVE,
+    );
+    if (slot.nextSeq < 0) slot.nextSeq = 0;
+    // 1刻みに1件だけ置く。溜めないので、この刻みの_feedがそのまま食べる
+    slot.pending.set(slot.nextSeq, [f.bits, f.yaw, f.pitch]);
+    slot._botFire = f.fire;
+  }
+
+  /* CPUの発砲。**_feedの後に呼ぶ。** 先に呼ぶと、1刻み前の位置と向きで撃つことになり、
+     動きながら撃った時だけ狙いが後ろへずれる */
+  _botShoot(slot) {
+    if (!slot._botFire) return;
+    slot._botFire = false;
+    slot.sim.eye(_botOrigin);
+    forwardOf(slot.lastYaw, slot.lastPitch, _botDir);
+    this.shot(slot, slot.lastSeq, _botOrigin, _botDir);
   }
 
   /* -------------------------------------------- 回線が切れた人の記録 */
@@ -630,6 +786,10 @@ export class Room {
     }
 
     this.slots.set(id, slot);
+    /* 人が入ってきたのに席が全部CPUで埋まっていたら、1体立たせて空ける。
+       CPUは人が足りない時の埋め合わせなので、来た人が座れないのは本末転倒。
+       ここはconnで見分ける（slot.botはこの後に立てるので、まだ付いていない） */
+    if (conn !== BOT_CONN) this._freeSeatForHuman();
     this._respawn(slot);
     this.push({ e: EV.JOIN, id, name });
     if (!this._timer) this._start();
@@ -682,10 +842,13 @@ export class Room {
         s.rounds = 0; s.sim.kills = 0; s.sim.deaths = 0;
         // 準備完了も倒す。倒さないと、残った人が押しっぱなしの状態でロビーに戻り、
         // 次に誰かが座って準備を押した瞬間に、心の準備なく試合が始まる
-        s.ready = false;
+        // **CPUは倒さない。** 押す人がいないので、倒すと座ったまま二度と始まらない
+        s.ready = !!s.bot;
       }
       this._sendScore();
     }
+    // 人が誰も居なくなったらCPUも引き上げる（見ていない部屋で撃ち合い続けない）
+    this._sweepBots();
     this._sendLobby();
   }
 
@@ -1113,6 +1276,9 @@ export class Room {
     // 包帯もラウンドの頭で戻す。持ち越すと、前のラウンドで使い切った側だけ
     // 立て直す手段が無いまま次のラウンドを戦うことになる
     slot.sim.player.refill();
+    // CPUの狙いと弾倉も湧き直しで戻す。戻さないと、前のラウンドで
+    // 撃ち切った状態のまま湧いて、装填が終わるまで棒立ちになる
+    slot.bot?.reset();
     slot.lastYaw = yaw;
     slot.lastPitch = 0;
     this.push({ e: EV.SPAWN, id: slot.id, p: [pos.x, pos.y, pos.z], yaw });
@@ -1158,7 +1324,10 @@ export class Room {
       // 入力が届いているかに関係なく毎刻み減らす。
       // 入力任せにすると、送るのを止めるだけで無敵が切れなくなる
       sim.clock(TICK_DT);
+      // CPUは自分で入力を作ってから食べる（人はWebSocketが先に置いている）
+      if (slot.bot) this._botInput(slot);
       this._feed(slot);
+      if (slot.bot) this._botShoot(slot);
       // 位置が決まった後で見る。食べる前に見ると1刻み古い位置で判定することになり、
       // 戻り切った瞬間にもう1回削られる。
       // 削るのはラウンドが動いている間だけ。人待ちの間や決着後の数秒に

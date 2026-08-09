@@ -299,6 +299,7 @@ function onMessage(conn, raw) {
     case C.WEAPON: return onWeapon(conn, m);
     case C.MODE: return onMode(conn, m);
     case C.SEAT: return onSeat(conn, m);
+    case C.BOT: return onBot(conn, m);
     case C.READY: return onReady(conn, m);
     case C.CHAR: return onChar(conn, m);
     case C.PONG: return onPong(conn, m);
@@ -430,6 +431,14 @@ function onSeat(conn, m) {
   // tools/check-protocol.mjs が、送る側と受ける側の食い違いを見張る
   if (!isNum(m.st)) return;
   conn.room.takeSeat(slot, Math.round(m.st));
+}
+
+// 空席にCPUを座らせる／その席のCPUを立たせる。誰が押しても効く（席と同じ扱い）。
+// 席の範囲も、人が座っている席かどうかもroomが見張っているので、ここは形だけ見る
+function onBot(conn, m) {
+  if (!conn.slot) return;
+  if (!isNum(m.st)) return;
+  conn.room.toggleBot(Math.round(m.st));
 }
 
 // 発言。人が読む文字列をそのまま他人の画面へ流すので、ここが一番危ない口になる。
