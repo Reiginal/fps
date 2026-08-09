@@ -33,11 +33,34 @@ export const TUTORIAL_STEPS = [
     sub: '画面の向きはマウスで変わる',
     goal: 2.5,   // ラジアン。ゆっくりでも2〜3秒で届く量
   },
+  /* 移動キーは1つずつ練習する。まとめて「WASDで歩く」だと、
+     Wだけで奥へ着いてクリアになり、A/S/Dを一度も押さないまま進む
+     （「それぞれで案内して」と言われた 2026-08-09）。
+     Wは通路の位置で、S/A/Dは「そのキーで実際に動けた距離」で見る
+     （sprintと同じ理屈: 壁に向かって押しても進まなければ数えない） */
   {
     id: 'move',
-    main: 'W A S D で通路の奥へ歩く',
-    sub: 'Wが前・Sが後ろ・AとDが横',
+    main: 'W で通路の奥へ歩く',
+    sub: 'Wが前。まずは奥へ進む',
     goalZ: 10,   // 湧き(z=18)から8m歩いた所
+  },
+  {
+    id: 'moveBack',
+    main: 'S で少し下がる',
+    sub: '撃ち合いながら間合いを取る時に使う',
+    goal: 2,     // 動けた距離(m)
+  },
+  {
+    id: 'moveLeft',
+    main: 'A で左へ動く',
+    sub: '左右の動きは弾をかわす基本',
+    goal: 2,
+  },
+  {
+    id: 'moveRight',
+    main: 'D で右へ動く',
+    sub: '左右の動きは弾をかわす基本',
+    goal: 2,
   },
   {
     id: 'sprint',
@@ -82,6 +105,12 @@ export const TUTORIAL_STEPS = [
     goal: 1,
   },
   {
+    id: 'knife',
+    main: '3 でナイフを持つと、足が少し速くなる',
+    sub: '移動したい時はナイフ。戦う前に 1 か 2 へ戻す',
+    goal: 8,     // ナイフを持ったまま動けた距離(m)。速さの違いを体で感じる長さ
+  },
+  {
     id: 'target',
     main: '的の兵士を3体倒す',
     sub: '頭に当てると大ダメージ',
@@ -89,26 +118,29 @@ export const TUTORIAL_STEPS = [
   },
   {
     id: 'nade',
-    main: '4 で手榴弾。左クリックを押して狙い、離して投げる',
-    sub: '押している間、飛んでいく先の線が出る',
+    // 「投げたら」でなく「倒したら」クリア（2026-08-09。投げるだけだと
+    // 爆風がどのくらい効くのかを一度も見ないまま先へ進んでしまう）
+    main: '4 で手榴弾。左クリックを押して狙い、離して投げて的を倒す',
+    sub: '押している間、飛んでいく先の線が出る。何発でも配られる',
     goal: 1,
   },
   {
     id: 'heal',
     main: 'F で包帯を持ち、左クリックで巻く',
-    sub: '巻き終わるまで動きが遅くなる。物陰で使う',
+    sub: '左下のゲージが体力。巻き終わると回復する',
     goal: 1,
   },
 ];
 
 export class TutorialMachine {
   /**
-   * @param rifleIndex / pistolIndex 武器の番号（weapons.carryの中身）。
+   * @param rifleIndex / pistolIndex / knifeIndex 武器の番号（weapons.carryの中身）。
    *   protocol.jsをここから読まないのは、この機械を「表と判定だけ」に保つため
    */
-  constructor({ rifleIndex = 0, pistolIndex = 1 } = {}) {
+  constructor({ rifleIndex = 0, pistolIndex = 1, knifeIndex = 2 } = {}) {
     this.rifleIndex = rifleIndex;
     this.pistolIndex = pistolIndex;
+    this.knifeIndex = knifeIndex;
     this.reset();
   }
 
@@ -128,8 +160,10 @@ export class TutorialMachine {
    * 毎フレーム呼ぶ。達成して次へ進んだフレームだけ 'advance' を返す。
    * snapは全部プリミティブ:
    *   { dt, yaw, pitch, z, speed, onFloor, sprinting, crouching,
-   *     shots, kills, adsFactor, reloading, weaponIndex, threw, healed }
-   * zは通路のどこまで進んだか（移動系の課題は位置で判定する）
+   *     keyA, keyS, keyD, shots, kills, adsFactor, reloading,
+   *     weaponIndex, nadeKilled, healed }
+   * zは通路のどこまで進んだか（移動系の課題は位置で判定する）。
+   * keyA/S/Dは移動キーを押しているか（そのキーで動けた距離を数える）
    */
   update(snap) {
     if (this.done) return null;
@@ -141,8 +175,8 @@ export class TutorialMachine {
        数える。累積そのものを見ると、先走って的を倒した人のtargetステップが
        入った瞬間に達成になってしまい、課題を1つも読まずに進む。
        **判定を打ち切るのはこの2つだけ。** 全ステップで入場フレームを捨てると、
-       1フレームしか立たないフラグ（threw/healed）が入場と同時に来た時に
-       取りこぼして、投げたのに課題が残る */
+       1フレームしか立たないフラグ（nadeKilled/healed）が入場と同時に来た時に
+       取りこぼして、倒したのに課題が残る */
     if (!this._entered) {
       this._entered = true;
       if (s.id === 'shoot') { this._base = snap.shots; return null; }
@@ -166,10 +200,29 @@ export class TutorialMachine {
       case 'crouch':
         hit = snap.z <= s.goalZ;
         break;
+      /* S/A/Dは「そのキーを押しながら動けた距離」。時間でなく距離なのは
+         sprintと同じ理由（壁に向かって押しても進まなければ数えない） */
+      case 'moveBack':
+        if (snap.keyS) this._progress += snap.speed * snap.dt;
+        hit = this._progress >= s.goal;
+        break;
+      case 'moveLeft':
+        if (snap.keyA) this._progress += snap.speed * snap.dt;
+        hit = this._progress >= s.goal;
+        break;
+      case 'moveRight':
+        if (snap.keyD) this._progress += snap.speed * snap.dt;
+        hit = this._progress >= s.goal;
+        break;
       case 'sprint':
         // 走った距離。時間でなく距離なのは、壁に向かって走り続けても
         // 進まなければ「走れた」ことにならないため（speedは実際の移動速度）
         if (snap.sprinting) this._progress += snap.speed * snap.dt;
+        hit = this._progress >= s.goal;
+        break;
+      case 'knife':
+        // ナイフを持ったまま動けた距離。持っただけでは速さの違いが分からない
+        if (snap.weaponIndex === this.knifeIndex) this._progress += snap.speed * snap.dt;
         hit = this._progress >= s.goal;
         break;
       case 'shoot':
@@ -198,7 +251,8 @@ export class TutorialMachine {
         hit = this._progress >= s.goal;
         break;
       case 'nade':
-        if (snap.threw) hit = true;
+        // 投げた瞬間ではなく、爆風で的が倒れた瞬間（1フレームの印）
+        if (snap.nadeKilled) hit = true;
         break;
       case 'heal':
         if (snap.healed) hit = true;
@@ -232,7 +286,7 @@ export class TutorialMachine {
         if (typeof z === 'number') left = `あと${Math.max(1, Math.ceil(z - s.goalZ))}m先へ`;
         break;
       }
-      case 'sprint':
+      case 'moveBack': case 'moveLeft': case 'moveRight': case 'sprint': case 'knife':
         left = `あと${Math.max(1, Math.ceil(s.goal - this._progress))}m`;
         break;
       case 'shoot':
