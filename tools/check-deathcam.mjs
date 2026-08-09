@@ -321,6 +321,15 @@ console.log('\n[観戦カメラ] 繋ぎ込み（main.js / remote.js）');
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   ok(/id="specHp"/.test(html), '体力のDOMがある');
   ok(/#specHp\.low/.test(html), '残りが少ない時に色が変わる');
+  /* **倒れている間は手元の武器を描かない。**
+     手元の武器は自分専用の別の場面(viewScene)に浮かんでいて、カメラがどこへ
+     行こうが画面の手前に付いてくる。だから観戦中も自分の武器が写り続けて、
+     **見ている相手が自分と同じ武器を持っているように見える**
+     （遊んで「デスカメラの時に自分と同じ武器になってる気がする」と言われた）。
+     ガンゲームだと相手が今どの段にいるのかが読めなくなる */
+  ok(/viewScene\.visible = !down/.test(src), '倒れている間は手元の武器を描かない');
+  ok(/_deathFall\(dt\) \{[\s\S]{0,900}?viewScene\.visible/.test(src),
+    '倒れ込みの所で畳んでいる（1人用と対戦の両方が通る道）');
   // 肩越しの名残（壁当たりのレイ）が残っていないか
   ok(!/_specRay/.test(src), '肩越しの時の壁当たりのレイは消えている');
 
