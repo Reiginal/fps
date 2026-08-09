@@ -3034,6 +3034,8 @@ export class WeaponSystem {
     this.nades = NADE.PER_ROUND;
     // 投げ切ったので、投げ終わったら手から下ろす、の印
     this._holsterThrown = false;
+    // 手前投げ（右クリックで入り切り）。投げる強さと角度を弱める側へ倒す
+    this.throwShort = false;
     // 自分から持ち替えた時に知らせる先。対戦では持っている物をサーバーへ
     // 伝え直さないと、画面と当たり判定が別々の武器になる
     this.onSwitched = null;
@@ -3435,7 +3437,22 @@ export class WeaponSystem {
     // 右クリックは「押している間」ではなく「押すたびに入り切り」で扱う。
     // Macのトラックパッドは右クリックを押したまま左クリックができないので、
     // 押しっぱなし方式だと覗きながら撃つ動作そのものが物理的に取れない
-    if (input.clicked?.(2)) this.adsHeld = !this.adsHeld;
+    if (input.clicked?.(2)) {
+      /* 投げ物では覗く物が無いので、同じ右クリックを**手前投げの入り切り**に使う。
+         遊んで「右クリしたら手前めに投げれるようになったら嬉しい」と言われた所。
+
+         ここも入り切り（押しっぱなしではない）。理由はADSと同じで、
+         投げる時は左クリックを押したまま狙いを決める作りなので、
+         トラックパッドでは右クリックを押しながら左クリックができない。
+         入っているかどうかは、持っている間ずっと出ている軌道の線の色と長さで分かる */
+      if (d.thrown) {
+        this.throwShort = !this.throwShort;
+        // 入った時は低く、切った時は高く。線の色を見ていなくても切り替えが分かる
+        ctx.audio?.click(this.throwShort ? 900 : 1400, 0.26, 0.04);
+      } else {
+        this.adsHeld = !this.adsHeld;
+      }
+    }
     // 包帯を持っている間は武器そのものを下ろしているので、覗くも撃つも無い
     const busyHealing = this.bandageOut || player.healing > 0;
     // 近接は覗く物が無い。覗けると刃を目の前に構えて視界を塞ぐだけになる
@@ -4218,6 +4235,8 @@ export class WeaponSystem {
     this.burstLeft = 0;
     // 手榴弾を構えたまま(離さずに)死ぬと、湧き直した所でも構えたままになっていた
     this._throwCharging = false;
+    // 手前投げも解く。湧いた所で入ったままだと、投げてから短いことに気づく
+    this.throwShort = false;
     this.shotIndexInMag = 0;
     this.boltCycle = 0;
     this.magWob = 0; this.magWobV = 0;

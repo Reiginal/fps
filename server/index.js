@@ -401,7 +401,8 @@ function onThrow(conn, m) {
   const len = _d.length();
   if (len < 1e-6) return;
   _d.divideScalar(len);
-  conn.room.throwNade(slot, _o, _d);
+  // 手前投げの印。**どれだけ弱いかはこちらが決める**（強さを申告させない）
+  conn.room.throwNade(slot, _o, _d, m.s === 1);
 }
 
 // 遊び方を選ぶ。誰が押しても変わるので、席に着いているかも見ない

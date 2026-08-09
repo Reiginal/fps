@@ -388,6 +388,15 @@ const TUT_FINISH_HOLD_S = 3.5;
    protocol.jsのGRAVITYとセットで動かすこと（片方だけ触ると
    「ふわふわ飛んで遠くまで行く」になる）。数字は tools/check-nade.mjs が測る */
 const NADE_LOFT = 0.50;
+/* 手前投げ（右クリックで入り切り）の上向き成分。0.90は約42度で、
+   下手投げでひょいと放る角度。**初速の倍率(protocol.jsのNADE.SHORT_MUL)とセット。**
+   角度だけ上げると山なりに高く上がって同じ距離まで飛ぶので、両方を弱める。
+   この2つで、水平を向いて投げた時に7.1m先へ落ちる（普通は12.9m先） */
+const NADE_LOFT_SHORT = 0.90;
+
+// 今の投げ方（普通か手前か）に合う初速と上向き。手元の予測線と実際の飛翔で同じ物を使う
+const throwSpeedOf = (short) => NADE.SPEED * (short ? NADE.SHORT_MUL : 1);
+const throwLoftOf = (short) => (short ? NADE_LOFT_SHORT : NADE_LOFT);
 const _throwOrigin = new THREE.Vector3();
 const _throwDir = new THREE.Vector3();
 
@@ -3139,8 +3148,14 @@ class Game {
     // 持って出ない武器のぶんずれて、別の札が光る
     const slotAt = this.weapons.carry.indexOf(this.weapons.index);
     this._weaponSlotsHud();
+    /* 手前投げに入っている間は武器の名前に添える。
+       軌道の線の色でも分かるが、線を見ていない時（持ち替えた直後・遮蔽の裏）でも
+       入っているかを読めるようにしておく。**同じ状態なら文字は書き換わらない**
+       （hud.ammoが前回の名前と比べる）ので、毎フレームの負担にはならない */
+    const wname = w.def.thrown && this.weapons.throwShort
+      ? `${w.def.name}（手前投げ）` : w.def.name;
     this.hud.ammo(
-      w.ammo, w.reserve, w.def.name, slotAt, this.weapons.reloading, !!w.def.melee,
+      w.ammo, w.reserve, wname, slotAt, this.weapons.reloading, !!w.def.melee,
       // 投げ物は弾数ではなく残りの数を出す。**対戦でも出す。**
       // 数える人がサーバーにしかいなかった頃は横線だったが、
       // 手元も「飛んだ」の知らせで数えるようになったので出せる
@@ -3203,13 +3218,15 @@ class Game {
     // 対戦と同じNADEの値を使うので、飛び方と爆風の広さは両モードで揃う
     if (this.mode !== 'versus') { this._throwNadeSolo(); return; }
     if (!this.net) return;
+    const short = !!this.weapons.throwShort;
     const cam = this.camera;
     _throwOrigin.setFromMatrixPosition(cam.matrixWorld);
     // 真っ直ぐ前ではなく少し上へ。水平に投げると足元へ落ちて自爆する
     _throwDir.set(0, 0, -1).applyQuaternion(cam.quaternion);
-    _throwDir.y += NADE_LOFT;
+    _throwDir.y += throwLoftOf(short);
     _throwDir.normalize();
-    this.net.sendThrow(_throwOrigin, _throwDir);
+    // 強さは送らない。送るのは「弱く投げた」の印だけ（client.jsのsendThrow参照）
+    this.net.sendThrow(_throwOrigin, _throwDir, short);
   }
 
   /**
@@ -3261,14 +3278,25 @@ class Game {
     }
     this._arc.visible = true;
 
+    /* 手前投げに入っているかは**線の色で見せる。**
+       押しても何も起きない操作を作らないための唯一の合図で、
+       しかも見ている所（狙っている先）で色が変わるので視線を動かさずに読める。
+       線の長さも一緒に変わるが、遠くを狙っている時は
+       画面の中の差が小さいので、色が無いと入り切りが分からない */
+    const short = !!this.weapons.throwShort;
+    if (short !== this._arcShort) {
+      this._arcShort = short;
+      this._arc.material.color.setHex(short ? 0xffc866 : 0x63d2ff);
+    }
+
     const cam = this.camera;
     _throwOrigin.setFromMatrixPosition(cam.matrixWorld);
     _throwDir.set(0, 0, -1).applyQuaternion(cam.quaternion);
-    _throwDir.y += NADE_LOFT;
+    _throwDir.y += throwLoftOf(short);
     _throwDir.normalize();
 
     const pos = _arcPos.copy(_throwOrigin).addScaledVector(_throwDir, NADE.MUZZLE);
-    const vel = _arcVel.copy(_throwDir).multiplyScalar(NADE.SPEED);
+    const vel = _arcVel.copy(_throwDir).multiplyScalar(throwSpeedOf(short));
     const arr = this._arc.geometry.attributes.position.array;
     const dt = 0.045;
     let n = 0;
@@ -3310,17 +3338,19 @@ class Game {
     }
     // チュートリアルの手榴弾の課題は「投げたら」ではなく「爆風で的を倒したら」
     // クリアになった(2026-08-09)。印を立てるのは_explodeSoloの側
+    // 手前投げかどうか。予測線と同じ関数から取るので、線の通りに飛ぶ
+    const short = !!this.weapons.throwShort;
     const cam = this.camera;
     _throwOrigin.setFromMatrixPosition(cam.matrixWorld);
     _throwDir.set(0, 0, -1).applyQuaternion(cam.quaternion);
-    _throwDir.y += NADE_LOFT;
+    _throwDir.y += throwLoftOf(short);
     _throwDir.normalize();
 
     const gid = this._soloNadeId++;
     this._soloNades.push({
       gid,
       pos: _throwOrigin.clone().addScaledVector(_throwDir, NADE.MUZZLE),
-      vel: _throwDir.clone().multiplyScalar(NADE.SPEED),
+      vel: _throwDir.clone().multiplyScalar(throwSpeedOf(short)),
       fuse: NADE.FUSE_S,
       cap: new Capsule(new THREE.Vector3(), new THREE.Vector3(), NADE.RADIUS),
     });
