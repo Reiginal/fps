@@ -20,6 +20,9 @@ RUN npm ci --omit=dev
 # 外へ配る物を server/index.js 側でも絞っているが、
 # そもそも置かないのが一番確実
 COPY index.html ./
+# 個人情報の扱い。**ここに書き忘れると本番だけ404になる**（コンテナの中に無いので）。
+# ogp.pngで同じことをやったので、ファイルを1枚足したらここも見ること
+COPY privacy.html ./
 COPY src ./src
 COPY server ./server
 # URLを貼った時の札に使う画像。ここに書き忘れると、手元では出るのに

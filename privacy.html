@@ -1,0 +1,98 @@
+<!doctype html>
+<!--
+  個人情報の扱い。**メールアドレスを預かる時点で要る。**
+  課金より前で、ログインを出すのと同時に必要になる。
+
+  ゲーム本体(index.html)とは別の1枚にしてある。
+  本体は6万行あって、読み込みに3Dの一式が付いてくるので、
+  「規約を読みたいだけ」の人にゲームを起動させることになる。
+  配ってよいURLの一覧(server/serve-rules.js)にこのファイルを足してある。
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>個人情報の扱い — BLACKOUT</title>
+<style>
+  :root { --hud: #d8dee6; --dim: #7c8794; --accent: #63d2ff; --bg: #0d1014; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 48px 20px 80px;
+    background: var(--bg); color: var(--hud);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 14px; line-height: 2;
+  }
+  main { max-width: 680px; margin: 0 auto; }
+  h1 { font-size: 22px; letter-spacing: .2em; margin: 0 0 6px; font-weight: normal; }
+  h2 { font-size: 14px; letter-spacing: .16em; margin: 38px 0 8px; color: var(--accent); font-weight: normal; }
+  .sub { color: var(--dim); font-size: 11px; letter-spacing: .16em; margin-bottom: 40px; }
+  ul { padding-left: 1.3em; }
+  li { margin-bottom: 4px; }
+  a { color: var(--accent); }
+  .back { display: inline-block; margin-top: 48px; font-size: 12px; letter-spacing: .16em; }
+  .note { color: var(--dim); font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>個人情報の扱い</h1>
+<div class="sub">BLACKOUT — 最終更新 2026-08-09</div>
+
+<p>個人開発のブラウザゲームです。集める物は少なく、使い道も限られています。</p>
+
+<h2>集める物</h2>
+<ul>
+  <li><b>メールアドレス</b> … アカウントを作った人だけ。本人確認とログインに使います</li>
+  <li><b>名前</b> … ゲームの中に表示される名前です。本名である必要はありません</li>
+  <li><b>パスワード</b> … <b>元に戻せない形に変換してから保存します。</b>そのままの文字列は保存していません</li>
+  <li><b>遊んだ記録の一部</b> … 入退場・試合の結果・画面で起きたエラー・描画の重さ。
+    サーバーの中に最新500件だけ残り、サーバーを更新すると消えます</li>
+</ul>
+
+<p class="note">
+  アカウントを作らずに遊ぶ場合、こちらに残る物は上の最後の1つだけです。
+  通算の戦績はお使いの端末の中にだけ保存され、こちらへは送られません。
+</p>
+
+<h2>使い道</h2>
+<ul>
+  <li>ログインと、なりすましを防ぐこと</li>
+  <li>メールアドレスの確認メールを送ること</li>
+  <li>不具合を直すこと</li>
+</ul>
+<p><b>広告には使いません。第三者へ売ったり渡したりしません。</b></p>
+
+<h2>預けている先</h2>
+<ul>
+  <li><b>Fly.io</b> … ゲームのサーバー（東京）</li>
+  <li><b>Neon</b> … アカウントの保存先（データベース）</li>
+  <li><b>Resend</b> … 確認メールの送信</li>
+</ul>
+
+<h2>保存する期間</h2>
+<p>アカウントを消すまで保存します。ログインの札は30日で切れます。</p>
+
+<h2>消したい時</h2>
+<p>
+  下の連絡先へ、登録したメールアドレスから連絡してください。アカウントごと消します。
+</p>
+
+<h2>Cookie</h2>
+<p>
+  ログイン状態を保つための物を1つだけ使います。
+  広告や行動の追跡には使っていません。
+</p>
+
+<h2>連絡先</h2>
+<p class="note">
+  <!-- お金を取り始める（特定商取引法の表示が要る）時に、ここへ
+       販売者名・住所・連絡先を足すこと。今は無料なので連絡先だけ置く -->
+  GitHubの <a href="https://github.com/Reiginal/fps/issues" target="_blank" rel="noopener">issue</a> からどうぞ。
+</p>
+
+<a class="back" href="/">&lt; ゲームへ戻る</a>
+
+</main>
+</body>
+</html>
