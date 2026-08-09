@@ -41,7 +41,8 @@ export class AccountMenu {
   constructor() {
     this.el = {
       root: $('account'),
-      row: $('acctRow'), who: $('acctWho'), open: $('acctOpen'), out: $('acctOut'),
+      row: $('acctRow'), who: $('acctWho'),
+      open: $('acctOpen'), new: $('acctNew'), out: $('acctOut'),
       title: $('acTitle'), sub: $('acSub'), status: $('acStatus'),
       email: $('acEmail'), name: $('acName'), nameField: $('acNameField'), pass: $('acPass'),
       close: $('acClose'), swap: $('acSwap'), go: $('acGo'),
@@ -59,7 +60,9 @@ export class AccountMenu {
 
     // addEventListenerではなく代入。DOMは1組しかないので、
     // 2回作られた時に古い方まで動くのを防ぐ（netmenu.jsと同じ作法）
+    // ホームから直接どちらの面でも開ける。開いてから切り替えさせない
     this.el.open.onclick = () => this.show(false);
+    this.el.new.onclick = () => this.show(true);
     this.el.out.onclick = () => this._logout();
     this.el.close.onclick = () => this.hide();
     this.el.swap.onclick = () => this._setMode(!this._register);
@@ -110,16 +113,17 @@ export class AccountMenu {
     const { row, who, open, out } = this.el;
     row.classList.toggle('hidden', !this.available);
     if (!this.available) return;
-    if (this.user) {
+    const inside = !!this.user;
+    if (inside) {
       who.innerHTML = `<b>${escapeHtml(this.user.name)}</b> でログイン中`
         + (this.user.verified ? '' : '<br>メールの確認がまだです');
-      open.classList.add('hidden');
-      out.classList.remove('hidden');
     } else {
       who.textContent = 'ログインしていません';
-      open.classList.remove('hidden');
-      out.classList.add('hidden');
     }
+    // 入っている時は出る口だけ、入っていない時は入る口だけを出す
+    open.classList.toggle('hidden', inside);
+    this.el.new.classList.toggle('hidden', inside);
+    out.classList.toggle('hidden', !inside);
   }
 
   get isOpen() { return !this.el.root.classList.contains('hidden'); }
@@ -143,7 +147,11 @@ export class AccountMenu {
     sub.textContent = this._register
       ? 'メールアドレスとパスワードだけです'
       : '買った物が端末を跨いで残ります';
-    swap.textContent = this._register ? 'ログイン' : '新規登録';
+    /* **どこへ行くのかを文で書く。**「ログイン」「新規登録」の単語だけだと、
+       今どちらの面にいて押すとどうなるのかが読めない */
+    swap.textContent = this._register
+      ? 'アカウントを持っている（ログインする）'
+      : 'アカウントを作る';
     go.textContent = this._register ? '登録' : 'ログイン';
     nameField.classList.toggle('hidden', !this._register);
     // 名前の初期値は、ホームで打っていた物を引き継ぐ。もう一度打たせない
@@ -161,6 +169,7 @@ export class AccountMenu {
   _lock(on) {
     this._busy = on;
     for (const b of [this.el.go, this.el.swap, this.el.close]) b.disabled = on;
+    // 送っている最中に面を切り替えられると、返事が来た時にどちらの結果か分からなくなる
   }
 
   async _submit() {
