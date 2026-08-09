@@ -37,7 +37,7 @@ export class NetMenu {
       root: $('netmenu'),
       name: $('nmName'),
       status: $('nmStatus'), solo: $('nmSolo'), join: $('nmJoin'),
-      tutorial: $('nmTutorial'), range: $('nmRange'),
+      tutorial: $('nmTutorial'), range: $('nmRange'), look: $('nmLook'),
       settings: $('nmSettings'), quit: $('nmQuit'),
     };
 
@@ -50,6 +50,8 @@ export class NetMenu {
     this.onRange = () => {};
     // 設定を開く口。画面そのものは src/ui/settings.js が持っている
     this.onSettings = () => {};
+    // 見た目（武器のスキン）を開く口。画面は src/ui/look.js
+    this.onLook = () => {};
     // 戦績を開く口はここにあったが、画面ごと消した（「誰も見ない」）
     /* 終了する口。**ブラウザのゲームには「閉じる」が無い。**
        タブを閉じるまで裏で3Dを描き続けるので、見ていないのにパソコンが熱くなる。
@@ -59,6 +61,7 @@ export class NetMenu {
 
     this.el.name.value = load(SAVE.name, '');
     this.el.settings.onclick = () => this.onSettings();
+    this.el.look.onclick = () => this.onLook();
     this.el.quit.onclick = () => this.onQuit();
 
     // addEventListenerではなく代入で持つ。DOMはindex.html側に1組しかないので、

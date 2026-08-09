@@ -576,6 +576,39 @@
   .swaplink:hover { color: var(--hud); }
   .swaplink:disabled { opacity: .35; cursor: default; pointer-events: none; }
 
+  /* ------------------------------------------------------- 見た目 */
+  /* 会員証と同じ作り。**#look.hidden も要る**（IDの指定がクラスに勝つため） */
+  #look {
+    position: fixed; inset: 0; z-index: 45;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px 0; overflow-y: auto;
+    background: rgba(3, 5, 8, .92);
+  }
+  #look.hidden { display: none; }
+  .lkpanel { width: min(680px, 92vw); text-align: center; }
+  /* 銃を出す枠。**背景を少し明るくする。** 真っ黒だと黒い銃が沈んで、
+     どのスキンを選んでも同じに見える */
+  #lkView {
+    width: 100%; max-width: 420px; height: auto; aspect-ratio: 420 / 200;
+    background: radial-gradient(ellipse at 50% 45%, rgba(70,84,102,.5), rgba(10,14,20,.9));
+    border: 1px solid rgba(255,255,255,.12);
+  }
+  .lkname { font-size: 15px; letter-spacing: .18em; color: var(--hud); margin-top: 12px; }
+  .lknote { font-size: 10px; letter-spacing: .1em; color: var(--dim); min-height: 20px; }
+  /* 並べる。狭い画面では折り返す */
+  .lklist { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 14px 0 4px; }
+  .lkitem {
+    display: flex; align-items: center; gap: 7px;
+    padding: 8px 12px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+    color: var(--dim); background: transparent;
+    border: 1px solid rgba(255,255,255,.18); cursor: pointer;
+  }
+  .lkitem:hover { color: var(--hud); border-color: rgba(255,255,255,.4); }
+  .lkitem.on { color: var(--accent); border-color: var(--accent); background: rgba(99,210,255,.1); }
+  /* 色の見本。3Dの絵が出るまでの間も、どんな色かがここで読める */
+  .lkitem .sw { width: 13px; height: 13px; border: 1px solid rgba(255,255,255,.25); }
+
   /* --------------------------------------------------------- 設定 */
   /* 接続画面と同じ見た目にする。開ける場所が2つ（ホームと一時停止）あるので、
      どちらから開いても同じ物が出るよう、画面は1つだけ置いて出し入れする。
@@ -1180,9 +1213,12 @@
 
     <!-- チュートリアルと訓練場は別の行。既存の行は4個でぎりぎりの幅なので、
          同じ行へ入れると全員のボタンが潰れる -->
+    <!-- 見た目は「設定」の隣ではなくこちらの行へ。下の行は4個でぎりぎりの幅で、
+         5個にすると全員のボタンが潰れる -->
     <div class="netbtns tutrow">
       <button id="nmTutorial" class="netbtn" type="button">チュートリアル</button>
       <button id="nmRange" class="netbtn" type="button">射撃訓練場</button>
+      <button id="nmLook" class="netbtn" type="button">見た目</button>
     </div>
     <div class="netbtns">
       <button id="nmQuit" class="netbtn" type="button">終了</button>
@@ -1199,6 +1235,28 @@
 <!-- 会員証。ログインと新規登録を1枚で兼ねる。
      2枚に分けると、打ち間違えて行き来するたびに入力が消えるので1枚にしてある。
      中身の出し入れは src/ui/account.js -->
+<!-- 見た目。今は武器のスキンだけ。中身は src/ui/look.js が並べる。
+     **選んだ物が見えないと選べない**ので、実物の銃を3Dで出して回す -->
+<div id="look" class="hidden">
+  <div class="lkpanel">
+    <div class="title">見た目</div>
+    <div class="subtitle">武器のスキン</div>
+
+    <canvas id="lkView" width="420" height="200"></canvas>
+
+    <div class="lkname" id="lkName"></div>
+    <div class="lknote" id="lkNote"></div>
+
+    <div class="lklist" id="lkList"></div>
+
+    <div class="hint">押すとその場で決まります。次に構えた時から変わります</div>
+
+    <div class="netbtns" style="margin-top:14px">
+      <button id="lkClose" class="netbtn main" type="button">閉じる</button>
+    </div>
+  </div>
+</div>
+
 <div id="account" class="hidden">
   <div class="netpanel">
     <div class="title" id="acTitle">ログイン</div>
