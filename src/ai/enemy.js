@@ -5,6 +5,12 @@ import * as THREE from 'three';
 import { Capsule } from 'three/addons/math/Capsule.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { charModelReady, spawnCharModel, SOLO_MODEL } from './glbchar.js';
+/* 当たり判定の太さは**対戦と同じ表(HITBOX)から取る。**
+   ここに別の数字を書いていた頃は、同じ見た目の兵士がモードによって
+   違う形をしていた（1人用は頭が半径0.19＝直径34〜41cm、対戦は0.15＝30cm）。
+   見えている頭は20〜28cmなので、1人用だけ**顔の脇17cmまでヘッドショット**だった。
+   遊んで「ヘッドショット判定お互いガバガバだったりしないよね？」と聞かれて測った */
+import { HITBOX } from '../net/protocol.js';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -1679,14 +1685,30 @@ export class Enemy {
   intersect(origin, dir) {
     if (!this.alive) return null;
     const s = this.bodyScale;
-    const th = raySphere(origin, dir, this._headPos, 0.19 * s);
-    const tc = rayCapsule(origin, dir, this._chestA, this._chestB, 0.30 * s);
-    const tl = rayCapsule(origin, dir, this._legA, this._legB, 0.24 * s);
+    /* 太さは対戦と同じ（HITBOX）。**体格の個体差ぶんだけ掛ける。**
+       兵士は0.90〜1.08倍に伸び縮みするので、掛けないと大柄な相手だけ
+       見た目より判定が細くなる（対戦は見た目を1.74mへ揃えているのでその掛け算が要らない）。
+       中心は骨から取っているので、上体を捻っても仰け反っても画に付いてくる */
+    const th = raySphere(origin, dir, this._headPos, HITBOX.HEAD_R * s);
+    const tc = rayCapsule(origin, dir, this._chestA, this._chestB, HITBOX.CHEST_R * s);
+    const tl = rayCapsule(origin, dir, this._legA, this._legB, HITBOX.LEG_R * s);
 
+    /* **頭は手前の部位より少し後ろでも優先する。** server/sim.js の hitPose と同じ決まり。
+
+       単純に「一番手前」で採ると、顔の高さを撃っても胴判定になる。
+       胴のカプセルは上端が丸いので、その丸みが頭の下半分を覆っていて、
+       太いぶん撃つ側から見た面が頭の球より手前に来るため。
+       実測すると、頭の球が直径32cmあるのに**頭になるのは上の11cmだけ**で、
+       顔を正面から撃つと胴になっていた（2026-08-09に測って判明）。
+
+       優先する幅(HEAD_SPAN)は胴1本ぶん。これより後ろの頭は
+       「体を貫いてから頭に届いた」ということなので、手前の部位を採る
+       （真下から脚越しに撃った弾が頭になるのを防ぐ） */
+    const HEAD_SPAN = HITBOX.CHEST_R * 2 * s;
     let best = Infinity, part = null;
-    if (th >= 0 && th < best) { best = th; part = 'head'; }
     if (tc >= 0 && tc < best) { best = tc; part = 'chest'; }
     if (tl >= 0 && tl < best) { best = tl; part = 'legs'; }
+    if (th >= 0 && (part === null || th - best <= HEAD_SPAN)) { best = th; part = 'head'; }
     if (!part) return null;
     // 倒れる向きに弾の飛来方向を効かせたい。hit()に引数を足すと呼び出し側の
     // 変更が要るので、当たった瞬間の向きをここで覚えておく

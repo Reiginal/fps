@@ -14,6 +14,7 @@
 //
 //   node tools/check-hitbox.mjs
 import '../server/dom-stub.js';
+import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { HITBOX, CHARACTERS, PART } from '../src/net/protocol.js';
 
@@ -116,6 +117,76 @@ console.log('\n[3.5] 相手が武器を持ち替えると見た目が変わる')
   ok(holdOf(WEAPONS.length + 5).length === 1, '知らない番号でも必ず1つ出る');
   // 持ち替えて戻れること。1回変えたら戻らない作りになっていないか
   ok(holdOf(0)[0] === 'ライフル', 'ライフルへ戻せる');
+}
+
+console.log('\n[5] 1人用の敵も、対戦と同じ形と決まりで判定している');
+/* 遊んで「ヘッドショット判定お互いガバガバだったりしないよね？」と聞かれて測った所。
+   **1人用だけ別物だった。** しかも太いほうではなく、頭が当たらないほうへ壊れていた。
+
+   1つ目: 太さが対戦と違った（頭が半径0.19。対戦は0.15）。
+   2つ目: **こちらが本題。** 当たりを「一番手前の部位」だけで決めていた。
+   胴のカプセルは上端が丸く、その丸みが頭の下半分を覆っている。
+   太いぶん撃つ側から見た面が頭の球より手前に来るので、
+   **顔の高さを正面から撃つと胴判定**になっていた。
+   実測では、頭の球が直径32cmあるのに頭になるのは上の11cmだけ。
+
+   サーバー側(hitPose)には最初から「頭は手前の部位より少し後ろでも優先する」
+   という決まりがあり、1人用にはそれが無かった。同じ決まりを入れて揃える。
+
+   ここでは実際にレイを撃って測る。コードの数字を読むだけだと、
+   「読んでいる場所が違う」も「決まりが無い」も見逃す */
+{
+  const { Enemy } = await import('../src/ai/enemy.js');
+  const src = readFileSync(new URL('../src/ai/enemy.js', import.meta.url), 'utf8');
+  ok(/HITBOX\.HEAD_R \* s/.test(src) && /HITBOX\.CHEST_R \* s/.test(src),
+    '太さを共有の表(HITBOX)から取っている');
+  ok(/HEAD_SPAN/.test(src), '頭を優先する決まりを持っている');
+
+  const dir = new THREE.Vector3(0, 0, -1);
+  for (let c = 0; c < CHARACTERS.length; c++) {
+    const e = new Enemy(level, { variant: c });
+    e.spawn(new THREE.Vector3(0, 0, 0));
+    e.root.position.set(0, 0, 0);
+    e.root.updateMatrixWorld(true);
+    // 実際に動いている時と同じ、骨から作る判定で測る
+    e._syncHitboxesFromBones();
+    const s = e.bodyScale;
+    const r = HITBOX.HEAD_R * s;
+    const hy = e._headPos.y;
+
+    // 真正面から水平に撃つ。高さを変えながらどこ判定になるかを拾う
+    const at = (y, x = 0) => e.intersect(new THREE.Vector3(x, y, 3), dir)?.part ?? null;
+
+    ok(at(hy) === 'head', `${c}番 … 顔の高さ(${hy.toFixed(2)}m)を撃つと頭`);
+    ok(at(hy - r - 0.03) === 'chest', `${c}番 … 頭の球より下は胴`);
+
+    // 頭になる帯の厚み。球の直径とほぼ同じであること
+    let band = 0;
+    for (let y = hy - 0.5; y <= hy + 0.5; y += 0.005) if (at(y) === 'head') band += 0.005;
+    ok(Math.abs(band - r * 2) < 0.04,
+      `${c}番 … 頭になる帯 ${(band * 100).toFixed(0)}cm（球は直径${(r * 200).toFixed(0)}cm）`);
+
+    // 見えている頭と比べる。基準は[3]と同じ（見た目の高さの2倍まで）
+    const b = new THREE.Box3().setFromObject(e.parts.headPivot);
+    const seen = b.max.y - b.min.y;
+    ok(r * 2 <= seen * 2,
+      `${c}番 … 判定 ${(r * 200).toFixed(0)}cm / 見た目 ${(seen * 100).toFixed(0)}cm`);
+  }
+
+  /* 頭を優先すると言っても限度がある。
+     **体を貫いた先の頭まで拾ってはいけない。**
+     真下から脚越しに撃った弾が頭判定になると、足元を撃つのが最適解になる */
+  {
+    const e = new Enemy(level, { variant: 0 });
+    e.spawn(new THREE.Vector3(0, 0, 0));
+    e.root.position.set(0, 0, 0);
+    e.root.updateMatrixWorld(true);
+    e._syncHitboxesFromBones();
+    const from = new THREE.Vector3(0, -2.5, 0.001);
+    const up = new THREE.Vector3(0, 1, 0).normalize();
+    const part = e.intersect(from, up)?.part ?? null;
+    ok(part === 'legs', `真下から撃つと脚（${part}）`);
+  }
 }
 
 console.log('\n[4] 当たった弾のうち頭になる割合');
