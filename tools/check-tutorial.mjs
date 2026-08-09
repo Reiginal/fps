@@ -360,13 +360,14 @@ console.log('\n[6] 本編との縁切り（戦績・波・死・当たり先）'
   const src = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/^\s*\/\/.*$/mg, '');
-  ok(/_tally\(key, n = 1\) \{\s*if \(this\.tutorial\) return;/.test(src),
+  // ガードは訓練場(check-range.mjs)と共用の「tutorial || range」の形
+  ok(/_tally\(key, n = 1\) \{\s*if \(this\.tutorial \|\| this\.range\) return;/.test(src),
     '_tallyの先頭で止める（戦績を汚さない唯一の急所）');
-  ok(/_tallyBest\(key, v\) \{\s*if \(this\.tutorial\) return;/.test(src),
+  ok(/_tallyBest\(key, v\) \{\s*if \(this\.tutorial \|\| this\.range\) return;/.test(src),
     '_tallyBestも同じ');
-  ok(/mode === 'solo' && !this\.tutorial && this\.director\.wave === 0/.test(src),
+  ok(/mode === 'solo' && !this\.tutorial && !this\.range && this\.director\.wave === 0/.test(src),
     '波の起動にガードがある（一時停止からの復帰でも通る行）');
-  ok(/_onPlayerDown\(\) \{\s*if \(this\.state === 'dead'\) return;\s*if \(this\.tutorial\) \{/.test(src),
+  ok(/_onPlayerDown\(\) \{\s*if \(this\.state === 'dead'\) return;\s*if \(this\.tutorial \|\| this\.range\) \{/.test(src),
     '_onPlayerDownの先頭で受ける（倒れない・結果画面へ行かない）');
   // 当たり先の差し替え。射撃と爆風の両方（片方だけだと手榴弾が的に効かない）
   const swaps = (src.match(/this\._shootables \?\? this\.director\.active/g) || []).length;
