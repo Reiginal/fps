@@ -13,6 +13,7 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "pg": "^8.23.0",
     "three": "^0.185.1",
     "ws": "^8.21.1"
   },
