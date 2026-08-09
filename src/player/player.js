@@ -188,11 +188,13 @@ export class Player {
     this.staminaLock = false;
     this._sprintRest = SPRINT_REST_S;
     /* 滑り込み。slidingが今まさに滑っているか、_slideTが残り秒数、
-       _slideCdが次に滑れるまでの待ち。_slideLeanは見た目の傾きだけに使う */
+       _slideCdが次に滑れるまでの待ち。_slideLeanは見た目の傾きだけに使う。
+       _slideKeyHeldは「滑り出しに使ったしゃがみを、まだ離していない」印 */
     this.sliding = false;
     this._slideT = 0;
     this._slideCd = 0;
     this._slideLean = 0;
+    this._slideKeyHeld = false;
     // 滑り出した瞬間に1回だけ呼ぶ。音を鳴らすのは呼ばれた側の仕事
     this.onSlide = null;
     this.adsFactor = 0;      // 外から武器が書き込む 0..1
@@ -259,6 +261,8 @@ export class Player {
     this._airTime = 0;
     this._jumpBuffer = 0;
     this._wantCrouch = false;
+    // 立とうとしたが頭がつかえた。低い天井の下で足の速さを決めるのに要る
+    this._headBlocked = false;
     this._postureArm = 0;
     this._sprintHold = 0;    // 摩擦と旋回の鈍さに使う（ゆっくり抜ける）
     this._sprintLean = 0;    // 走りの前傾（狙いに響くので速く抜ける）
@@ -298,6 +302,7 @@ export class Player {
     this._slideT = 0;
     this._slideCd = 0;
     this._slideLean = 0;
+    this._slideKeyHeld = false;
     this._wasMoving = false;
     this._prevSpeed = 0;
     this._fallSpeed = 0;
@@ -505,6 +510,8 @@ export class Player {
 
     this.sliding = true;
     this._slideT = SLIDE_TIME_S;
+    // この押し下げは滑りに使い切った。離すまでしゃがみには数えない
+    this._slideKeyHeld = true;
     this.stamina = Math.max(0, this.stamina - SLIDE_STAMINA);
     // 今進んでいる向きへそのまま加速する。視点の向きではなく速度の向きに乗せるのは、
     // 滑り出しで体が横へワープしたように見えるのを避けるため
@@ -562,12 +569,27 @@ export class Player {
 
     /* ---------------------------------------------------- しゃがみ */
     // MetaはMacのCommand。対戦側の割り当て(protocol.jsのKEY_CODES)と揃えてある
-    const wantCrouch = this.alive && (input.down('ControlLeft') || input.down('KeyC')
+    const crouchKey = this.alive && (input.down('ControlLeft') || input.down('KeyC')
       || input.down('MetaLeft') || input.down('MetaRight'));
     this._slideCd = Math.max(0, this._slideCd - dt);
+    /* **滑り出しに使った押し下げを、滑り終わった後まで持ち越さない。**
+
+       滑るのに押したしゃがみは、指を離す理由が無いので押しっぱなしになる。
+       そのまま数えていると、滑り終わった瞬間にしゃがみ歩き(2.3m/s)へ落ちて、
+       走り出そうとしても動けない。実測すると滑り終わりの4.3m/sから
+       2.3へ落ちてそこに張り付いた。**遊んでいる側には「なんか止まる」としか見えない。**
+
+       1回の押し下げは1つの操作。滑りに使ったらそこで使い切りにして、
+       一度離すまでは「しゃがみたい」に数えない。
+       滑ったまま低い姿勢で居たい時は、離して押し直せば今まで通りしゃがめる */
+    if (this._slideKeyHeld && !crouchKey) this._slideKeyHeld = false;
+    const wantCrouch = crouchKey && !this._slideKeyHeld;
     if (wantCrouch !== this._wantCrouch) {
       this._wantCrouch = wantCrouch;
-      this._postureArm = wantCrouch ? -1 : 1;   // 到着した時に行き過ぎさせる向き
+      // 到着した時に行き過ぎさせる向き。滑っている最中の切り替わりでは付けない
+      // （上のラッチで滑り出した次の刻みに必ず1回落ちるので、そこで
+      //   「立ち上がる」向きの勢いが入って、滑りの最中に頭が跳ねる）
+      if (!this.sliding) this._postureArm = wantCrouch ? -1 : 1;
       /* しゃがみを押し下げた瞬間だけ、滑れるかを見る。
          押し下がりをここで拾うのは、しゃがみのキーが4つ(Ctrl/C/Command左右)あって、
          input.pressed()を1つずつ見ると押し方によって取りこぼすため。
@@ -581,7 +603,8 @@ export class Player {
     if (Math.abs(this.height - targetH) > 0.001) {
       // 沈むのは速く、立つのは遅い。左右対称だと機敏すぎて体重が消える
       const rate = targetH < this.height ? 20 : 12;
-      this._tryHeight(THREE.MathUtils.damp(this.height, targetH, rate, dt));
+      // 立てなかった（頭がつかえた）かどうかを覚えておく。下の足の速さで要る
+      this._headBlocked = !this._tryHeight(THREE.MathUtils.damp(this.height, targetH, rate, dt));
     }
     if (this._postureArm !== 0 && Math.abs(this.height - targetH) < 0.1) {
       // 体が止まる瞬間に頭だけ勢いで行き過ぎ、戻ってから収まる。
@@ -590,6 +613,19 @@ export class Player {
       this._postureArm = 0;
     }
     this.crouching = this.height < (STAND_H + CROUCH_H) / 2;
+    /* **足が縛られるのは「しゃがんでいる間」ではなく「しゃがみ続けたい間」。**
+
+       身長だけで見ていると、立ち上がっている途中の数フレームもしゃがみ扱いになり、
+       そこで摩擦がしゃがみの速さ(2.3)まで削りにいく。立とうとしているのに
+       足だけ止められるので、滑り終わりに4.3→2.8まで一度落ちてから戻っていた
+       （普通のしゃがみを解いた時にも同じ引っ掛かりが出ていた）。
+       低い姿勢のまま歩きの速さで動ける時間が0.06秒できるが、悪用できる長さではない。
+
+       **ただし頭がつかえて立てない時は別。** 低い天井の下（階段の裏・配管の下）で
+       しゃがみを離すと、意思は「立ちたい」なのに身長は縮んだままになる。
+       そこを速い側に倒すと、**判定が低いまま走れる場所**ができてしまう。
+       0.06秒では済まず、その場所に居る限りずっと続く */
+    const crouchSlow = this.crouching && (this._wantCrouch || this._headBlocked);
 
     /* ------------------------------------------------------ 移動入力 */
     const m = input.moveVector(this._move);
@@ -598,7 +634,7 @@ export class Player {
        半分だけ戻った所で走り出せる形にすると、押し直すのが最適解になって
        「息が切れた」という状態が事実上消える（走る／歩くの判断も戻らない） */
     const wantSprint = this.alive && moving && m.z < -0.1 && input.down('ShiftLeft')
-      && !this.crouching && this.adsFactor < 0.5;
+      && !crouchSlow && this.adsFactor < 0.5;
     if (this.staminaLock && this.stamina >= 1) this.staminaLock = false;
     this.sprinting = wantSprint && !this.staminaLock;
     // 滑っている間は「走り」ではない。ここを立てたままにすると、
@@ -634,7 +670,7 @@ export class Player {
     // 持たない武器はmoveMulを書いていないので、その時は1として扱う
     // 包帯を巻いている間は遅くなる。速いまま巻けると、下がりながら回復できて
     // 「遮蔽に入って巻く」という判断が消える
-    let wishSpeed = (this.crouching ? SPEED_CROUCH : this.sprinting ? SPEED_SPRINT : SPEED_WALK)
+    let wishSpeed = (crouchSlow ? SPEED_CROUCH : this.sprinting ? SPEED_SPRINT : SPEED_WALK)
       * (this.moveMul || 1) * (this.healing > 0 ? HEAL.SLOW : 1);
     wishSpeed *= 1 - this.adsFactor * 0.35;
     if (!this.alive) wishSpeed = 0;

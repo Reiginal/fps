@@ -128,12 +128,21 @@ console.log('\n[3] 滑る距離と長さ');
   const v0 = p.horizontalSpeed;
   step(p, DT, RUN_CROUCH);
   let t = 0;
-  while (p.sliding && t < 3) { p.update(DT, RUN_CROUCH, false); p.yaw = LANE_YAW; t += DT; }
+  /* **滑っている間の速さだけを覚える。** 滑り終わった刻みでは、もう普通の加速が
+     動いていて歩きの速さまで戻る（[8]の通り、そこで止まらないのが正しい）。
+     ループを抜けた後に読むと、その戻った値を「滑りの終速」として測ってしまう */
+  let last = p.horizontalSpeed;
+  while (p.sliding && t < 3) {
+    last = p.horizontalSpeed;
+    p.update(DT, RUN_CROUCH, false);
+    p.yaw = LANE_YAW;
+    t += DT;
+  }
   const dist = Math.hypot(p.collider.start.x - x0, p.collider.start.z - z0);
   ok(t > 0.6 && t < 0.95, `0.8秒ほどで終わる (${t.toFixed(2)}秒)`);
   ok(dist > 4 && dist < 6.5, `5mほど進む (${dist.toFixed(2)}m)`);
-  ok(p.horizontalSpeed < v0 * 0.62,
-    `終わる頃には遅くなっている (${v0.toFixed(2)} → ${p.horizontalSpeed.toFixed(2)}m/s)`);
+  ok(last < v0 * 0.62,
+    `終わる頃には遅くなっている (${v0.toFixed(2)} → ${last.toFixed(2)}m/s)`);
   // 同じ時間ずっと走っていたほうが遠い＝滑りは移動手段として得ではない
   const q = mk();
   runUp(q);
@@ -156,6 +165,8 @@ console.log('\n[4] 滑っている間は加速できない');
   while (p.sliding) {
     p.update(DT, RUN_CROUCH, false);
     p.yaw = LANE_YAW;
+    // 滑りが終わった刻みは数えない。そこはもう普通の加速が動いている
+    if (!p.sliding) break;
     if (p.horizontalSpeed > prev + 1e-6) rose++;
     prev = p.horizontalSpeed;
   }
@@ -207,7 +218,63 @@ console.log('\n[7] 足音が鳴らない');
   ok(fired === 1, `滑り出しの合図は1回 (${fired}回)`);
 }
 
-console.log('\n[8] 息を使う');
+console.log('\n[7.5] 滑り終わったらそのまま走り出せる');
+/* 遊んで「滑ったあと、そのまま歩いたり走ったりしたいのに止まる」と言われた所。
+   測ったら原因が2つあった。
+
+     1. **しゃがみを押しっぱなしのまま滑り終わると、しゃがみ歩き(2.3)に落ちて
+        そこに張り付く。** 滑るのに押したキーは離す理由が無いので、
+        ほぼ全員がこの形になる。実測で4.28→2.30のまま2秒以上動けなかった
+     2. 離した場合でも、立ち上がる数フレームだけ身長がしゃがみ扱いのままで、
+        摩擦がしゃがみの速さまで削りにいく。4.28→2.80まで一度落ちてから戻っていた
+
+   どちらも「滑りの終わりに一瞬引っかかる」として体に来る。
+   ここは**速度が落ち込まないこと**を見る */
+{
+  const dip = (label, releaseAt) => {
+    const p = mk();
+    runUp(p);
+    step(p, DT, RUN_CROUCH);
+    const endAt = p.horizontalSpeed;
+    let t = 0;
+    let low = Infinity;
+    let top = 0;
+    /* 滑り終わってから0.9秒ぶん見る（滑りが0.78秒なので合計1.7秒まで）。
+       最低速度が落ち込みの深さ、最高速度が戻りきれたかどうか。
+       1.7秒より先まで回すと、走りの息(3秒)が切れて歩きへ落ちる区間に入る */
+    while (t < 1.7) {
+      const held = releaseAt == null || t < releaseAt;
+      p.update(DT, held ? RUN_CROUCH : RUN, false);
+      p.yaw = LANE_YAW;
+      if (!p.sliding) {
+        low = Math.min(low, p.horizontalSpeed);
+        top = Math.max(top, p.horizontalSpeed);
+      }
+      t += DT;
+    }
+    return { label, endAt, low, top };
+  };
+  for (const r of [dip('しゃがみ押しっぱなし', null), dip('途中で離す', 0.3)]) {
+    // 滑りの終速(4.0)を割らないこと。割ると「引っかかった」として体に来る
+    ok(r.low > 3.8, `${r.label}: 滑り終わりで速度が落ち込まない (最低 ${r.low.toFixed(2)}m/s)`);
+    ok(r.top > 7.0, `${r.label}: そのまま走りの最高速まで戻る (${r.top.toFixed(2)}m/s)`);
+  }
+}
+
+console.log('\n[7.6] 滑りに使ったしゃがみは、離すまで数え直さない');
+/* 1回の押し下げは1つの操作。滑りに使ったらそこで使い切りにする。
+   低い姿勢で居たい時は、離して押し直せば今まで通りしゃがめる */
+{
+  const p = mk();
+  runUp(p);
+  step(p, DT, RUN_CROUCH);
+  while (p.sliding) { p.update(DT, RUN_CROUCH, false); p.yaw = LANE_YAW; }
+  step(p, 0.4, RUN_CROUCH);       // 押しっぱなしのまま
+  ok(p.crouching === false, `押しっぱなしでは、しゃがみに戻らない (身長 ${p.height.toFixed(2)}m)`);
+  step(p, 0.1, RUN);              // 一度離して
+  step(p, 0.4, RUN_CROUCH);       // 押し直す
+  ok(p.crouching === true, '離して押し直せば、今まで通りしゃがめる');
+}
 {
   const p = mk();
   runUp(p, 0.9);
