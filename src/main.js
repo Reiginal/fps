@@ -38,7 +38,7 @@ import { RemotePlayers } from './net/remote.js';
 import { preloadCharModel, SOLO_MODEL } from './ai/glbchar.js';
 import { FarShadowGate } from './world/shadowgate.js';
 import {
-  K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, outsideZone, CHARACTERS,
+  K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, HP, outsideZone, CHARACTERS,
   TEAM_NAMES, soloUnlocksAt,
 } from './net/protocol.js';
 
@@ -1648,6 +1648,10 @@ class Game {
     this.shotsFired = 0; this.shotsHit = 0;
     this.damageFlash = 0;
     this.weapons.resetAll();
+    // 対戦の体力は1人用の倍。**サーバー側(SimPlayer)と同じ値を入れる。**
+    // 入れ忘れると、画面の体力の棒だけ130を上限に描かれて、
+    // 満タンなのに半分減っているように見える（落下ダメージの量もずれる）
+    this.player.maxHealth = HP.VERSUS;
     this.player.health = this.player.maxHealth;
     this.player.alive = true;
     this._acc = 0;
@@ -1776,6 +1780,10 @@ class Game {
     // 残さないと「勝てないから抜ける」と記録が消えるのが同じ操作になる
     this._flushStats();
     this.mode = 'solo';
+    // 体力を1人用へ戻す。戻さないと、対戦から抜けた後の1人用が倍の体力のままになる。
+    // 今の値も上限まで詰める（130を超えた値が残ると棒がはみ出す）
+    this.player.maxHealth = HP.SOLO;
+    this.player.health = Math.min(this.player.health, HP.SOLO);
     this.net = null;
     // 落ちている物も片付ける。残すと、1人用に戻った後の街に光る箱が浮いたままになる
     this._clearDrops();

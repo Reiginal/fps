@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { Player } from '../src/player/player.js';
 import {
   K, S, TICK_DT, TICK_HZ, HISTORY_MS, MAX_REWIND_MS, INTERP_DELAY_MS,
-  HITBOX, PART, PART_MUL, loadoutOf,
+  HITBOX, HP, PART, PART_MUL, loadoutOf,
 } from '../src/net/protocol.js';
 
 /* ------------------------------------------------------------ 武器の表 */
@@ -248,6 +248,12 @@ export class SimPlayer {
     // カメラはObject3Dで足りる。Playerがカメラに触るのは_applyCameraだけで、
     // そこがやるのはpositionとrotation(order='YXZ')の書き込みだけ
     this.player = new Player(new THREE.Object3D(), world);
+    /* **対戦の体力は1人用の倍。** Playerが持っている既定は1人用の値なので、
+       サーバー側で上書きする。ここが権威で、手元(main.jsの_joinMatch)は
+       同じ値を自分にも入れて表示と落下ダメージの計算を合わせているだけ。
+       食い違うと、手元では死んでいないのにサーバーでは死んでいる、が起きる */
+    this.player.maxHealth = HP.VERSUS;
+    this.player.health = HP.VERSUS;
     this.input = new ServerInput();
 
     // 持って出ている物の番号。既定は protocol.js の LOADOUT_IDS。

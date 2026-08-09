@@ -4,7 +4,7 @@
 //   node tools/check-heal.mjs
 import '../server/dom-stub.js';
 import * as THREE from 'three';
-import { HEAL } from '../src/net/protocol.js';
+import { HEAL, HP } from '../src/net/protocol.js';
 
 const { Player } = await import('../src/player/player.js');
 const { buildWorld } = await import('../server/world.js');
@@ -189,7 +189,13 @@ const healBit = (p) => (p.healing > 0 || p.healHold > 0 ? K.HEAL : 0);
  * @param cancelAt 何秒目に自分の側で巻くのをやめるか（nullなら最後まで巻く）
  */
 const runNet = (cancelAt) => {
+  /* **対戦の話なので、手元も対戦の体力にしてから始める。**
+     Playerの既定は1人用の130で、対戦に入る時にmain.jsが260へ書き換えている。
+     ここで書き換えないと、比べている2人が別の上限を持ったまま走り、
+     「サーバーだけ回復量が違う」ように見える（実際は最大値が違うだけ） */
   const me = mk();
+  me.maxHealth = HP.VERSUS;
+  me.health = HP.VERSUS;
   me.damage(80);
   const sim = new SimPlayer(1, 'me', world);
   sim.player.teleport(new THREE.Vector3(0, 0.1, 0));
@@ -214,14 +220,14 @@ console.log('\n[13] 最後まで巻いた時、サーバー側も同じだけ回
   const { me, srv } = runNet(null);
   ok(me.health === srv.health, `体力が一致する (自分 ${me.health} / サーバー ${srv.health})`);
   ok(me.bandages === srv.bandages, `残数が一致する (${me.bandages} / ${srv.bandages})`);
-  ok(me.health === 50 + HEAL.AMOUNT, `ちゃんと回復している (${me.health})`);
+  ok(me.health === HP.VERSUS - 80 + HEAL.AMOUNT, `ちゃんと回復している (${me.health})`);
 }
 
 console.log('\n[14] 途中でやめた時、サーバー側も回復しない');
 {
   const { me, srv } = runNet(1.0);
   ok(me.health === srv.health, `体力が一致する (自分 ${me.health} / サーバー ${srv.health})`);
-  ok(me.health === 50, `やめたので戻っていない (${me.health})`);
+  ok(me.health === HP.VERSUS - 80, `やめたので戻っていない (${me.health})`);
   ok(srv.bandages === HEAL.PER_ROUND, `サーバー側も消費していない (${srv.bandages})`);
 }
 
@@ -237,7 +243,7 @@ console.log('\n[15] 手に持っただけではサーバーの回復が始まら
   sim.player.damage(80);
   for (let i = 0; i < 60; i++) sim.tick(healBit(p), 0, 0);
   ok(sim.player.healing === 0, 'サーバー側が勝手に巻き始めない');
-  ok(sim.player.health === 50, `体力が動いていない (${sim.player.health})`);
+  ok(sim.player.health === HP.VERSUS - 80, `体力が動いていない (${sim.player.health})`);
   ws.holsterBandage();
 }
 
