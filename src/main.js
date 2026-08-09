@@ -11,7 +11,8 @@ import { Input } from './core/input.js';
 import { AudioEngine } from './core/audio.js';
 import { createComposer } from './core/postfx.js';
 import {
-  DEATH_FALL_S, startLook, turnLook, applyDeath, spectatePose,
+  DEATH_FALL_S, startLook, turnLook, applyDeath,
+  spectatePose, spectateEyeH, smoothEyeH,
 } from './core/deathcam.js';
 import { Capsule } from 'three/addons/math/Capsule.js';
 import { Player } from './player/player.js';
@@ -412,9 +413,6 @@ const _meshFrom = new THREE.Vector3();
 // 敵の発砲(_enemyShot)用の使い回し。発砲は敵14体の撃ち合いで毎秒30〜60回来るので、
 // 1発ごとにnewすると毎秒150個級のゴミになる（enemy.js側の_shootは先に使い回し化済み。
 // 受け側のここだけnewが残っていた）。effects.tracer/impactは同期で写し取るので渡してよい
-// 観戦カメラの壁当たり用。毎フレーム1本だけ飛ばすので使い回す
-const _specFrom = new THREE.Vector3();
-const _specDir = new THREE.Vector3();
 const _shotEye = new THREE.Vector3();
 const _shotEnd = new THREE.Vector3();
 const _shotNormal = new THREE.Vector3();
@@ -548,22 +546,16 @@ class Game {
     this._idleDrawn = false;
     // fpsの上限の升目（_loopの頭を参照）。設定「fps上限」で30へ落とせる
     this._frameGate = new FrameGate(FRAME_CAP_HZ);
-    /* 観戦カメラ（対戦で倒れている間）。今どの人の肩越しに居るか。
-       deathcam側へ渡す壁当たりの受け口はここで1つ作って使い回す
-       （毎フレーム関数を作ると、そのぶんゴミが出る） */
     /* チュートリアル（詳しくは_enterTutorial）と射撃訓練場（_enterRange）。
        どちらかが真の間は波が湧かない・戦績に混ざらない・倒れない。
        _shootablesは射撃と爆風の当たり先の差し替え口で、普段はnull＝本編の敵 */
     this.tutorial = false;
     this.range = false;
     this._shootables = null;
+    /* 観戦（対戦で倒れている間）。今どの人の目線を借りているかと、その目の高さ。
+       高さを覚えているのは、相手がしゃがんだ時に段が付かないよう均すため（_spectate参照） */
     this._specId = null;
-    this._specRay = (from, dir, maxDist) => {
-      _specFrom.set(from.x, from.y, from.z);
-      _specDir.set(dir.x, dir.y, dir.z);
-      const hit = this._terrainRay(_specFrom, _specDir, maxDist);
-      return hit ? hit.distance : null;
-    };
+    this._specEyeH = null;
     this._lastTime = 0;
     this._invQ = new THREE.Quaternion();
     // 倒れている間の見回し。生きている間はnullで、倒れた瞬間に
@@ -1805,8 +1797,7 @@ class Game {
     this.hud.setMode('solo');
     this.hud.show(false);
     // 観戦の札を畳む。倒れたまま試合を抜けると出っぱなしになる
-    this._specId = null;
-    this.hud.spectating(null);
+    this._forgetSpectate();
     // 一時停止から戻る時は一時停止の画面が、ロビーから戻る時はロビーが
     // 出たままなので、どちらも畳んでから選択画面を出す
     this.hud.hideOverlay();
@@ -2142,19 +2133,22 @@ class Game {
   }
 
   /**
-   * 倒れている間、生きている人の肩越しへカメラを移す（対戦だけ）。
+   * 倒れている間、生きている人の目線へカメラを移す（対戦だけ）。
    *
    * なぜ要るか: 倒れてから生き返るまで死体の目線のままで、地面に転がった絵を
    * 数秒見せられる。「ずっと死体からの目線しかないのキツかった」と言われた所。
    *
-   * **重さはほとんど増えない。** 見る相手の位置も向きも、他人を描くために
-   * 元々毎フレーム届いている（protocol.jsのpackPlayer）。ここは置き場所を
-   * 計算し直すだけで、描く物は1つも増えない。地形へのレイが1本だけ増えるが、
-   * 交戦中は毎フレーム90〜140本飛んでいるので誤差の範囲。
+   * **肩越し（後ろ2.6m・上0.75m）ではなく本人の目線に置く。**
+   * 肩越しは頭より高い所から見下ろす形になり、俯瞰の絵に見えた（2026-08-09）。
+   *
+   * **重さはむしろ減る。** 見る相手の位置も向きも、他人を描くために
+   * 元々毎フレーム届いている（protocol.jsのpackPlayer）。ここはその数字を
+   * 読み替えるだけで、目線を借りている本人を描かなくなるぶん1体減る
+   * （肩越しの時に飛ばしていた壁当たりのレイ1本も要らなくなった）。
    *
    * 誰を見るかは左クリックで次の人へ回す。誰も生きていなければ死体の目線のまま
    */
-  _spectate(states, input) {
+  _spectate(states, input, dt) {
     if (!states || !this.net) return;
     // 生きている他人だけを、idの順で並べる（毎フレーム同じ順に回るように）
     const alive = [];
@@ -2165,8 +2159,7 @@ class Game {
     if (!alive.length) {
       // 全滅している間は死体の目線のまま。ここで前の相手を掴んだままにすると、
       // その人が倒れた場所を映し続けることになる
-      this._specId = null;
-      this.hud.spectating(null);
+      this._forgetSpectate();
       return;
     }
     alive.sort((a, b) => a.id - b.id);
@@ -2177,9 +2170,18 @@ class Game {
     // クリックで次の人へ。押しっぱなしで回り続けないよう、押した瞬間だけ拾う
     if (input?.clicked(0)) at = (at + 1) % alive.length;
     const target = alive[at];
+    const switched = target.id !== this._specId;
     this._specId = target.id;
+    /* 目線を借りる人の体は描かない。カメラがその人の頭の中に入るので、
+       腕と銃が視界を横切る（自分の体を描かないのと同じ理由。remote.jsのsetHidden） */
+    this.remotes?.setHidden(target.id);
 
-    const pose = spectatePose(target, this._specRay);
+    /* 目の高さ。しゃがみはスナップショットでは0か1の切り替えしか無いので、
+       そのまま入れると相手がしゃがんだ瞬間に68cm落ちる。相手を替えた時だけ即決め */
+    const wantH = spectateEyeH(target.state);
+    this._specEyeH = switched ? wantH : smoothEyeH(this._specEyeH, wantH, dt ?? 0);
+
+    const pose = spectatePose(target, this._specEyeH);
     this.camera.position.set(pose.pos.x, pose.pos.y, pose.pos.z);
     this.camera.rotation.set(pose.rot.x, pose.rot.y, 0, 'YXZ');
     // 誰を見ているかを画面に出す。出さないと自分が生き返ったのかどうかも分からない
@@ -2187,6 +2189,19 @@ class Game {
       this.net.players.get(target.id)?.name || '味方',
       alive.length > 1,
     );
+  }
+
+  /**
+   * 観戦をやめる。生き返った時・全滅している間・試合を抜けた時に呼ぶ。
+   *
+   * **消した体を戻すのを忘れやすいので1箇所にまとめてある。**
+   * 呼び忘れると、目線を借りていた人が誰の画面からも消えたままになる
+   */
+  _forgetSpectate() {
+    this._specId = null;
+    this._specEyeH = null;
+    this.remotes?.setHidden(null);
+    this.hud.spectating(null);
   }
 
   _showDeath() {
@@ -3086,14 +3101,14 @@ class Game {
 
     const states = net.stateAt();
     this._lastStates = states;
-    // 倒れている間は生きている人の肩越しへ移る（倒れ込みを見せ終わってから）
+    // 倒れている間は生きている人の目線へ移る（倒れ込みを見せ終わってから）
     if (!player.alive && this.deathT !== null && this.deathT >= DEATH_FALL_S) {
-      this._spectate(states, input);
+      this._spectate(states, input, dt);
     } else if (player.alive) {
       // 生き返ったら見ていた相手を忘れる。覚えたままだと
-      // 次に倒れた時、いきなり前回の相手の肩越しから始まる
-      this._specId = null;
-      this.hud.spectating(null);
+      // 次に倒れた時、いきなり前回の相手の目線から始まる。
+      // 消していた相手の体を出し直すのもここ（_forgetSpectate）
+      this._forgetSpectate();
     }
     // 誰がどの見た目かを渡す。姿を組むのは相手が初めて画面に出る時だけなので、
     // 毎フレーム作り直すことにはならない

@@ -231,74 +231,101 @@ console.log('\n[倒れ込みは何フレーム回しても暴れない]');
     '姿勢を決め直さずに回すと傾きが積み上がる（だから直前の_applyCameraが要る）');
 }
 
-console.log('\n[観戦カメラ] 生きている人の肩越しに置く');
+console.log('\n[観戦カメラ] 生きている人の目線に入る');
 {
-  const { spectatePose, SPEC_BACK, SPEC_UP, SPEC_AIM_H, SPEC_PAD } =
+  const { spectatePose, spectateEyeH, smoothEyeH, SPEC_EYE_STAND, SPEC_EYE_CROUCH, SPEC_EYE_DROP } =
     await import('../src/core/deathcam.js');
+  const { S, HITBOX } = await import('../src/net/protocol.js');
 
   // 北(-Z)を向いて立っている人。yaw=0がその向き（player._applyCameraと同じ約束）
-  const t = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 };
+  const t = { x: 3, y: 1, z: -2, yaw: 0.4, pitch: 0.2, state: 0 };
   const p = spectatePose(t);
   ok(Math.abs(p.rot.y - t.yaw) < 1e-9, '見ている人と同じ方を向く');
-  // 後ろへ下がっている＝相手より手前(+Z)に居る
-  ok(p.pos.z > SPEC_BACK - 0.01, `相手の後ろに置く（z=${p.pos.z.toFixed(2)}）`);
-  ok(Math.abs(p.pos.x) < 1e-9, '真後ろ（横にずれない）');
-  // 高さは「胸の高さ＋肩越しの上げ幅」ちょうど（真後ろなので下がりぶんは効かない）
-  ok(Math.abs(p.pos.y - (t.y + SPEC_AIM_H + SPEC_UP)) < 1e-9,
-    `胸の高さ+${SPEC_UP}mから見下ろす（y=${p.pos.y.toFixed(2)}）`);
-  ok(p.rot.x < 0, '少し下を向く（相手が画面の下寄りに来る）');
+  ok(Math.abs(p.rot.x - t.pitch) < 1e-9, '上下の向きもそのまま借りる（勝手に見下ろさない）');
+  /* **本人の目線なので、横にも後ろにもずれない。**
+     ここがずれていると肩越し（俯瞰に見える）へ戻ったということ */
+  ok(Math.abs(p.pos.x - t.x) < 1e-9 && Math.abs(p.pos.z - t.z) < 1e-9,
+    '足元と同じ位置に立つ（後ろへ引かない）');
+  ok(Math.abs(p.pos.y - (t.y + SPEC_EYE_STAND)) < 1e-9,
+    `目の高さは足元から${SPEC_EYE_STAND}m（y=${p.pos.y.toFixed(2)}）`);
 
-  // 向きを変えたらカメラも回り込む
-  const east = spectatePose({ ...t, yaw: Math.PI / 2 });
-  ok(Math.abs(east.pos.x - SPEC_BACK) < 0.01 && Math.abs(east.pos.z) < 0.01,
-    '相手が右を向けばカメラは左へ回り込む');
+  /* **目の高さの出し方が本人と同じか。** ここが違うと、生き返った瞬間に視点が跳ねる。
+     player._applyCamera() は feetY + height - 0.16 で、heightは判定と同じ1.74/1.06 */
+  const psrc = readFileSync(new URL('../src/player/player.js', import.meta.url), 'utf8');
+  ok(/feetY \+ this\.height - 0\.16/.test(psrc),
+    'player側の目の高さは feetY + height - 0.16 のまま');
+  ok(Math.abs(SPEC_EYE_DROP - 0.16) < 1e-9, `観戦側も同じ0.16を引いている（${SPEC_EYE_DROP}）`);
+  ok(Math.abs(SPEC_EYE_STAND - (HITBOX.STAND_H - 0.16)) < 1e-9, '立ちの目の高さが判定の身長と揃っている');
+  ok(Math.abs(SPEC_EYE_CROUCH - (HITBOX.CROUCH_H - 0.16)) < 1e-9, 'しゃがみも揃っている');
 
-  // 上を向いている人の後ろでも、カメラが地面へ潜らない
-  const up = spectatePose({ ...t, pitch: -0.8 });
-  ok(up.pos.y > t.y + SPEC_AIM_H, `上を撃っている人の後ろでも地面へ潜らない（y=${up.pos.y.toFixed(2)}）`);
+  // しゃがんでいる人の目線は低い
+  ok(spectateEyeH(S.CROUCH) < spectateEyeH(0), 'しゃがんでいる相手の目線は低くなる');
+  const crouched = spectatePose({ ...t, state: S.CROUCH });
+  ok(crouched.pos.y < p.pos.y - 0.5, `しゃがみで視点が下がる（${p.pos.y.toFixed(2)} → ${crouched.pos.y.toFixed(2)}）`);
+  // 高さを渡したらそちらが勝つ（滑らかに寄せた値を入れるため）
+  ok(Math.abs(spectatePose(t, 1.0).pos.y - (t.y + 1.0)) < 1e-9, '渡した目の高さが優先される');
 
-  /* 壁の手当て。**渡したレイの結果より必ず手前へ寄る。**
-     寄らないと、狭い通路で観戦した瞬間に壁の中へ入って真っ黒になる */
-  const near = spectatePose(t, () => 1.0);   // 1m先に壁
-  const dist = Math.hypot(near.pos.x - t.x, near.pos.z - t.z);
-  ok(dist < 1.0, `壁があれば手前で止まる（壁1.0m → カメラ${dist.toFixed(2)}m）`);
-  ok(dist >= 0.4 - 1e-9, '寄せすぎない（相手の中へ入らない下限がある）');
-  const far = spectatePose(t, () => null);   // 何にも当たらない
-  ok(Math.abs(Math.hypot(far.pos.x - t.x, far.pos.z - t.z) - SPEC_BACK) < 0.01,
-    '何も無ければ規定の距離まで下がる');
-  // ぴったり壁際でも余白ぶんは残す
-  const tight = spectatePose(t, () => SPEC_PAD * 0.5);
-  ok(Number.isFinite(tight.pos.x) && Number.isFinite(tight.pos.y),
-    '壁が目の前でも数字が壊れない');
-
-  // レイは1本だけ（毎フレーム飛ぶので、増えると効いてくる）
-  let rays = 0;
-  spectatePose(t, () => { rays++; return null; });
-  ok(rays === 1, `飛ばすレイは1本だけ（今${rays}本）`);
+  /* しゃがみの上下を均す所。スナップショットのしゃがみは0か1しか無いので、
+     ここが効いていないと相手がしゃがんだ瞬間に68cm落ちる */
+  ok(smoothEyeH(null, 1.58, 1 / 60) === 1.58, '見始めは寄せずにその高さから始める');
+  const step = smoothEyeH(SPEC_EYE_STAND, SPEC_EYE_CROUCH, 1 / 60);
+  ok(step < SPEC_EYE_STAND && step > SPEC_EYE_CROUCH,
+    `1フレームでは途中までしか下がらない（${SPEC_EYE_STAND.toFixed(2)} → ${step.toFixed(2)}）`);
+  ok(SPEC_EYE_STAND - step < 0.30,
+    `1フレームの落ち幅は30cm未満（${(SPEC_EYE_STAND - step).toFixed(2)}m）`);
+  // 何フレームか回せば追いつく。行き過ぎない（越えると視点が上下に揺れる）
+  let h = SPEC_EYE_STAND;
+  for (let i = 0; i < 60; i++) h = smoothEyeH(h, SPEC_EYE_CROUCH, 1 / 60);
+  ok(Math.abs(h - SPEC_EYE_CROUCH) < 0.01, `1秒あれば追いつく（${h.toFixed(3)}）`);
+  ok(h >= SPEC_EYE_CROUCH - 1e-9, '行き過ぎない（下限を割らない）');
+  ok(smoothEyeH(1.0, 2.0, 10) <= 2.0, 'フレームが飛んでも越えない');
 }
 
-console.log('\n[観戦カメラ] main.jsの繋ぎ込み');
+console.log('\n[観戦カメラ] 繋ぎ込み（main.js / remote.js）');
 {
   const src = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
   // 倒れ込みを見せ終わってから移る（撃たれた瞬間に視点が飛ぶと何が起きたか分からない）
   ok(/deathT >= DEATH_FALL_S[\s\S]{0,80}?_spectate\(/.test(src),
     '倒れ込みが終わってから観戦へ移る');
   // 死んでいる人は候補に入れない
-  ok(/_spectate\(states, input\) \{[\s\S]{0,600}?st\.state & S\.DEAD\)+ continue;/.test(src),
+  ok(/_spectate\(states, input, dt\) \{[\s\S]{0,600}?st\.state & S\.DEAD\)+ continue;/.test(src),
     '倒れている人は観戦の相手にしない');
-  // 自分自身も候補から外す（自分の死体の肩越しに回っても意味が無い）
-  ok(/_spectate\(states, input\) \{[\s\S]{0,600}?st\.id === this\.net\.id/.test(src),
+  // 自分自身も候補から外す（自分の死体の目線に入っても意味が無い）
+  ok(/_spectate\(states, input, dt\) \{[\s\S]{0,600}?st\.id === this\.net\.id/.test(src),
     '自分は観戦の相手にしない');
-  // 生き返ったら畳む。畳まないと生きているのに他人の肩越しのまま
-  ok(/player\.alive\) \{[\s\S]{0,200}?_specId = null;[\s\S]{0,120}?spectating\(null\)/.test(src),
+  /* **目線を借りる人の体は描かない。** カメラがその人の頭の中に入るので、
+     消し忘れると腕と銃で画面が埋まる */
+  ok(/setHidden\(target\.id\)/.test(src), '見ている人の体を消している');
+  // 消した体を出し直すのを1箇所にまとめてある（呼び忘れると人が消えたままになる）
+  ok(/_forgetSpectate\(\) \{[\s\S]{0,300}?setHidden\(null\)[\s\S]{0,120}?spectating\(null\)/.test(src),
+    '観戦をやめる時に体を出し直して札も畳む');
+  ok(/player\.alive\) \{[\s\S]{0,200}?_forgetSpectate\(\)/.test(src),
     '生き返ったら自分の視点へ戻す');
-  // 試合を抜けた時も畳む
-  ok(/setMode\('solo'\);[\s\S]{0,200}?spectating\(null\)/.test(src),
-    '試合を抜けたら札を畳む');
+  ok(/setMode\('solo'\);[\s\S]{0,300}?_forgetSpectate\(\)/.test(src),
+    '試合を抜けたら観戦を畳む');
+  // 観戦をやめる時に体を出し直すのは、相手を描くsyncより前でないと1フレーム遅れる
+  ok(src.indexOf('_spectate(states, input, dt)') > 0
+    && /_spectate\(states, input, dt\);[\s\S]{0,600}?remotes\.sync\(/.test(src),
+    '体を消す指示を出してから相手を描く');
   // クリックは押した瞬間だけ拾う（押しっぱなしで相手が回り続けない）
   ok(/input\?\.clicked\(0\)/.test(src), '切り替えは押した瞬間だけ拾う');
-  // レイの受け口は使い回し（毎フレーム関数を作らない）
-  ok(/this\._specRay = \(/.test(src), '壁当たりの受け口を1つ作って使い回している');
+  // 肩越しの名残（壁当たりのレイ）が残っていないか
+  ok(!/_specRay/.test(src), '肩越しの時の壁当たりのレイは消えている');
+
+  const rsrc = readFileSync(new URL('../src/net/remote.js', import.meta.url), 'utf8');
+  /* 毎フレーム消し直す。_apply側が生き返りでvisibleを立て直すので、
+     1回消すだけだと相手が湧いた瞬間に体が生えてくる */
+  ok(/st\.id === this\._hiddenId\) this\._setBodyVisible\(slot, false\)/.test(rsrc),
+    '毎フレーム消し直している（生き返りで立て直されるため）');
+  // 変わった時しか触らない（毎フレーム呼ばれる所なので）
+  ok(/setHidden\(id = null\) \{[\s\S]{0,200}?if \(next === this\._hiddenId\) return;/.test(rsrc),
+    '相手が変わった時しかsceneを触らない');
+  // 沈み切った死体を出し直さない
+  ok(/_setBodyVisible\(slot, on\) \{[\s\S]{0,400}?CORPSE_HOLD_S \+ CORPSE_SINK_S\) return;/.test(rsrc),
+    '沈み切った死体は出し直さない');
+  // 試合をまたいで持ち越さない
+  ok(/slots\.clear\(\);[\s\S]{0,200}?_hiddenId = null/.test(rsrc),
+    '試合が終わったら観戦の相手を忘れる');
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
