@@ -39,7 +39,7 @@ import { preloadCharModel, SOLO_MODEL } from './ai/glbchar.js';
 import { FarShadowGate } from './world/shadowgate.js';
 import {
   K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, outsideZone, CHARACTERS,
-  TEAM_NAMES, soloCarryAt,
+  TEAM_NAMES, soloUnlocksAt,
 } from './net/protocol.js';
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -872,7 +872,8 @@ class Game {
     this.player.onFootstep = (i) => this.audio.footstep(i, this._footSurface());
     this.player.onLand = (i) => this.audio.land(Math.min(1, i * 1.4), this._footSurface());
     this.weapons.onShot = (s) => this._resolveShot(s);
-    this.weapons.onThrow = () => this._throwNade();
+    // shortは右クリックで放った時（手前投げ）。武器側が押された物を見て決める
+    this.weapons.onThrow = (short) => this._throwNade(short);
     // 包帯を巻き終えた瞬間。チュートリアルの課題「巻く」の判定にだけ使う
     // （本編では未使用の口。player.js側が呼んでくれる）
     this.player.onHealDone = () => { if (this.tutorial) this._tutFlags.healed = true; };
@@ -890,12 +891,12 @@ class Game {
         this.player.refill();
         this.weapons.resetAll();
       }
-      // 波が進むと持ち物が増える（今は第2波の狙撃銃1本）。
-      // 増えた本人が何番に増えたかを知らせる。増えたのに気づかれないと、
+      // 波が進むと武器が増える（今は第2波の狙撃銃1本）。
+      // どのキーで出るかまで知らせる。増えたのに気づかれないと、
       // 画面の隅に札が1枚増えただけで終わる
       const got = this._applySoloCarry(n);
       if (got) {
-        this.hud.banner(`第${n}波`, `${got.name}を支給（${got.slot}キー）`);
+        this.hud.banner(`第${n}波`, `${got.name}を支給（Qキー）`);
       } else {
         this.hud.banner(`第${n}波`, healed ? '体力と弾薬を補給した' : `敵 ${count}名 接近中`);
       }
@@ -3144,18 +3145,15 @@ class Game {
 
     const w = this.weapons.current;
     this.hud.health(this.player.health, this.player.maxHealth);
-    // 画面の札に印を付ける位置は「持ち物の何番目か」。武器の番号そのものだと、
-    // 持って出ない武器のぶんずれて、別の札が光る
-    const slotAt = this.weapons.carry.indexOf(this.weapons.index);
+    /* 画面の札に印を付ける位置は「並びの何番目か」。武器の番号そのものだと、
+       持って出ない武器のぶんずれて、別の札が光る。
+       支給品(Qの武器)は数字キーの4本の後ろに置いてあるので、その位置を指す */
+    const slotAt = this.weapons.index === this.weapons.quickIndex
+      ? this.weapons.carry.length
+      : this.weapons.carry.indexOf(this.weapons.index);
     this._weaponSlotsHud();
-    /* 手前投げに入っている間は武器の名前に添える。
-       軌道の線の色でも分かるが、線を見ていない時（持ち替えた直後・遮蔽の裏）でも
-       入っているかを読めるようにしておく。**同じ状態なら文字は書き換わらない**
-       （hud.ammoが前回の名前と比べる）ので、毎フレームの負担にはならない */
-    const wname = w.def.thrown && this.weapons.throwShort
-      ? `${w.def.name}（手前投げ）` : w.def.name;
     this.hud.ammo(
-      w.ammo, w.reserve, wname, slotAt, this.weapons.reloading, !!w.def.melee,
+      w.ammo, w.reserve, w.def.name, slotAt, this.weapons.reloading, !!w.def.melee,
       // 投げ物は弾数ではなく残りの数を出す。**対戦でも出す。**
       // 数える人がサーバーにしかいなかった頃は横線だったが、
       // 手元も「飛んだ」の知らせで数えるようになったので出せる
@@ -3174,37 +3172,43 @@ class Game {
      中身が変わっていなければHUD側が何も触らないので、ここでは作る手間だけを見る
      （札の名前は武器の表が持っているnick。ここで別の呼び名を作らない） */
   _weaponSlotsHud() {
-    const carry = this.weapons.carry;
+    const w = this.weapons;
     const items = this._slotItems ||= [];
     items.length = 0;
-    for (const i of carry) {
+    for (const i of w.carry) {
       const d = WEAPONS[i];
       if (!d) continue;
       // 使い切った投げ物は薄く。札そのものは残す（消すと後ろの番号がずれる）
-      items.push({ name: d.nick || d.name, out: !!d.thrown && this.weapons.nades <= 0 });
+      items.push({ name: d.nick || d.name, out: !!d.thrown && w.nades <= 0 });
     }
+    // 数字キーに載らない武器（支給された狙撃銃）は最後に、押すキーを名前にして出す。
+    // 番号の続きにすると「5」に見えて、実際には5では出ないことになる
+    const q = WEAPONS[w.quickIndex];
+    if (q) items.push({ name: q.nick || q.name, key: 'Q' });
     this.hud.weaponSlots(items);
   }
 
   /**
-   * ソロの持ち物を今の波に合わせる。増えた物があればその中身を返す。
+   * ソロで、今の波までに解放された武器をQへ割り当てる。
+   * 新しく増えた物があればその中身を返す（画面に出す文言のため）。
    *
-   * **持ち物を決める表は protocol.js の SOLO_UNLOCKS。** ここに条件を書かないのは、
+   * **数字キーには載せない。** 一度5番へ足したが「5押すのは指的に遠い」と言われた。
+   * 条件の表は protocol.js の SOLO_UNLOCKS。ここに「波が2以上なら」と書かないのは、
    * 画面を持たない所（tools/check-sniper.mjs）から確かめられるようにするため
    */
   _applySoloCarry(wave) {
     if (this.mode === 'versus') return null;
-    const before = this.weapons.carry;
-    const next = soloCarryAt(WEAPONS, wave);
-    const added = next.filter((i) => !before.includes(i));
-    this.weapons.carry = next;
-    if (added.length === 0) return null;
-    /* **支給された物をQの行き先にしておく。** これが無いと、5番を一度押すまで
-       Qがスナイパーを指さない。「5は指が遠い」から往復キーを足したのに、
-       最初の1回だけ5を押させるのでは半分しか解けていない */
-    this.weapons.lastIndex = added[0];
-    const d = WEAPONS[added[0]];
-    return { name: d.nick || d.name, slot: next.indexOf(added[0]) + 1 };
+    const before = this.weapons.quickIndex;
+    const now = soloUnlocksAt(WEAPONS, wave)[0] ?? null;
+    this.weapons.quickIndex = now;
+    // 持てなくなった物を握ったままにしない（出撃し直しでwave 0へ戻る時）
+    if (now == null && this.weapons.index === before && before != null) {
+      this.weapons.switching = 0;
+      this.weapons.switchTo(this.weapons.carry[0]);
+    }
+    if (now == null || now === before) return null;
+    const d = WEAPONS[now];
+    return { name: d.nick || d.name };
   }
 
   /**
@@ -3213,12 +3217,11 @@ class Game {
    * 「自分の画面では壁を越えたのにサーバーでは越えていない」がそのまま見えてしまう。
    * サーバーから届く位置だけを描くほうが、遅れても嘘をつかない
    */
-  _throwNade() {
+  _throwNade(short = false) {
     // ソロにはサーバーがいないので、手元で1つ飛ばして自分で爆発まで面倒を見る。
     // 対戦と同じNADEの値を使うので、飛び方と爆風の広さは両モードで揃う
-    if (this.mode !== 'versus') { this._throwNadeSolo(); return; }
+    if (this.mode !== 'versus') { this._throwNadeSolo(short); return; }
     if (!this.net) return;
-    const short = !!this.weapons.throwShort;
     const cam = this.camera;
     _throwOrigin.setFromMatrixPosition(cam.matrixWorld);
     // 真っ直ぐ前ではなく少し上へ。水平に投げると足元へ落ちて自爆する
@@ -3260,35 +3263,42 @@ class Game {
 
     if (!show) {
       if (this._arc) this._arc.visible = false;
+      if (this._arcShort) this._arcShort.visible = false;
       return;
     }
-    if (!this._arc) {
-      this._arc = new THREE.Line(
-        new THREE.BufferGeometry().setAttribute(
-          'position', new THREE.BufferAttribute(new Float32Array(ARC_STEPS * 3), 3),
-        ),
-        new THREE.LineDashedMaterial({
-          color: 0x63d2ff, transparent: true, opacity: 0.5,
-          dashSize: 0.22, gapSize: 0.16, depthTest: false,
-        }),
-      );
-      this._arc.renderOrder = 900;
-      this._arc.frustumCulled = false;
-      this.scene.add(this._arc);
-    }
-    this._arc.visible = true;
+    /* **線は2本出す。** 左クリックで投げる普通の弧（水色）と、
+       右クリックでその場から放る手前投げの弧（橙）。
 
-    /* 手前投げに入っているかは**線の色で見せる。**
-       押しても何も起きない操作を作らないための唯一の合図で、
-       しかも見ている所（狙っている先）で色が変わるので視線を動かさずに読める。
-       線の長さも一緒に変わるが、遠くを狙っている時は
-       画面の中の差が小さいので、色が無いと入り切りが分からない */
-    const short = !!this.weapons.throwShort;
-    if (short !== this._arcShort) {
-      this._arcShort = short;
-      this._arc.material.color.setHex(short ? 0xffc866 : 0x63d2ff);
-    }
+       右クリックは押した瞬間に飛ぶので、**押す前に落ちる場所が見えていないと
+       「押してみないと分からない物」になる。** 2本並べておけば、
+       近くへ置きたいのか奥へ投げたいのかを見ながらボタンを選べる。
+       手前投げの線は短くて手前で終わるので、遠くを狙っている時でも重ならない */
+    this._arc = this._arcLine(this._arc, 0x63d2ff, 0.5);
+    this._arcShort = this._arcLine(this._arcShort, 0xffc866, 0.42);
+    this._fillArc(this._arc, false);
+    this._fillArc(this._arcShort, true);
+  }
 
+  /** 軌道の線を1本作る（無ければ）。色と濃さだけが違う */
+  _arcLine(line, color, opacity) {
+    if (line) { line.visible = true; return line; }
+    const made = new THREE.Line(
+      new THREE.BufferGeometry().setAttribute(
+        'position', new THREE.BufferAttribute(new Float32Array(ARC_STEPS * 3), 3),
+      ),
+      new THREE.LineDashedMaterial({
+        color, transparent: true, opacity,
+        dashSize: 0.22, gapSize: 0.16, depthTest: false,
+      }),
+    );
+    made.renderOrder = 900;
+    made.frustumCulled = false;
+    this.scene.add(made);
+    return made;
+  }
+
+  /** 1本ぶんの点を埋める。shortで初速と上向きが変わる（実際の飛翔と同じ関数を読む） */
+  _fillArc(line, short) {
     const cam = this.camera;
     _throwOrigin.setFromMatrixPosition(cam.matrixWorld);
     _throwDir.set(0, 0, -1).applyQuaternion(cam.quaternion);
@@ -3297,7 +3307,7 @@ class Game {
 
     const pos = _arcPos.copy(_throwOrigin).addScaledVector(_throwDir, NADE.MUZZLE);
     const vel = _arcVel.copy(_throwDir).multiplyScalar(throwSpeedOf(short));
-    const arr = this._arc.geometry.attributes.position.array;
+    const arr = line.geometry.attributes.position.array;
     const dt = 0.045;
     let n = 0;
     for (let i = 0; i < ARC_STEPS; i++) {
@@ -3323,12 +3333,12 @@ class Game {
         }
       }
     }
-    this._arc.geometry.attributes.position.needsUpdate = true;
-    this._arc.computeLineDistances();
+    line.geometry.attributes.position.needsUpdate = true;
+    line.computeLineDistances();
   }
 
   /** ソロの手榴弾。判定を持つ相手がいないので、飛翔も爆発もここで完結させる */
-  _throwNadeSolo() {
+  _throwNadeSolo(short = false) {
     // 残りが無ければ投げない。対戦のサーバーが黙って捨てるのと同じ扱いだが、
     // ソロは手元なので空撃ちのカチッだけ返す（押したのに無反応、を作らない）。
     // takeNade()は使い切った時に手から下ろすところまでやる
@@ -3338,8 +3348,6 @@ class Game {
     }
     // チュートリアルの手榴弾の課題は「投げたら」ではなく「爆風で的を倒したら」
     // クリアになった(2026-08-09)。印を立てるのは_explodeSoloの側
-    // 手前投げかどうか。予測線と同じ関数から取るので、線の通りに飛ぶ
-    const short = !!this.weapons.throwShort;
     const cam = this.camera;
     _throwOrigin.setFromMatrixPosition(cam.matrixWorld);
     _throwDir.set(0, 0, -1).applyQuaternion(cam.quaternion);
@@ -3872,15 +3880,15 @@ class Game {
         this.weapons.holsterBandage();
         if (this.weapons.switchTo(i) && this.mode === 'versus') this.net?.sendWeapon(i);
       }
-      /* Qで直前の武器と往復する。**数字キーの代わりではなく、往復のための道具。**
-         遊んで「5を押すのは指的に遠い」と言われた所で、Qは指を浮かせずに届く。
-         実際の遊び方が「近い敵はライフル、遠い敵はスナイパー」の往復なので、
-         その2挺の行き来だけならもう数字を押さなくてよくなる。
-         中身（どこへ戻るか）は武器側が持つ（weapons.swapLast） */
+      /* Qは支給された武器（今は第2波の狙撃銃）の出し入れ。
+         **数字キーを増やさないための物。** 5番へ足していた時に
+         「5押すのは流石に指的に遠い」と言われたので、WASDから指を浮かさずに
+         届くQへ寄せてある。持っていない時（第2波より前・対戦）は何も起きない。
+         中身は武器側が持つ（weapons.quickSwap） */
       if (canAct && input.pressed('KeyQ')) {
         this.player.cancelHeal();
         this.weapons.holsterBandage();
-        const to = this.weapons.swapLast();
+        const to = this.weapons.quickSwap();
         if (to != null && this.mode === 'versus') this.net?.sendWeapon(to);
       }
 

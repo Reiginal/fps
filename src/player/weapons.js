@@ -3001,10 +3001,12 @@ export class WeaponSystem {
     // ガンゲームや将来の武器選択画面はここを差し替えるだけで済む
     this.carry = loadoutOf(WEAPONS);
     this.index = this.carry[0] ?? 0;
-    /* 直前に持っていた武器の番号（Qで往復する先）。
-       始まりは持ち物の2本目にしておく。nullのままだと最初の1回だけ
-       Qが「持ち物の中の最初の1本」へ逃げる形になって、行き先が読めない */
-    this.lastIndex = this.carry[1] ?? null;
+    /* **数字キーに載らない武器。** 今は1人用で第2波から支給される狙撃銃で、
+       Qで出し入れする（main.jsの_applySoloCarryが番号を入れる）。
+       nullなら「そんな物は持っていない」＝Qを押しても何も起きない。
+       quickBackは、Qで戻る時の行き先（Qを押す直前に持っていた物） */
+    this.quickIndex = null;
+    this.quickBack = null;
     this.current.model.visible = true;
 
     this.adsFactor = 0;
@@ -3034,8 +3036,6 @@ export class WeaponSystem {
     this.nades = NADE.PER_ROUND;
     // 投げ切ったので、投げ終わったら手から下ろす、の印
     this._holsterThrown = false;
-    // 手前投げ（右クリックで入り切り）。投げる強さと角度を弱める側へ倒す
-    this.throwShort = false;
     // 自分から持ち替えた時に知らせる先。対戦では持っている物をサーバーへ
     // 伝え直さないと、画面と当たり判定が別々の武器になる
     this.onSwitched = null;
@@ -3233,13 +3233,13 @@ export class WeaponSystem {
     // 持っていない武器へは替われない。**サーバーも同じ判断をする**ので、
     // ここを外しても向こうで弾かれる（画面だけ持ち替わって当たり判定が
     // 元の武器のまま、という一番読めない食い違いになる）
-    if (!this.carry.includes(i)) return false;
+    // **数字キーの4本＋Qの1本が持てる全部。** ここを外すと、
+    // 画面に出ていない武器を握れることになる（対戦ではサーバーも同じ判断をする）
+    if (!this.carry.includes(i) && i !== this.quickIndex) return false;
     // 使い切った投げ物は握らない。**無い物を持って構えるのが一番おかしい。**
     // 札は残したまま（残りの数を見せるため）、握るのだけ断る
     if (this.weapons[i].def.thrown && this.nades <= 0) return false;
     if (this.switching > 0) return false;
-    // 出ていく方を覚えておく。Qで往復するのに使う（swapLast）
-    this.lastIndex = this.index;
     this.reloading = 0;
     this.shellReload = false;
     this._shellLower = 0;
@@ -3257,27 +3257,6 @@ export class WeaponSystem {
   }
 
   /**
-   * 直前に持っていた武器へ戻る（Qキー）。替われたらその番号、駄目ならnull。
-   *
-   * **数字キーの代わりではなく、往復のための道具。**
-   * 遊んで「5を押すのは指的に遠い」と言われた所で、実際の遊び方が
-   * 「近い敵はライフル、遠い敵はスナイパー」の往復なので、
-   * その2挺を1キーで行き来できれば5まで指を伸ばす場面が無くなる。
-   *
-   * 直前の物が持てない時（拾われて持ち物から消えた・手榴弾を使い切った）は、
-   * 持ち物の中で今と違う最初の1本へ逃がす。**押して何も起きないのを作らない**
-   * （黙って効かない操作は、遊ぶ側からは壊れているようにしか見えない）
-   */
-  swapLast() {
-    const want = this.lastIndex;
-    if (want != null && this.switchTo(want)) return want;
-    for (const i of this.carry) {
-      if (i !== this.index && this.switchTo(i)) return i;
-    }
-    return null;
-  }
-
-  /**
    * 手榴弾を構えている途中（離せば投げる状態）を、投げずに断ち切る。
    * 一時停止で呼ぶ。pointerlockが外れるとinput.buttonsが黙って全部falseに
    * なるので、断ち切らずにいると再開した1フレーム目が「離した」と誤認して
@@ -3285,6 +3264,30 @@ export class WeaponSystem {
    * 増やした側が閉じる）
    */
   cancelThrowHold() { this._throwCharging = false; }
+
+  /**
+   * Qで、数字キーに載らない武器（今は狙撃銃）を出し入れする。
+   * 替われたらその番号、駄目ならnull。
+   *
+   * **数字キーを増やす代わりの物。** 一度5番へ足したが「5押すのは指的に遠い」
+   * と言われた。WASDから指を浮かせずに届くのがQまでなので、そこへ寄せてある。
+   *
+   * 押すたびに行って戻る。行き先が固定なので、何を持っていても
+   * 「Qを押せばあれが出る」で読める（直前の武器へ戻る形にすると、
+   * 間に別の武器を挟んだ時にQが狙撃銃を指さなくなる）
+   */
+  quickSwap() {
+    if (this.quickIndex == null) return null;
+    if (this.index === this.quickIndex) {
+      // 戻る先。覚えていない・もう持っていないなら主武器へ
+      const back = this.carry.includes(this.quickBack) ? this.quickBack : this.carry[0];
+      return back != null && this.switchTo(back) ? back : null;
+    }
+    const from = this.index;
+    if (!this.switchTo(this.quickIndex)) return null;
+    this.quickBack = from;
+    return this.quickIndex;
+  }
 
   /**
    * 投げ物を1つ使う。使えたらtrue。
@@ -3434,25 +3437,15 @@ export class WeaponSystem {
     }
 
     /* ------------------------------------------------------ ADS */
-    // 右クリックは「押している間」ではなく「押すたびに入り切り」で扱う。
-    // Macのトラックパッドは右クリックを押したまま左クリックができないので、
-    // 押しっぱなし方式だと覗きながら撃つ動作そのものが物理的に取れない
-    if (input.clicked?.(2)) {
-      /* 投げ物では覗く物が無いので、同じ右クリックを**手前投げの入り切り**に使う。
-         遊んで「右クリしたら手前めに投げれるようになったら嬉しい」と言われた所。
+    /* 右クリックを押した瞬間。**投げ物とそれ以外で意味が違う。**
 
-         ここも入り切り（押しっぱなしではない）。理由はADSと同じで、
-         投げる時は左クリックを押したまま狙いを決める作りなので、
-         トラックパッドでは右クリックを押しながら左クリックができない。
-         入っているかどうかは、持っている間ずっと出ている軌道の線の色と長さで分かる */
-      if (d.thrown) {
-        this.throwShort = !this.throwShort;
-        // 入った時は低く、切った時は高く。線の色を見ていなくても切り替えが分かる
-        ctx.audio?.click(this.throwShort ? 900 : 1400, 0.26, 0.04);
-      } else {
-        this.adsHeld = !this.adsHeld;
-      }
-    }
+       銃では「押すたびに覗きの入り切り」。押している間ではないのは、
+       Macのトラックパッドが右クリックを押したまま左クリックできないためで、
+       押しっぱなし方式だと覗きながら撃つ動作そのものが物理的に取れない。
+
+       投げ物では覗く物が無いので、こちらは**押した瞬間に手前へ放る**（下の投擲で受ける） */
+    const rightEdge = !!input.clicked?.(2);
+    if (rightEdge && !d.thrown) this.adsHeld = !this.adsHeld;
     // 包帯を持っている間は武器そのものを下ろしているので、覗くも撃つも無い
     const busyHealing = this.bandageOut || player.healing > 0;
     // 近接は覗く物が無い。覗けると刃を目の前に構えて視界を塞ぐだけになる
@@ -3573,9 +3566,21 @@ export class WeaponSystem {
         if (canFire) {
           player.cancelHeal?.();
           this.swing = SWING_TIME;
-          this.onThrow?.();
+          this.onThrow?.(false);
           this.fireTimer = 60 / d.rpm;
         }
+      }
+      /* 右クリックは押した瞬間に手前へ放る。**構えない。**
+         左クリックが「押して狙って離す」なのに対して、こちらは1動作で終わる。
+         逃げながら足元へ落とす・角の裏へ転がす、が手数無しで取れるようにするため。
+         構えている途中に押された時は、そちらの構えを畳んでから放る
+         （畳まないと、指を離した時にもう1つ飛ぶ） */
+      if (rightEdge && canFire) {
+        this._throwCharging = false;
+        player.cancelHeal?.();
+        this.swing = SWING_TIME;
+        this.onThrow?.(true);
+        this.fireTimer = 60 / d.rpm;
       }
     } else if (wantFire && canFire) {
       if (w.ammo > 0) {
@@ -4214,9 +4219,9 @@ export class WeaponSystem {
     // 投げ物も配り直す。**弾と同じ扱い**（出撃のたびに満タンから始まる）
     this.nades = NADE.PER_ROUND;
     this.index = 0;
-    // Qの行き先も出撃前へ戻す。前の回の最後に持っていた物が残っていると、
-    // 湧いた直後のQが「さっきまで持っていた（もう持っていない）武器」を指す
-    this.lastIndex = this.carry[1] ?? null;
+    // Qで戻る先も出撃前へ。**quickIndex(何が持てるか)は消さない。**
+    // あれは波が決める物で、湧き直しでは変わらない
+    this.quickBack = null;
     this.current.model.visible = true;
     this.reloading = 0;
     this.shellReload = false;
@@ -4235,8 +4240,6 @@ export class WeaponSystem {
     this.burstLeft = 0;
     // 手榴弾を構えたまま(離さずに)死ぬと、湧き直した所でも構えたままになっていた
     this._throwCharging = false;
-    // 手前投げも解く。湧いた所で入ったままだと、投げてから短いことに気づく
-    this.throwShort = false;
     this.shotIndexInMag = 0;
     this.boltCycle = 0;
     this.magWob = 0; this.magWobV = 0;
