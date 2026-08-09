@@ -46,6 +46,48 @@ npm run sounds     # 音を sounds/*.wav に書き出して数字で並べる
 package.jsonにもci.ymlにも名前を書かない（前は3箇所を手で揃えていて、必ずずれた）。
 本数と項目数も走らせた時に出るので、ここに数字を書かない。
 
+---
+
+## どこを見るか（直す前に、探す時間を減らすため）
+
+```bash
+node tools/map.mjs        # 全ファイルの一覧。何行あって、何を持っているか
+node tools/map.mjs 発砲    # 「発砲」を含む区切りがどのファイルのどこにあるか
+```
+
+**地図は手で書いていない。** 各ファイルの冒頭コメントと、元から書いてある
+`/* ------ 見出し */` の行を読んで並べているだけなので、古くならない。
+（ファイルを足した時にやることも無い。冒頭コメントさえ書けば勝手に載る）
+
+下の表だけは手書き。**症状の言葉からは機械で引けない**ので、ここに置く。
+
+| 言われ方 | まず見る所 | 確かめる検査 |
+|---|---|---|
+| 弾が当たらない・当たり判定 | 対戦は `server/sim.js` の `resolveShot`、ソロは `src/main.js` の `_resolveShot`。**別物が2つある** | weapons, hitbox, rays |
+| 撃ち味・反動・構え・持ち替え | `src/player/weapons.js`（「実装」より下） | weapons, loadout, reload |
+| 動きが変・位置が引き戻される | `src/player/player.js`。**両側で同じ物が走る** | parity, doors |
+| 弾痕・火花・煙・薬莢 | `src/world/effects.js` | — |
+| 音 | `src/core/audio.js` | sound（`npm run sounds`で先に測る） |
+| 画面の数字・撃破表示・順位表 | `src/ui/hud.js` | hud |
+| 通れない・すり抜ける・地形 | `src/world/level.js` | doors, world, rays, worldgeo |
+| 1人用の敵 | `src/ai/enemy.js` | swarm |
+| 席・ラウンド・勝敗・復帰 | `server/room.js` | lobby, modes, teams, rejoin |
+| 遊び方の決まり | `server/modes.js`（**サーバーだけが持つ**） | modes |
+| 送る項目を足す・食い違う | `src/net/protocol.js` を**両側同時に** | protocol |
+| 他人がカクつく・見た目が変 | 見た目は `src/net/remote.js`、位置合わせは `src/net/client.js` | parity |
+| 重い・熱い | `src/core/autoquality.js` と `src/core/framegate.js`。まず `/logs` のfpsを読む | framecap, autoquality, worldgeo |
+| 設定を足す | `src/core/settings.js` の表（`src/ui/settings.js` は並べるだけ） | settings |
+| 色・ボケ・輪郭・眩しさ | `src/core/postfx.js` | postfx |
+| 開くと画面が真っ黒 | `import` の綴り | imports |
+
+**ソロと対戦で持ち主が違う物がある。** 撃った判定と手榴弾は、
+ソロが `src/main.js`、対戦が `server/` 側にそれぞれ別に居る。
+片方だけ直すと「1人用では直っているのに対戦では直っていない」になる。
+どちらの話かを先に確かめる。
+
+判定は全部サーバーが持っていて、クライアントが送るのは入力と向きだけ。
+理由は `src/net/protocol.js` の冒頭に書いてある。
+
 ## 本番
 
 **https://blackout-fps.fly.dev** — Fly.io 東京(nrt)、512MB、常時起動、月$3。

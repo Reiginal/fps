@@ -15,7 +15,7 @@
 // **一覧を手で持つ形に戻っていないか**になった。
 //
 //   node tools/check-meta.mjs
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 
 let bad = 0;
 const ok = (c, msg) => { console.log(`  ${c ? '○' : '× 失敗:'} ${msg}`); if (!c) bad++; };
@@ -160,6 +160,57 @@ console.log('\n[7] ブラウザ検査が見るidが、画面に実在する');
   ok(ids.size >= 5, `e2eが見るidを${ids.size}個拾えた（拾えなさすぎたら検査の壊れ）`);
   for (const id of ids) {
     ok(html.includes(`id="${id}"`), `#${id} が index.html に実在する`);
+  }
+}
+
+console.log('\n[8] 直す場所を探す道具が、実物と繋がっている');
+/* **地図(tools/map.mjs)と、CLAUDE.mdの「どこを見るか」の表が本体からずれていないか。**
+
+   なぜ要るか: このrepoは「手で書いた一覧が古くなる」で何度も転んでいて、
+   検査の一覧も本数も課題の一覧も、全部それでずれた。
+   地図の方はファイルの中身から組み立てているのでずれようが無いが、
+   **材料（冒頭コメント）が無いファイルは地図の上で空欄になる。**
+   表の方は症状の言葉なので手書きしかなく、ここが唯一ずれる余地の残った所。
+
+   ずれても誰も気づけないのがまずい。地図も表も、**間違っている時ほど
+   「調べなくていい」と思わせる**（名前があるので実在しているように見える）。 */
+{
+  const md = readFileSync('CLAUDE.md', 'utf8');
+
+  // 地図の材料。冒頭コメントが無いファイルは、名前と行数しか出なくなる
+  const srcFiles = [];
+  const walk = (dir) => {
+    for (const name of readdirSync(dir)) {
+      const p = `${dir}/${name}`;
+      if (statSync(p).isDirectory()) walk(p);
+      else if (name.endsWith('.js')) srcFiles.push(p);
+    }
+  };
+  walk('src'); walk('server');
+  const noHead = srcFiles.filter((p) => !/^\s*(\/\/|\/\*)/.test(readFileSync(p, 'utf8').split('\n', 1)[0]));
+  ok(noHead.length === 0, `冒頭コメントが全${srcFiles.length}ファイルに有る${noHead.length ? `（無い: ${noHead.join(', ')}）` : ''}`);
+  ok(existsSync('tools/map.mjs'), 'tools/map.mjs がある');
+  ok(md.includes('node tools/map.mjs'), 'CLAUDE.md が地図の呼び方を書いている');
+
+  // 「どこを見るか」の表。次の見出しまでを切り出す
+  const from = md.indexOf('## どこを見るか');
+  ok(from > 0, 'CLAUDE.md に「どこを見るか」の表がある');
+  const table = md.slice(from).split('\n## ')[0];
+  const rows = table.split('\n').filter((l) => l.startsWith('|') && !/^\|\s*-+/.test(l)).slice(1);
+  ok(rows.length >= 10, `表に ${rows.length} 行ある（減りすぎていたら表の壊れ）`);
+
+  for (const row of rows) {
+    const cell = row.split('|').slice(1, -1);
+    // 見る所の欄に書いたファイルが実在するか
+    for (const m of (cell[1] || '').matchAll(/`([\w./-]+\.js)`/g)) {
+      ok(existsSync(m[1]), `${m[1]} … 実在する（表の「${cell[0].trim()}」の行）`);
+    }
+    // 確かめる検査の欄。「sound（npm run soundsで測る）」のような書き足しがあるので頭だけ見る
+    for (const token of (cell[2] || '').split(',')) {
+      const name = token.trim().match(/^[a-z][a-z-]*/)?.[0];
+      if (!name) continue;
+      ok(real.includes(`check-${name}.mjs`), `check-${name}.mjs … 実在する（表の「${cell[0].trim()}」の行）`);
+    }
   }
 }
 
