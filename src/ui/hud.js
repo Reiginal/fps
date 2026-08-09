@@ -43,6 +43,7 @@ export class HUD {
       achfeed: $('achfeed'),
       voice: $('voice'), voiceText: $('voiceText'),
       spectate: $('spectate'), specName: $('specName'), specHint: $('specHint'),
+      specHp: $('specHp'),
       tutorial: $('tutorial'), tutMain: $('tutMain'), tutSub: $('tutSub'),
     };
     this.markerTimer = 0;
@@ -557,16 +558,35 @@ export class HUD {
     this._tutDoneTimer = setTimeout(() => el.classList.remove('done'), holdS * 1000);
   }
 
-  spectating(name, canSwitch = false) {
+  /**
+   * 観戦の札。nameがnullで消える。
+   *
+   * hpは見ている人の体力（maxで割った割合ではなく実数）。
+   * **これが無いと、観戦中は画面のどこにも体力が出ない。**
+   * 自分の体力の棒は0のまま消えているので、見ている相手が
+   * あと1発なのか満タンなのかが分からず、見ていて何も起きていないように見える。
+   *
+   * 毎フレーム呼ばれる前提なので、値が変わった時しかDOMを触らない
+   */
+  spectating(name, canSwitch = false, hp = null, maxHp = 0) {
     const el = this.el.spectate;
     if (!el) return;
-    const key = name === null || name === undefined ? '' : `${name}|${canSwitch ? 1 : 0}`;
+    const shown = hp == null ? '' : String(Math.max(0, Math.ceil(hp)));
+    const key = name === null || name === undefined
+      ? '' : `${name}|${canSwitch ? 1 : 0}|${shown}`;
     if (key === this._specKey) return;
     this._specKey = key;
     if (!key) { el.classList.add('hidden'); return; }
     el.classList.remove('hidden');
     this.el.specName.textContent = name;
     this.el.specHint.classList.toggle('hidden', !canSwitch);
+    const hpEl = this.el.specHp;
+    if (hpEl) {
+      hpEl.textContent = shown;
+      // 割合で見る。対戦の体力は260、1人用は130なので実数では線が引けない
+      const r = maxHp > 0 && hp != null ? hp / maxHp : 1;
+      hpEl.classList.toggle('low', r < 0.34);
+    }
   }
 
   elim(name, headshot = false) {

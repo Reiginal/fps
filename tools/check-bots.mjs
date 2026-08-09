@@ -192,6 +192,67 @@ console.log('\n[5] 実際に動いて・撃って・当てる（本物の地形�
   clear();
 }
 
+console.log('\n[5.5] 人が倒れてCPUだけになっても撃ち合いになる');
+/* 遊んで**「CPU同士が残ると、建物と建物の外をずっとぐるぐるしていた」**と言われた所。
+
+   **この検査では再現していない。** 2対2で人だけ先に倒して20秒回すと、
+   残ったCPUは8秒ほどで撃ち合いを始める（8つの種で試して全部）。
+   なので**ここは「その形になっていないこと」を見張る番人**であって、
+   報告された不具合を捕まえた物ではない。再現の手掛かりが出たら足すこと。
+
+   ついでに分かったこと: 「見つけられない時は場の真ん中へ寄る」を入れてみたが、
+   **初弾までが8.0秒から8.7〜22.1秒へ遅くなった**（追いかけるのを途中でやめるので）。
+   周回を止めたくてもこの形では駄目、という記録として残しておく */
+{
+  clear();
+  room.phase = PHASE.WAIT;
+  // 2対2。人1人＋CPU3体で始めて、人だけ先に倒す。
+  // 実際に言われた形（2対2で自分が倒れて、CPUだけが残る）をそのまま作る
+  room.setMode('team');
+  const me = join('まと');
+  room.takeSeat(me.slot, 0);
+  room.toggleBot(1);
+  room.toggleBot(2);
+  room.toggleBot(3);
+  seedBots();
+  room.setReady(me.slot, true);
+  const bots = [...room.slots.values()].filter((s) => s.bot);
+  ok(bots.length === 3, `CPUが3体入った（${bots.length}体）`);
+  ok(room.phase === PHASE.LIVE, '試合が始まった');
+  // 人を倒す。ここから先は残ったCPUだけの話になる
+  me.slot.sim.player.alive = false;
+  me.slot.sim.player.health = 0;
+  // 相手チームの2体だけを見る（同じチームの1体は撃ち合わないので数えない）
+  const foes = bots.filter((b) => room.teamOf(b) !== room.teamOf(me.slot));
+  ok(foes.length === 2, `相手チームのCPUが2体（${foes.length}体）`);
+  const mate = bots.find((b) => room.teamOf(b) === room.teamOf(me.slot));
+  ok(!!mate, '自分のチームにもCPUが1体いる');
+
+  // 残った味方1体と、相手2体のうち近いほうの距離
+  const gap = () => Math.min(...foes.map((f) => Math.hypot(
+    f.sim.player.collider.start.x - mate.sim.player.collider.start.x,
+    f.sim.player.collider.start.z - mate.sim.player.collider.start.z,
+  )));
+  let fired = 0;
+  let hits = 0;
+  let closest = gap();
+  for (let i = 0; i < 20 * 60; i++) {
+    room._tick();
+    for (const ev of room.events) {
+      if (ev.e === 'f') fired++;
+      if (ev.e === 'h') hits++;
+    }
+    room.events.length = 0;
+    if (room.phase === PHASE.LIVE) closest = Math.min(closest, gap());
+  }
+  // 会えていれば必ず撃ち合いになる。1発も出ないなら、ずっとすれ違っている
+  ok(closest < 12, `20秒のうちに近づけている（一番近い時で ${closest.toFixed(1)}m）`);
+  ok(fired > 0, `CPU同士が撃ち合った（${fired}発）`);
+  ok(hits > 0, `弾が当たった（${hits}発）`);
+  clear();
+  room.setMode('dm');
+}
+
 console.log('\n[6] 強すぎない（振り向きざまの即死をしない）');
 {
   /* CPUは人と同じ入力しか使えないが、向きだけは計算で作れるので、

@@ -309,6 +309,18 @@ console.log('\n[観戦カメラ] 繋ぎ込み（main.js / remote.js）');
     '体を消す指示を出してから相手を描く');
   // クリックは押した瞬間だけ拾う（押しっぱなしで相手が回り続けない）
   ok(/input\?\.clicked\(0\)/.test(src), '切り替えは押した瞬間だけ拾う');
+  /* **見ている人の体力を出す。** 自分の体力の棒は倒れている間0のまま消えているので、
+     出さないと観戦中は画面のどこにも体力が無い。遊んで
+     「デスカメラのときに、そいつの体力とかもない」と言われた所 */
+  ok(/spectating\([\s\S]{0,160}?target\.hp/.test(src), '観戦の札へ相手の体力を渡している');
+  const hsrc = readFileSync(new URL('../src/ui/hud.js', import.meta.url), 'utf8');
+  ok(/specHp/.test(hsrc), 'HUDが体力の置き場を持っている');
+  // 毎フレーム呼ばれるので、値が変わった時だけ書く（同じ値で書き直さない）
+  ok(/_specKey = key;/.test(hsrc) && /\$\{shown\}/.test(hsrc),
+    '同じ値なら書き込まない（体力も鍵に入っている）');
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  ok(/id="specHp"/.test(html), '体力のDOMがある');
+  ok(/#specHp\.low/.test(html), '残りが少ない時に色が変わる');
   // 肩越しの名残（壁当たりのレイ）が残っていないか
   ok(!/_specRay/.test(src), '肩越しの時の壁当たりのレイは消えている');
 
