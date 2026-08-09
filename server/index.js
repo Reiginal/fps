@@ -26,6 +26,7 @@ import { logs, canViewLogs, isLocal, renderPage } from './logs.js';
 import { WEAPONS, weaponsSource } from './sim.js';
 import * as db from './db.js';
 import * as auth from './auth.js';
+import { addCoins, getCoins, coinsFor } from './wallet.js';
 import { sendVerifyMail } from './mail.js';
 import {
   C, Sv, decode, encode, TIMEOUT_MS, CHAT_MAX, CHAT_GAP_MS,
@@ -283,7 +284,10 @@ async function routeApi(url, req, res) {
        遊ぶ側はこれを見て、ログインの行そのものを画面に出さない */
     if (!accountsOn) { sendJson(res, 200, { ok: true, accounts: false, user: null }); return; }
     if (!meLimit.allow(`me|${ip}`, Date.now())) { sendJson(res, 429, { ok: false, error: '少し待ってください' }); return; }
-    sendJson(res, 200, { ok: true, accounts: true, user: await auth.sessionUser(db.query, token) });
+    const me = await auth.sessionUser(db.query, token);
+    // 残高も一緒に返す。別の口にすると、画面を開くたびに往復が2回になる
+    if (me) me.coins = await getCoins(db.query, me.id);
+    sendJson(res, 200, { ok: true, accounts: true, user: me });
     return;
   }
 
@@ -350,6 +354,50 @@ async function routeApi(url, req, res) {
   }
 
   res.writeHead(404).end('not found');
+}
+
+/* ------------------------------------------------------------ 財布 */
+
+/**
+ * 試合が終わった時にコインを配る。部屋(server/room.js)から呼ばれる。
+ *
+ * **ログインしている人にだけ配る。** 配る先が無いので当然だが、
+ * 遊ぶ側には「貯まらない」が分かるようにしてある（ホームの行にログイン状態が出る）。
+ * CPUは conn.user を持たないので、ここで勝手に外れる。
+ *
+ * **1人ずつ別々に書く。** まとめて1つの取引にすると、
+ * 誰か1人の書き込みで詰まった時に全員が待つ。
+ * コインは1人ずつ独立しているので、まとめる理由が無い。
+ *
+ * @returns Map<slot, {got, coins}>。台帳が無ければ null（部屋は枚数を載せずに配る）
+ */
+async function payMatch(slots) {
+  if (!accountsOn) return null;
+  // 1位の判定に使う。**誰も取っていない試合(0-0の時間切れ)では全員に付けない**
+  let top = 0;
+  for (const s of slots.values()) if ((s.rounds | 0) > top) top = s.rounds | 0;
+
+  const paid = new Map();
+  for (const s of slots.values()) {
+    const user = s.conn?.user;
+    if (!user) continue;
+    const got = coinsFor({ kills: s.sim?.kills, rounds: s.rounds }, top);
+    try {
+      // 1人ずつ順に書く。まとめて1つの取引にすると、誰か1人で詰まった時に全員が待つ
+      const coins = await addCoins(db.query, user.id, got);
+      paid.set(s, { got, coins });
+    } catch (e) {
+      // その人だけ配れなかった。試合の終わりそのものは止めない
+      console.warn(`[wallet] ${s.name} に配れなかった: ${e && e.message}`);
+    }
+  }
+  if (paid.size) {
+    logs.add('coin', {
+      message: [...paid.values()].map((p) => `+${p.got}`).join(' '),
+      count: paid.size,
+    });
+  }
+  return paid;
 }
 
 /* ------------------------------------------------------ 値の検査 */
@@ -543,6 +591,8 @@ async function onJoin(conn, m) {
     const token = typeof m.tk === 'string' ? m.tk.slice(0, 64) : null;
     // 部屋はサーバーに1つだけ。繋いだ人は全員そこへ入る
     const room = getRoom(world);
+    // コインを配る係を差し込む。部屋は台帳を知らないので、外から入れる
+    room.onMatchEnd = payMatch;
     const slot = room.join(conn, name, token);
     if (!slot) {
       conn.send({ t: Sv.FULL, why: 'この部屋は満員' });

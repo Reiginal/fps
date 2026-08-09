@@ -304,7 +304,9 @@ export const Sv = {
   SCORE: 'C',     // { t, rows:[[id,kills,deaths,ping,rounds]] }
   // 試合終了。これが無いと「今届いた得点が最終順位なのか途中経過なのか」を
   // 受け取る側が判別できず、最終順位を出した直後に0点で上書きされる
-  MATCHEND: 'M',  // { t, rows:[[id,kills,deaths,ping]], why:'score'|'time', next:再開までの秒 }
+  // got は今回稼いだコイン、coins は稼いだ後の残高。**ログインしている人にだけ入る。**
+  // ログインしていない人と、台帳を持たないサーバーでは、どちらも undefined
+  MATCHEND: 'M',  // { t, rows:[[id,kills,deaths,ping]], why:'score'|'time', next:再開までの秒, got?, coins? }
   PING: 'P',      // { t, id }
   // 声の合図を相手から受け取った。fromは送ってきた人
   VSIG: 'V',      // { t, from:送り主のid, d:中身 }

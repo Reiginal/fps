@@ -83,7 +83,28 @@ export const STEPS = [
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
   },
-  // 通貨とスキンはここへ足す。上の4つには二度と触らない
+  {
+    n: 5,
+    name: '財布',
+    /* ゲーム内通貨。**1人1行しか無い。**
+       user_id をそのまま主キーにしてあるので、
+       同じ人の財布が2つできることが台帳の作りとして起きない。
+
+       CHECK (coins >= 0) は最後の砦。買い物を作った時に
+       「残高より高い物を買えてしまう」不具合を書いても、**台帳が断る。**
+       アプリ側でも当然確かめるが、そこを間違えた時にマイナスの残高が
+       残る方が後始末が難しい（どこまで戻せばいいのか誰にも分からなくなる）。
+
+       BIGINT なのは、後で「1コイン＝小数点以下も持つ通貨」にしたくなった時に
+       整数のまま桁を増やせるようにするため。お金を小数で持つのは事故のもと */
+    sql: `CREATE TABLE wallets (
+      user_id    BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      coins      BIGINT NOT NULL DEFAULT 0 CHECK (coins >= 0),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+  },
+  // スキン(owned_skins)と、現金を入れる時の明細(ledger)はここへ足す。
+  // 上の5つには二度と触らない
 ];
 
 /**

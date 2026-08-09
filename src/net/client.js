@@ -383,6 +383,11 @@ export class NetClient {
       rows: this.scoreRows(),
       why: m.why === 'time' ? 'time' : 'score',
       next: typeof m.next === 'number' ? m.next : 0,
+      /* 稼いだコインと残高。**数でなければ通さない。**
+         ログインしていない人・台帳を持たないサーバーでは届かないので、
+         受け取る側は「無い」を普通の状態として扱うこと */
+      got: typeof m.got === 'number' ? m.got : null,
+      coins: typeof m.coins === 'number' ? m.coins : null,
     });
   }
 

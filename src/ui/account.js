@@ -115,8 +115,11 @@ export class AccountMenu {
     if (!this.available) return;
     const inside = !!this.user;
     if (inside) {
+      // 残高は0でも出す。**出さないと「まだ1枚も無い」が分からない**
+      const coins = Number(this.user.coins ?? 0).toLocaleString();
       who.innerHTML = `<b>${escapeHtml(this.user.name)}</b> でログイン中`
-        + (this.user.verified ? '' : '<br>メールの確認がまだです');
+        + `<br>コイン <b>${coins}</b>枚`
+        + (this.user.verified ? '' : '　メールの確認がまだです');
     } else {
       who.textContent = 'ログインしていません';
     }
@@ -124,6 +127,17 @@ export class AccountMenu {
     open.classList.toggle('hidden', inside);
     this.el.new.classList.toggle('hidden', inside);
     out.classList.toggle('hidden', !inside);
+  }
+
+  /**
+   * 残高を差し替える。試合の終わりにサーバーが配った値をそのまま入れる。
+   * **数え直さない。** こちらでも足すと、届いた値とずれた時に
+   * どちらが本当か分からなくなる（台帳が持っている値だけが本当）
+   */
+  setCoins(coins) {
+    if (!this.user || typeof coins !== 'number') return;
+    this.user.coins = coins;
+    this._paint();
   }
 
   get isOpen() { return !this.el.root.classList.contains('hidden'); }
