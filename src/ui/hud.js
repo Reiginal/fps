@@ -739,12 +739,31 @@ export class HUD {
       if (!e) {
         const root = document.createElement('div');
         root.className = 'plate';
-        root.innerHTML = '<div class="pname"></div><div class="pbar"><div class="pfill"></div></div>';
+        root.innerHTML = '<div class="pname"></div><div class="pgun hidden"></div>'
+          + '<div class="pbar"><div class="pfill"></div></div>';
         this.el.plates.appendChild(root);
-        e = { root, name: root.firstChild, bar: root.lastChild, fill: root.lastChild.firstChild, txt: null };
+        e = {
+          root,
+          name: root.children[0],
+          gun: root.children[1],
+          bar: root.children[2],
+          fill: root.children[2].firstChild,
+          txt: null,
+          gunTxt: null,
+        };
         this.plateEls.set(p.id, e);
       }
       if (e.txt !== p.name) { e.txt = p.name; e.name.textContent = p.name; }
+      /* 何を持っているか。**ガンゲームで一番要る情報。**
+         倒すたびに武器が替わるのに、他人の姿はどの銃でもほぼ同じ形なので、
+         札に書かないと相手が今どの段にいるのかが分からない。
+         毎フレーム呼ばれる所なので、変わった時だけ書く */
+      const gun = p.gun || '';
+      if (e.gunTxt !== gun) {
+        e.gunTxt = gun;
+        e.gun.textContent = gun;
+        e.gun.classList.toggle('hidden', !gun);
+      }
 
       const d = Math.max(0, p.dist || 0);
       // 遠いほど小さく薄く。遠くの名前が近くの相手と同じ大きさで並ぶと、
