@@ -874,10 +874,17 @@ export class AudioEngine {
    * 滑りは打点が1つも無い連続音。速く鳴らすと機関銃のような足音になるだけで、
    * 「体が地面に接している」に絶対に聞こえない。
    *
-   * 組み方は3層。
+   * 組み方は4層。
    *   1. 体が路面へ落ちる低音（1回だけ。無いと何もない所から急に擦り始める）
-   *   2. 擦れ本体。帯域を下へ落としながら減っていく。減速がそのまま音になる
-   *   3. 砂利や小石が弾ける粒（素材のgritをそのまま使う）
+   *   2. 引きずる唸り（下で鳴っているのが分かる程度。主役ではない）
+   *   3. 擦れ本体。**ここが「シュー」。** 帯域を上から下へ落としながら減る
+   *   4. 砂利や小石が弾ける粒（素材のgritをそのまま使う）
+   *
+   * **高さの置き所を2回外している。** 詳しくは下の3の所に書いたが、
+   * 上げすぎると砂嵐、下げすぎると「ズズッ」で、どちらも一発では当たらなかった。
+   * 今の形は遊ぶ側に「もっとシュー！って感じに」と言われて寄せた版で、
+   * 数字の線は tools/check-sound.mjs の [7] が持っている。
+   * **触る時はそちらを先に読むこと。** 両方の外し方が数字で書いてある。
    *
    * 長さは player.js の SLIDE_TIME_S(0.78秒) に合わせてある。
    * 途中で滑りが終わる（跳んで抜ける等）ことはあるが、鳴っている音を
@@ -894,54 +901,63 @@ export class AudioEngine {
     const bus = ctx.createGain();
     bus.gain.value = 1;
 
-    // 1. 体が落ちる低音。着地(land)より深く、余韻を長めに取る
+    // 1. 体が落ちる低音。着地(land)より深く、余韻を長めに取る。
+    // 「シュー」に寄せる時、ここを大きいままにすると出だしが「ドッ」で始まって
+    // 息の抜ける音に聞こえない。体が接した合図として残る量まで下げてある
     const th = ctx.createOscillator();
     th.type = 'sine';
     th.frequency.setValueAtTime(s.thump * 0.9, t);
-    th.frequency.exponentialRampToValueAtTime(s.thump * 0.42, t + 0.16);
+    th.frequency.exponentialRampToValueAtTime(s.thump * 0.42, t + 0.14);
     const thg = ctx.createGain();
     th.connect(thg); thg.connect(bus);
-    this._env(thg, t, 0.52 * s.vol, 0.005, 0.15);
-    th.start(t); th.stop(t + 0.5);
+    this._env(thg, t, 0.60 * s.vol, 0.005, 0.12);
+    th.start(t); th.stop(t + 0.45);
 
-    // 2. 体が路面を引きずる唸り。**ここが「重さ」の正体。**
-    // 低い所だけを残したノイズを、滑っている間ずっと鳴らす。
-    // 最初これを入れずに擦れだけで組んだら、重心が5.2kHzまで上がって
-    // 「シャー」というただの雑音になった（足音は2.2kHz）。
-    // 体が地面に接している音は、擦れる高い成分より先にこの唸りが要る
+    // 2. 体が路面を引きずる唸り。**支え役であって主役ではない。**
+    // これを最初に外して組んだら重心が5.2kHzまで上がって砂嵐になったが、
+    // 逆に大きくしすぎると「ゴー」という地鳴りになって、遊ぶ側が言う
+    // 「シュー」から遠ざかる。**下で鳴っているのが分かる程度**に留める
     const low = this._noiseSource(rnd(0.55, 0.7));
     const lf = ctx.createBiquadFilter();
     lf.type = 'lowpass';
-    lf.frequency.setValueAtTime(s.thump * 2.6, t);
-    lf.frequency.exponentialRampToValueAtTime(s.thump * 1.3, t + dur);
+    lf.frequency.setValueAtTime(s.thump * 5.0, t);
+    lf.frequency.exponentialRampToValueAtTime(s.thump * 2.0, t + dur);
     lf.Q.value = 1.1;
     const lg = ctx.createGain();
     low.connect(lf); lf.connect(lg); lg.connect(bus);
     lg.gain.setValueAtTime(0.0001, t);
-    lg.gain.linearRampToValueAtTime(1.35 * s.vol, t + 0.05);
-    lg.gain.setTargetAtTime(0.0001, t + 0.05, dur * 0.30);
+    lg.gain.linearRampToValueAtTime(1.25 * s.vol, t + 0.05);
+    lg.gain.setTargetAtTime(0.0001, t + 0.05, dur * 0.28);
     low.start(t, Math.random() * 1.5);
     low.stop(t + dur + 0.3);
 
-    // 3. 擦れ本体。帯域が下がりながら細くなる＝速さが落ちていく音になる。
-    // **上に蓋(lowpass)を必ず被せる。** bandpassのQを下げると帯が広くなり、
-    // 蓋が無いと7kHz超が全体の27%を占めて、布ではなく砂嵐の音になる
-    const src = this._noiseSource(rnd(0.8, 1.0));
+    /* 3. 擦れ本体。**ここが「シュー」そのもの。**
+       帯域が上から下へ落ちていく＝速さが落ちていく音になる。
+
+       高さの置き所を2回外している。
+       ・4kHz付近を蓋なしで鳴らした最初の版 … 7kHz超が27%を占めて砂嵐になった
+       ・800Hzまで落とした次の版         … 重さは出たが「ズズッ」で、
+                                            遊ぶ側が欲しかった「シュー」ではなかった
+       今は3.8kHz→1.3kHzを掃きながら、6.5kHzに蓋をしてある。
+       **蓋は残す。** 外すと1回目に戻る（人が耳障りだと感じるのは7kHzより上）。
+       Qを0.45まで下げて帯を広く取るのは、狭いと音程の付いた笛になるため */
+    const src = this._noiseSource(rnd(0.9, 1.15));
     const f = ctx.createBiquadFilter();
     f.type = 'bandpass';
-    f.frequency.setValueAtTime(s.gritFreq * 0.34, t);
-    f.frequency.exponentialRampToValueAtTime(s.gritFreq * 0.11, t + dur);
-    f.Q.value = 0.7;
+    f.frequency.setValueAtTime(s.gritFreq * 1.05, t);
+    f.frequency.exponentialRampToValueAtTime(s.gritFreq * 0.28, t + dur);
+    f.Q.value = 0.45;
     const cap = ctx.createBiquadFilter();
     cap.type = 'lowpass';
-    cap.frequency.value = 1500;
+    cap.frequency.value = 5000;
     const g = ctx.createGain();
     src.connect(f); f.connect(cap); cap.connect(g); g.connect(bus);
-    // 立ち上がりだけ速く、そこから滑りの減速と同じ形で減らす。
-    // _envだと減り方が固定なので、ここは直に書く
+    /* 立ち上がりだけ速く、そこから滑りの減速と同じ形で減らす。
+       _envだと減り方が固定なので、ここは直に書く。
+       「シュー！」の勢いは立ち上がりの速さで決まるので、0.03秒で頂点まで出す */
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(0.55 * s.vol * s.grit + 0.16, t + 0.045);
-    g.gain.setTargetAtTime(0.0001, t + 0.045, dur * 0.30);
+    g.gain.linearRampToValueAtTime(0.85 * s.vol * s.grit + 0.24, t + 0.03);
+    g.gain.setTargetAtTime(0.0001, t + 0.03, dur * 0.32);
     src.start(t, Math.random() * 1.5);
     src.stop(t + dur + 0.3);
 
