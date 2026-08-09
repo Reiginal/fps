@@ -886,7 +886,8 @@ export class AudioEngine {
    * 数字の線は tools/check-sound.mjs の [7] が持っている。
    * **触る時はそちらを先に読むこと。** 両方の外し方が数字で書いてある。
    *
-   * 長さは player.js の SLIDE_TIME_S(0.78秒) に合わせてある。
+   * 長さは player.js の滑りが実際に終わる0.83秒に合わせてある
+   （上限のSLIDE_TIME_Sは0.90だが、普段はその手前で速さが落ちて終わる）。
    * 途中で滑りが終わる（跳んで抜ける等）ことはあるが、鳴っている音を
    * 途中で止める仕組みは持たせていない。0.2秒ぶんの尻尾が残るだけで、
    * そのために毎回ノードの参照を持ち回るほうが割に合わない
@@ -896,7 +897,7 @@ export class AudioEngine {
     const ctx = this.ctx;
     const t = ctx.currentTime;
     const s = SURFACES[surface] ?? SURFACES.dirt;
-    const dur = 0.78;
+    const dur = 0.83;
 
     /* 全体の大きさ。**層ごとの値ではなくここで絞る。**
        「うるさい」と言われた時に層ごとの値を触ると、せっかく合わせた帯のつり合い

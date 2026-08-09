@@ -1431,6 +1431,8 @@ class Game {
       onFloor: p.onFloor,
       sprinting: p.sprinting,
       crouching: p.crouching,
+      // 滑り込みの課題。滑っている間ずっと立つ
+      sliding: p.sliding,
       // S/A/Dの課題は「そのキーで動けた距離」で見る（押している印＋実速度）
       keyA: this.input.down('KeyA'),
       keyS: this.input.down('KeyS'),
