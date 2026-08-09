@@ -1112,6 +1112,7 @@ class Game {
     // ここでもう一度頼める。試合が始まってからでは断られる
     lobby.onPress = () => this.input.goFullscreen();
     lobby.onSeat = (seat) => this.net?.sendSeat(seat);
+    lobby.onBot = (seat) => this.net?.sendBot(seat);
     lobby.onMode = (id) => this.net?.sendMode(id);
     lobby.onReady = (on) => this.net?.sendReady(on);
     // 選んでいる兵士を3Dで見せる。ロビーにいる間だけ描く

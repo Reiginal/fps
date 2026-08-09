@@ -33,6 +33,8 @@ export class Lobby {
 
     // 統合側が差し替える。初期値を空関数にしておくと、繋ぎ忘れても画面が落ちない
     this.onSeat = () => {};
+    // 空席にCPUを座らせる／外す。1人でも対戦を確かめられるようにするための口
+    this.onBot = () => {};
     this.onLeave = () => {};
     this.onReady = () => {};
     this.onChar = () => {};
@@ -104,15 +106,29 @@ export class Lobby {
        そのかわり、どちら側なのかは席の上に出さないと分からない
        （席の番号だけ見ても、1番と2番が味方だとは読めない） */
     this.seatEls = [];
+    this.botEls = [];
     const box = this.el.seats;
     box.innerHTML = '';
     for (let seat = 0; seat < SEATS; seat++) {
+      // 席とCPUボタンを1行に並べる。ボタンの中にボタンは置けないので行を挟む
+      const row = document.createElement('div');
+      row.className = 'lbseatrow';
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'lbseat';
       b.onclick = () => { this.onPress(); this.onSeat(seat); };
-      box.appendChild(b);
+      row.appendChild(b);
+      /* その席のCPU。空席なら座らせ、CPUが座っていれば外す。
+         **1人でも対戦を確かめられるようにするための物**（2026-08-09）。
+         席ごとに置いてあるのは、2対2でどちら側に何体入れるかを選べるようにするため */
+      const bot = document.createElement('button');
+      bot.type = 'button';
+      bot.className = 'lbbot';
+      bot.onclick = () => { this.onPress(); this.onBot(seat); };
+      row.appendChild(bot);
+      box.appendChild(row);
       this.seatEls.push(b);
+      this.botEls.push(bot);
     }
   }
 
@@ -143,7 +159,8 @@ export class Lobby {
     for (const r of rows) {
       const id = r[LOBBY_ROW.ID], name = r[LOBBY_ROW.NAME];
       const seat = r[LOBBY_ROW.SEAT], ready = r[LOBBY_ROW.READY];
-      if (seat >= 0) bySeat[seat] = { id, name, ready: !!ready };
+      const bot = !!r[LOBBY_ROW.BOT];
+      if (seat >= 0) bySeat[seat] = { id, name, ready: !!ready, bot };
       else standing.push({ id, name });
     }
 
@@ -155,6 +172,13 @@ export class Lobby {
       b.classList.toggle('ready', !!who && who.ready);
       b.disabled = !!who && who.id !== this.myId;
       b.innerHTML = who ? esc(who.name) : `<span>${seat + 1}番 空席</span>`;
+      /* CPUのボタン。空席なら「CPU」、CPUが座っていれば「外す」。
+         人が座っている席では押せない（サーバーも断るが、
+         押して無反応だと壊れているように見えるので、こちらでも止める） */
+      const bot = this.botEls[seat];
+      bot.textContent = who?.bot ? '外す' : 'CPU';
+      bot.classList.toggle('on', !!who?.bot);
+      bot.disabled = !!who && !who.bot;
       // 2対2の時だけ、どちら側かを席に色で出す
       const team = TEAM_OF_SEAT(seat);
       b.classList.toggle('sideA', cur.id === 'team' && team === 0);

@@ -706,6 +706,19 @@
   .lbteam { border: 1px solid rgba(255,255,255,.14); padding: 12px 10px; margin-bottom: 10px; }
   .lbhead { font-size: 12px; letter-spacing: .24em; color: var(--dim); margin-bottom: 10px; }
   .lbseats { display: flex; flex-direction: column; gap: 7px; }
+  /* 席1行。席そのものと、その席のCPUボタンを横に並べる。
+     入れ子のボタンはHTMLとして書けないので、行を1枚挟んでいる */
+  .lbseatrow { display: flex; gap: 6px; align-items: stretch; }
+  /* 空席にCPUを座らせる／外すボタン。**1人でも対戦を確かめられるようにするための物。**
+     細く小さくしてあるのは、これが主役ではないから（人が来るならCPUは要らない） */
+  .lbbot {
+    flex: 0 0 auto; padding: 0 10px; font-family: var(--mono); font-size: 11px;
+    letter-spacing: .1em; color: var(--dim); background: transparent;
+    border: 1px dashed rgba(255,255,255,.18); cursor: pointer; white-space: nowrap;
+  }
+  .lbbot:hover { color: var(--hud); border-color: rgba(255,255,255,.4); }
+  .lbbot.on { border-style: solid; border-color: var(--warn); color: var(--warn); }
+  .lbbot:disabled { opacity: .25; cursor: default; pointer-events: none; }
   /* 席1つ。空席は押せる、埋まっている席は押せない。
      押せるかどうかを色だけで表すと、埋まっている席を押して無反応に見える。
      カーソルの形まで変えて、押せない事を触る前に分からせる */
