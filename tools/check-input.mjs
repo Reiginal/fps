@@ -52,6 +52,16 @@ document.exitFullscreen = () => {
   return Promise.resolve();
 };
 
+/* キーボードの受け口も拾う。**windowに付くので、Inputを読み込む前に差し替える。**
+   こうしないとキーを押した時に何が起きるかを一度も確かめられない
+   （実際、Commandを離すと走りが止まる不具合をここで踏めなかった） */
+const winKeys = new Map();
+const origWinAdd = globalThis.addEventListener;
+globalThis.addEventListener = (type, fn) => {
+  winKeys.set(type, fn);
+  origWinAdd?.(type, fn);
+};
+
 const { Input } = await import('../src/core/input.js');
 
 // addEventListenerを受け取るだけの受け口。掴む・離すを手で起こせるようにする
@@ -177,6 +187,49 @@ console.log('\n[6] 掴むのを断られても、拾い手のいない失敗に�
   ok(!unhandled, `拾い手のいない失敗になっていない（${unhandled?.message ?? 'なし'}）`);
   process.off('unhandledRejection', onUnhandled);
   log.lockRejects = false;
+}
+
+console.log('\n[7] Commandを離しても走りとしゃがみが落ちない');
+/* **Macでだけ起きる形。** macOSはCommandを押している間、他のキーのkeyupを送らない。
+   だからCommandを離した時にこちらで落とすのだが、前は押している物を
+   丸ごと落としていて、**走りながらCommandでしゃがむと離した瞬間に棒立ちになった**
+   （実測で速度が0まで落ちる。しゃがみからCommandを外して回避しようとしたが、
+   今度はMacの人がしゃがめなくなった＝滑れなくなった）。
+
+   正しい形は「keyupが来ない文字キーだけ落として、修飾キーは残す」。
+   落とした文字キーのうち本当に押し続けている物は、キーリピートが戻す */
+{
+  // 「文字を打っている最中か」を見るのに使われる。dom-stubには無いので生やす
+  globalThis.HTMLElement = globalThis.HTMLElement ?? class {};
+  const down = (code, repeat = false) => winKeys.get('keydown')?.({
+    code, repeat, target: null, preventDefault: () => {},
+  });
+  const up = (code) => winKeys.get('keyup')?.({ code, preventDefault: () => {} });
+  ok(!!winKeys.get('keydown') && !!winKeys.get('keyup'), 'キーの受け口を掴めた');
+
+  input.keys.clear();
+  // Shift+Wで走りながら、Commandでしゃがむ
+  down('KeyW'); down('ShiftLeft'); down('MetaLeft');
+  ok(input.down('KeyW') && input.down('ShiftLeft') && input.down('MetaLeft'),
+    '3つとも押している');
+  // Commandだけ離す
+  up('MetaLeft');
+  ok(!input.down('MetaLeft'), 'しゃがみは離れた');
+  ok(input.down('ShiftLeft'), '**走り(Shift)は残る**（ここが落ちると棒立ちになる）');
+  /* 文字キーは落ちる。macOSがkeyupを送らないので、
+     ここで落とさないと手を離したWが押しっぱなしで残る */
+  ok(!input.down('KeyW'), '文字キー(W)はいったん落ちる');
+  // 本当に押し続けていれば、キーリピートが入れ直す
+  down('KeyW', true);
+  ok(input.down('KeyW'), 'キーリピートでWが戻る');
+  // ただし「押した瞬間」の印はリピートで立てない（跳躍が連射になる）
+  input.endFrame();
+  down('Space', true);
+  ok(!input.pressed('Space'), 'リピートでは押した瞬間の印を立てない');
+  down('Space');
+  ok(input.pressed('Space'), '本当に押し下げた時だけ立つ');
+  input.keys.clear();
+  input.endFrame();
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);

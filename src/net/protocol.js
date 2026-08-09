@@ -117,13 +117,14 @@ export const KEY_CODES = [
   ['KeyW', K.FWD], ['KeyS', K.BACK], ['KeyA', K.LEFT], ['KeyD', K.RIGHT],
   ['Space', K.JUMP], ['ShiftLeft', K.SPRINT],
   ['KeyR', K.RELOAD],
-  /* しゃがみは2通り受ける。同じビットを何度立てても結果は変わらないので並べてよい。
+  /* しゃがみは4通り受ける。同じビットを何度立てても結果は変わらないので並べてよい。
      Cが入っていなかったので、1人用ではCでしゃがめるのに対戦ではしゃがめなかった。
+     MetaはMacのCommand。左手の小指がCtrlより自然に届く。
 
-     **Command(Meta)は外した。** Macの小指が届くという理由で入れていたが、
-     Commandでしゃがむと離した瞬間に全部のキーが落ちて棒立ちになる
-     （理由は player.js のしゃがみの節と src/core/input.js のkeyup） */
+     **一度Commandを外して戻している。** 外した時は「Commandを離すと棒立ちになる」
+     が理由だったが、原因はinput.jsのkeyupが修飾キーまで落としていたほうだった */
   ['ControlLeft', K.CROUCH], ['KeyC', K.CROUCH],
+  ['MetaLeft', K.CROUCH], ['MetaRight', K.CROUCH],
 ];
 
 /* ---------------------------------------------------------- 遊び方 */

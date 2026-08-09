@@ -581,15 +581,15 @@ export class Player {
     }
 
     /* ---------------------------------------------------- しゃがみ */
-    /* しゃがみはCtrlとC。対戦側の割り当て(protocol.jsのKEY_CODES)と揃えてある。
+    /* しゃがみはCtrl・C・Command。対戦側の割り当て(protocol.jsのKEY_CODES)と揃えてある。
+       MetaはMacのCommandで、左手の小指がCtrlより自然に届く。
 
-       **Command(Meta)は外してある。** 前は「Macの小指が自然に届く」ので入れていたが、
-       Commandでしゃがむと**離した瞬間に完全に止まる**（実測v=0）。
-       input.jsがCommandのkeyupで押しているキーを全部落としているためで、
-       あれはMacがCommand押下中に他キーのkeyupを送らない事への対策として要る。
-       つまりCommandをゲームの操作に使うこと自体が噛み合っていない。
-       走りながらしゃがんだ瞬間に棒立ちになるより、キーが1つ減るほうが軽い */
-    const crouchKey = this.alive && (input.down('ControlLeft') || input.down('KeyC'));
+       **一度Commandを外したが、戻した。** 外した理由は「Commandを離すと棒立ちになる」で、
+       それ自体は本当に起きていた（実測v=0）。ただし原因はCommandの側ではなく、
+       input.jsがCommandのkeyupで**修飾キーまで含めて全部落としていた**ことだった。
+       そちらを直したので、ここは元に戻してよい（詳しくはsrc/core/input.jsのkeyup） */
+    const crouchKey = this.alive && (input.down('ControlLeft') || input.down('KeyC')
+      || input.down('MetaLeft') || input.down('MetaRight'));
     this._slideCd = Math.max(0, this._slideCd - dt);
     /* **滑り出しに使った押し下げを、滑り終わった後まで持ち越さない。**
 
