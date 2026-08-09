@@ -275,13 +275,39 @@ console.log('\n[7.6] 滑りに使ったしゃがみは、離すまで数え直�
   step(p, 0.4, RUN_CROUCH);       // 押し直す
   ok(p.crouching === true, '離して押し直せば、今まで通りしゃがめる');
 }
+/* **息はほとんど取らない。** 0.34（走り1秒ぶん）にしていた時は、
+   滑るために先に走る必要があるぶんと合わせて、走りの3秒のうち2秒を払う形になっていた。
+   実測で「1.5秒走る→滑る→また走る」だと滑り終わりの1秒後に息が尽きて
+   7.4m/sから4.7m/sへ落ち、そこから3秒走れない。2.5秒走ってからだと滑れもしない。
+   遊ぶ側からは**「滑ったあと止まる」**にしか見えなかった。
+   連打の歯止めは息ではなく待ち時間が持つ（[9]） */
 {
   const p = mk();
   runUp(p, 0.9);
   const before = p.stamina;
   step(p, DT, RUN_CROUCH);
-  ok(p.stamina < before - 0.2,
-    `1回で息が減る (${before.toFixed(2)} → ${p.stamina.toFixed(2)})`);
+  const used = before - p.stamina;
+  ok(used > 0.02 && used < 0.2,
+    `1回で少しだけ減る (${before.toFixed(2)} → ${p.stamina.toFixed(2)} / ${used.toFixed(2)}ぶん)`);
+}
+{
+  // **ここが本命。** 走って詰めてから滑り込むのが一番したい形なので、
+  // 走りの息を半分以上使った後でも滑れないといけない
+  const p = mk();
+  step(p, 2.5, RUN);
+  ok(p.stamina < 0.35, `息が残り少ない (${p.stamina.toFixed(2)})`);
+  step(p, DT, RUN_CROUCH);
+  ok(p.sliding === true, '2.5秒走った後でも滑れる');
+}
+{
+  // 滑った後も走り続けられること。ここが切れると「滑ったら止まる」になる
+  const p = mk();
+  runUp(p, 1.5);
+  step(p, DT, RUN_CROUCH);
+  while (p.sliding) { p.update(DT, RUN_CROUCH, false); p.yaw = LANE_YAW; }
+  ok(p.stamina > 0.4, `滑り終わっても息が残っている (${p.stamina.toFixed(2)})`);
+  step(p, 1.4, RUN);
+  ok(p.horizontalSpeed > 7.0, `そのまま1.4秒走り続けられる (${p.horizontalSpeed.toFixed(2)}m/s)`);
 }
 {
   // 息が足りなければ滑れない。走り切って空にしてから試す
@@ -314,7 +340,10 @@ console.log('\n[9] 押し直しても滑り続けられない');
     p.yaw = LANE_YAW;
     t += DT;
   }
-  // 待ち1.1秒＋息0.34ぶんで、6秒なら多くても3回。連打が効くなら10回以上出る
+  /* 待ち1.1秒に加えて、滑り終わりの4.0m/sから滑れる6.3m/sまで走り直すのに
+     0.5秒ほどかかる。合わせて1回2秒近く空くので、6秒なら多くても3回。
+     連打がそのまま効くなら10回以上出る。
+     **息を0.34から0.10へ下げた後もここが効いている**（歯止めは待ち時間の側） */
   ok(slides <= 3, `6秒間の連打で滑れたのは ${slides}回（3回まで）`);
 }
 

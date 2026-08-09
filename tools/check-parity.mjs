@@ -166,8 +166,16 @@ console.log('\n[3] しゃがみが両側で同じに効く');
 // server/sim.jsのCODE_BITは ControlLeft の1つしか戻さない。
 // player.jsは4つを or で見ているので今は通るが、
 // **player.jsから ControlLeft を外した瞬間、サーバーだけしゃがまなくなる**
-for (const key of ['ControlLeft', 'KeyC', 'MetaLeft', 'MetaRight']) {
+/* **Commandは入っていない。** 入れていた時期があるが、Commandを離すと
+   input.jsが押しているキーを全部落とすので、走りながらしゃがんだ瞬間に棒立ちになった。
+   ここに足す時は、まずそちらを読むこと */
+for (const key of ['ControlLeft', 'KeyC']) {
   same(`${key} でしゃがむ`, [[[key], 40], [[key, 'KeyW'], 60]]);
+}
+// 外したキーで本当にしゃがまなくなっているか。外し忘れが片側に残ると、
+// 手元だけしゃがんでサーバーは立ったまま＝隠れているのに頭を撃たれる
+for (const key of ['MetaLeft', 'MetaRight']) {
+  same(`${key} ではしゃがまない`, [[[key], 40], [[key, 'KeyW'], 60]]);
 }
 same('しゃがんでから立つ', [[['ControlLeft'], 40], [[], 60]]);
 
