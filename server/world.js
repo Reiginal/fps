@@ -63,6 +63,8 @@ export function buildWorld() {
     // 敵用のenemySpawnsは場内全域に散っていて1つも範囲内に無いので流用できない
     // （流用すると湧いた瞬間に全員が範囲外で、出てきた端から削られる）
     arenaSpawns: level.arenaSpawns,
+    // 2対2の湧き地点。味方2人が並んで出る4箇所（席番号でそのまま引く）
+    teamSpawns: level.teamSpawns,
     enemySpawns: level.enemySpawns,
     stats,
   };

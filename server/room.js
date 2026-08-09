@@ -1259,9 +1259,14 @@ export class Room {
   // 近くに湧いた2人だけが真っ先に潰し合う形にならないようにするため。
   // まだ席に着いていない人は、ロビーで立っているだけなので0番へ置く
   _spawnFor(slot) {
-    const spawns = this.world.arenaSpawns;
+    /* 2対2は別の表を使う。**味方2人が並んで出る。**
+       散らす表(arenaSpawns)をそのまま使うと味方が35m離れた所から出てきて、
+       組んで戦う遊び方なのに合流するまでが毎ラウンドの最初の仕事になる。
+       席番号でそのまま引く（level.jsのteamSpawnsが席の並びで持っている） */
+    const team = this.rules?.teams && this.world.teamSpawns;
+    const spawns = team ? this.world.teamSpawns : this.world.arenaSpawns;
     if (slot.seat === null) return spawns[0];
-    const idx = SEAT_SPAWN[slot.seat % SEATS];
+    const idx = team ? slot.seat % SEATS : SEAT_SPAWN[slot.seat % SEATS];
     return spawns[idx % spawns.length];
   }
 

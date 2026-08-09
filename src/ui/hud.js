@@ -141,14 +141,25 @@ export class HUD {
       ctx.stroke();
     }
 
-    // 撃った人の点。時間で薄くなる
+    /* 撃った人の点。時間で薄くなる。
+       味方(mate)は撃っていなくても出て、薄れず、色が違う。
+       2対2で「味方が今どこにいるか」を知る手段がここしか無い
+       （名札は見えている時だけなので、別の部屋にいる味方は分からない） */
     if (blips) {
       for (const b of blips) {
         if (b.t <= 0) continue;
         ctx.beginPath();
-        ctx.arc(px(b.x), py(b.z), Math.max(2, w / 46), 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255, 96, 64, ${b.t.toFixed(3)})`;
+        ctx.arc(px(b.x), py(b.z), Math.max(2, w / (b.mate ? 42 : 46)), 0, Math.PI * 2);
+        ctx.fillStyle = b.mate
+          ? 'rgba(80, 230, 160, 0.95)'
+          : `rgba(255, 96, 64, ${b.t.toFixed(3)})`;
         ctx.fill();
+        // 味方だけ縁を付ける。色だけだと、地図の明るい所で見失う
+        if (b.mate) {
+          ctx.strokeStyle = 'rgba(5, 7, 10, 0.85)';
+          ctx.lineWidth = Math.max(1, w / 150);
+          ctx.stroke();
+        }
       }
     }
 

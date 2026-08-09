@@ -221,7 +221,8 @@ console.log('\n[11] 手元の受け取り方');
 
   const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
   ok(/_isMate\(/.test(main), '味方かどうかを見る所がある');
-  ok(/mate: this\._isMate/.test(main), '名札へ味方かどうかを渡している');
+  ok(/const mate = this\._isMate\(/.test(main), '名札を作る所で味方かどうかを見ている');
+  ok(/\n\s+mate,\n/.test(main), '名札へ味方かどうかを渡している');
   ok(/net\.mode === 'team'/.test(main), 'チーム戦の時だけ味方として扱う');
 
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
@@ -230,6 +231,80 @@ console.log('\n[11] 手元の受け取り方');
   // 2人で挟む・別々に回る、という組み立てがそもそも要らなくなる
   ok(!/if \(!p\.mate\) continue;/.test(readFileSync(new URL('../src/ui/hud.js', import.meta.url), 'utf8')),
     '味方だけ別扱いで常に出したりはしていない');
+}
+
+console.log('\n[11.5] 味方が味方だと分かるか');
+/* 実際に2対2を遊んで最初に出た感想が**「どれが味方か分からない」**だった。
+   見た目は敵と同じ兵士で、名札は「相手が撃った直後」しか出ない決まりなので、
+   撃たない相手を撃たない理由が画面のどこにも無かった。
+
+   直し方は2つに分けてある。**どちらも「壁越しに全部見える」にはしない。**
+     ・名札 … 味方は「撃った直後」の条件だけ外す。壁抜けの条件は外さない。
+               見えた瞬間に色付きの名前が出るので、撃つ前に必ず分かる
+     ・地図 … 味方は撃っていなくても点が出て、薄れず、色が違う。
+               168pxの地図なので「あっちに居る」までしか分からない */
+{
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  const plates = main.split('_updatePlates(states) {')[1]?.split('\n  }')[0] || '';
+  ok(plates.length > 0, '名札を作る所が見つかった');
+  // 味方は「撃った直後」の条件を通らない
+  ok(/if \(!mate && !this\._blips\.has\(st\.id\)\) continue;/.test(plates),
+    '味方は撃っていなくても名札が出る');
+  /* **壁抜けの条件は味方にも掛かる。** ここを味方だけ飛ばすと、
+     相方の居場所が常に壁越しに分かって、組み立てが要らなくなる。
+     レイを飛ばす所がmateの分岐の中に入っていないことを見る */
+  const wallCheck = plates.split('rayIntersect')[0] || '';
+  ok(!/if \(!mate\) \{/.test(wallCheck), '壁の向こうの味方までは出さない');
+  ok(/hit\.distance < dist - 0\.45\) continue;/.test(plates), '遮蔽の判定が残っている');
+  // 地図の点。味方は薄れない印(mate)を立てて渡す
+  ok(/_blipList\.push\(\{[^}]*mate: true/.test(main), '地図へ味方の点を足している');
+  const hud = readFileSync(new URL('../src/ui/hud.js', import.meta.url), 'utf8');
+  ok(/b\.mate/.test(hud), '地図が味方の点を別の色で塗る');
+}
+
+console.log('\n[11.6] 2対2は味方同士で固まって始まる');
+/* 湧く位置を散らす表(arenaSpawns)は「全員が互いに敵」向けに4隅へ置いてある。
+   そのまま2対2に使うと**味方が35m離れた所からそれぞれ出てくる**ので、
+   組んで戦う遊び方なのに合流するまでが毎ラウンドの最初の仕事になっていた */
+{
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+  const sp = world.teamSpawns;
+  ok(Array.isArray(sp) && sp.length === 4, `2対2用の湧き位置が4つある（${sp?.length}）`);
+  const mateGap = [dist(sp[0], sp[1]), dist(sp[2], sp[3])];
+  ok(mateGap.every((d) => d > 3 && d < 10),
+    `味方同士は近い（${mateGap.map((d) => d.toFixed(1)).join('m / ')}m）`);
+  // 敵とは今までの1対1と同じくらい離す
+  const foeGap = dist(sp[0], sp[2]);
+  ok(foeGap > 25, `相手チームとは遠い（${foeGap.toFixed(1)}m）`);
+  /* **手榴弾1発で2人まとめて飛ばない距離。** 爆風は9.5mまで届くので、
+     味方を2mまで寄せると開始直後に片方が投げた1発で味方ごと消える */
+  ok(mateGap.every((d) => d > NADE.BLAST_R * 0.5),
+    `手榴弾1発で味方ごと飛ばない（爆風${NADE.BLAST_R}mに対して${mateGap[0].toFixed(1)}m）`);
+
+  // 本物のRoomで、席から引いた位置がそのチームの側になっているか
+  const ps = startWith(['あき', 'ばん', 'しい', 'えむ'], [0, 1, 2, 3], 'team');
+  const at = ps.map((p) => p.slot.sim.player.collider.start);
+  ok(dist(at[0], at[1]) < 10,
+    `左のチームは並んで湧く（${dist(at[0], at[1]).toFixed(1)}m）`);
+  ok(dist(at[2], at[3]) < 10,
+    `右のチームも並んで湧く（${dist(at[2], at[3]).toFixed(1)}m）`);
+  ok(dist(at[0], at[2]) > 25,
+    `相手とは離れて湧く（${dist(at[0], at[2]).toFixed(1)}m）`);
+  // 味方同士が同じ場所に重ならないこと。重なると押し出し合って開幕に事故る
+  ok(dist(at[0], at[1]) > 1.5, `味方同士が重なっていない（${dist(at[0], at[1]).toFixed(1)}m）`);
+}
+
+console.log('\n[11.7] デスマッチの湧き位置は今まで通り散っている');
+// チーム用の表を足したせいで、全員が互いに敵の遊び方まで固まったら本末転倒
+{
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+  const ps = startWith(['あき', 'ばん', 'しい', 'えむ'], [0, 1, 2, 3], 'dm');
+  const at = ps.map((p) => p.slot.sim.player.collider.start);
+  let worst = Infinity;
+  for (let i = 0; i < at.length; i++) {
+    for (let j = i + 1; j < at.length; j++) worst = Math.min(worst, dist(at[i], at[j]));
+  }
+  ok(worst > 20, `一番近い2人でも離れている（${worst.toFixed(1)}m）`);
 }
 
 console.log('\n[12] 2対2でも武器と手榴弾は今まで通り');

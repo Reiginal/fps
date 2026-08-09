@@ -3960,6 +3960,23 @@ export function buildLevel(mats, { lamps = true } = {}) {
     new THREE.Vector3(12, 0.1, 12), new THREE.Vector3(10.5, 0.1, -10.5),
   ];
 
+  /* 2対2の湧く位置。**味方2人が並んで出る。**
+     並び順は席番号そのまま（0,1が左のチーム／2,3が右のチーム。
+     どちらの席がどちらのチームかは protocol.js の TEAM_OF_SEAT）。
+
+     上のarenaSpawnsは「全員が互いに敵」向けに4隅へ散らしてあるので、
+     そのまま2対2に使うと**味方が35m離れた所からそれぞれ出てくる。**
+     組んで戦う遊び方なのに、合流するまでが毎ラウンドの最初の仕事になっていた。
+
+     味方同士は6m。声を掛けなくても互いが見える距離で、かつ手榴弾1発で
+     2人まとめて飛ばない距離（爆風の半径は9.5mだが、中心から6m離れれば
+     持っていかれるのは片方だけになる）。
+     チーム同士は35mで、これは今までの1対1の開始距離と同じ */
+  const teamSpawns = [
+    new THREE.Vector3(-17.5, 0.1, -3), new THREE.Vector3(-17.5, 0.1, 3),
+    new THREE.Vector3(17.5, 0.1, -3), new THREE.Vector3(17.5, 0.1, 3),
+  ];
+
   return {
     root,
     octree,
@@ -3969,6 +3986,7 @@ export function buildLevel(mats, { lamps = true } = {}) {
     solids,
     enemySpawns,
     arenaSpawns,
+    teamSpawns,
     coverPoints,
     playerSpawn: new THREE.Vector3(0, 1.2, 26),
     bounds: 40,
