@@ -19,8 +19,9 @@ const ok = (c, msg) => { console.log(`  ${c ? '○' : '× 失敗:'} ${msg}`); if
 // zの既定は湧き地点（そこに立っているだけでは移動系の課題が進まないこと）
 const snap = (over = {}) => ({
   dt: 1 / 60, yaw: 0, pitch: 0, z: 18, speed: 0, onFloor: true,
-  sprinting: false, crouching: false, shots: 0, kills: 0,
-  adsFactor: 0, reloading: 0, weaponIndex: 0, threw: false, healed: false,
+  sprinting: false, crouching: false, keyA: false, keyS: false, keyD: false,
+  shots: 0, kills: 0,
+  adsFactor: 0, reloading: 0, weaponIndex: 0, nadeKilled: false, healed: false,
   ...over,
 });
 
@@ -33,7 +34,7 @@ const run = (m, n, over) => {
 
 console.log('\n[1] ステップ機械: 全遷移');
 {
-  const m = new TutorialMachine({ rifleIndex: 0, pistolIndex: 2 });
+  const m = new TutorialMachine({ rifleIndex: 0, pistolIndex: 2, knifeIndex: 4 });
 
   // look: 動かさなければ進まない。累積2.5radで進む
   ok(m.step.id === 'look', '最初はlook');
@@ -51,13 +52,26 @@ console.log('\n[1] ステップ機械: 全遷移');
      「時間で解決してる感じ」と言われた。押しているだけでは進まないことを
      それぞれの課題で確かめる */
 
-  // move: 湧き地点に立っているだけでは進まない。奥まで歩いて進む
+  // move(W): 湧き地点に立っているだけでは進まない。奥まで歩いて進む
   run(m, 120, {});
   ok(m.step.id === 'move', '湧き地点に立っているだけでは進まない');
   run(m, 5, { z: 10.5 });
   ok(m.step.id === 'move', 'あと0.5m手前ではまだ');
   run(m, 2, { z: 10 });
-  ok(m.step.id === 'sprint', '8m歩いて進む');
+  ok(m.step.id === 'moveBack', '8m歩いて進む（次はSの練習）');
+
+  /* S/A/Dは「そのキーで動けた距離」。キーを押しているだけ・
+     別のキーで動いているだけでは数えない */
+  run(m, 300, { keyS: true, speed: 0 });
+  ok(m.step.id === 'moveBack', 'Sを押して壁に詰まっていても進まない');
+  run(m, 30, { keyS: true, speed: 4.7 });   // 2.35m
+  ok(m.step.id === 'moveLeft', 'Sで2m動いて進む');
+  run(m, 60, { keyS: true, speed: 4.7 });
+  ok(m.step.id === 'moveLeft', 'Sで動いてもAの課題は進まない');
+  run(m, 30, { keyA: true, speed: 4.7 });
+  ok(m.step.id === 'moveRight', 'Aで2m動いて進む');
+  run(m, 30, { keyD: true, speed: 4.7 });
+  ok(m.step.id === 'sprint', 'Dで2m動いて進む');
 
   // sprint: 距離で見る。キーを押しているだけ（進んでいない）では数えない
   run(m, 300, { z: 10, sprinting: true, speed: 0 });
@@ -108,7 +122,15 @@ console.log('\n[1] ステップ機械: 全遷移');
   run(m, 5, { weaponIndex: 2, kills: 7 });
   ok(m.step.id === 'switch', 'ピストルに替えただけではまだ');
   run(m, 2, { weaponIndex: 0, kills: 7 });
-  ok(m.step.id === 'target', 'ライフルへ戻して進む');
+  ok(m.step.id === 'knife', 'ライフルへ戻して進む（次はナイフ）');
+
+  // knife: 持って立っているだけ・別の武器で動くだけでは進まない
+  run(m, 300, { weaponIndex: 4, speed: 0, kills: 7 });
+  ok(m.step.id === 'knife', 'ナイフを持って立っているだけでは進まない');
+  run(m, 300, { weaponIndex: 0, speed: 6.3, kills: 7 });
+  ok(m.step.id === 'knife', 'ライフルのまま動いても進まない');
+  run(m, 80, { weaponIndex: 4, speed: 6.3, kills: 7 });   // 8.4m
+  ok(m.step.id === 'target', 'ナイフで8m動いて進む');
 
   // target: 入場時基準の増分3体
   run(m, 5, { kills: 7 });
@@ -120,15 +142,15 @@ console.log('\n[1] ステップ機械: 全遷移');
 
   // nade / heal: 1フレームのフラグ
   run(m, 30, {});
-  ok(m.step.id === 'nade', 'フラグ無しでは進まない');
-  m.update(snap({ threw: true }));
-  ok(m.step.id === 'heal', '投げた瞬間に進む');
+  ok(m.step.id === 'nade', '何もしなければ進まない');
+  m.update(snap({ nadeKilled: true }));
+  ok(m.step.id === 'heal', '爆風で的を倒した瞬間に進む');
   m.update(snap({ healed: true }));
   ok(m.done, '巻き終えて修了');
   ok(m.step === null, '修了後のstepはnull');
 
   // done後に呼び続けても落ちない・進まない
-  const after = run(m, 60, { threw: true, healed: true });
+  const after = run(m, 60, { nadeKilled: true, healed: true });
   ok(after === 0 && m.done, '修了後は何も起きない');
 
   // reset
@@ -165,14 +187,32 @@ console.log('\n[2] 文言とキーの整合');
     'ADSの文言が押しっぱなし前提になっていない');
   ok(/もう一度/.test(byId.ads.main) && /切り替え/.test(text(byId.ads)),
     'ADSの文言が「もう一度で戻す」切り替え式だと言っている');
-  // 手榴弾は「押して構え、離して投げる」。押した瞬間に飛ぶと書いたら嘘
-  ok(/離して/.test(byId.nade.main), '手榴弾の文言が「離して投げる」');
+  // 手榴弾は「押して構え、離して投げる」。押した瞬間に飛ぶと書いたら嘘。
+  // クリアの条件は「倒す」なので、それも文言に出ていること（投げただけで
+  // 終わらないのに「投げる」としか書いていないと、投げた後に置き去りになる）
+  ok(/離して/.test(byId.nade.main) && /倒/.test(byId.nade.main),
+    '手榴弾の文言が「離して投げて倒す」');
+
+  // 移動の4課題がW/A/S/Dをそれぞれ名指ししている（まとめて教えない）
+  ok(/W で/.test(byId.move.main) && /S で/.test(byId.moveBack.main)
+    && /A で/.test(byId.moveLeft.main) && /D で/.test(byId.moveRight.main),
+    '移動の課題がW・S・A・Dの4つに分かれている');
+
+  // ナイフの「足が速い」が実装と合っている（moveMul>1で本当に速い）
+  const weaponsSrc = readFileSync(new URL('../src/player/weapons.js', import.meta.url), 'utf8');
+  const knifeMul = weaponsSrc.match(/id: 'knife'[\s\S]{0,1500}?moveMul: ([\d.]+)/);
+  ok(/速/.test(text(byId.knife)) && knifeMul && parseFloat(knifeMul[1]) > 1,
+    `ナイフの課題が速さを教えていて、実装も速い（moveMul=${knifeMul?.[1]}）`);
+
+  // 包帯の課題が体力ゲージの場所を教えている（回復を目で確かめられるように）
+  ok(/左下のゲージが体力/.test(text(byId.heal)),
+    '包帯の課題が「左下のゲージが体力」を言っている');
 
   /* switchステップの数字はLOADOUT_IDSの並びと一致すること。
      並びが変わると「2でピストル」が嘘になる */
   const { LOADOUT_IDS } = await import('../src/net/protocol.js');
-  ok(LOADOUT_IDS[0] === 'rifle' && LOADOUT_IDS[1] === 'pistol',
-    `1=ライフル・2=ピストルの並び（今: ${LOADOUT_IDS.join(',')}）`);
+  ok(LOADOUT_IDS[0] === 'rifle' && LOADOUT_IDS[1] === 'pistol' && LOADOUT_IDS[2] === 'knife',
+    `1=ライフル・2=ピストル・3=ナイフの並び（今: ${LOADOUT_IDS.join(',')}）`);
 }
 
 console.log('\n[3] 小ステージ: 実際に組んで寸法を測る');
@@ -394,6 +434,15 @@ console.log('\n[6] 本編との縁切り（戦績・波・死・当たり先）'
   ok(/tutorialDone\(/.test(adv), 'クリアの瞬間に✓の合図を出す');
   ok(/lobbyJoin\(\)/.test(adv), 'クリアの瞬間に音を鳴らす');
   ok(/_tutDoneHold/.test(adv), '文言を少し止めてから次の課題へ変える');
+  // 最後の課題（包帯）の後は、体力ゲージの案内を見せる間を置いてから修了画面
+  ok(/if \(!s\) \{\s*this\._tutFinishT = TUT_FINISH_HOLD_S;/.test(src),
+    '修了の前に間を置く（回復したのを見届けてから修了画面）');
+  ok(/左下のゲージが体力/.test(src), '修了前の間に体力ゲージの場所を出す');
+  // 手榴弾の課題は爆風の的キルで進む。的には_onKillを呼ばない（二重表示と得点を防ぐ）
+  ok(/if \(this\._shootables\) \{\s*if \(this\.tutorial\) this\._tutFlags\.nadeKill = true;/.test(src),
+    '爆風の的キルで課題の印を立てる（_onKillは的に呼ばない）');
+  ok(/step\?\.id === 'nade' && this\.weapons\.nades < NADE\.PER_ROUND/.test(src),
+    '手榴弾の課題の間は投げ放題（外し続けても詰まない）');
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);

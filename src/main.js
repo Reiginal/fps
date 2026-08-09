@@ -377,6 +377,11 @@ const BLIP_FADE_S = 2.2;
 // HUD側(tutorialDone)の消えるタイミングにも同じ値を渡す（別々に持つと必ずずれる）
 const TUT_DONE_HOLD_S = 0.85;
 
+// 最後の課題（包帯）を終えてから修了画面を出すまでの間。
+// この間に「左下のゲージが体力」を見せる。0だと回復した実感が無いまま
+// 画面が切り替わる（「回復したことがわからないじゃん」2026-08-09）
+const TUT_FINISH_HOLD_S = 3.5;
+
 /* 投げる時に前方へ足す上向き成分。真っ直ぐ投げると足元へ落ちて自爆する。
    0.34（約19度）から0.50（約27度）へ。**下手投げで放る角度に寄せた。**
    重力を落としただけだと弧は高くならず飛距離だけ伸びるので、
@@ -1284,14 +1289,16 @@ class Game {
     // 敵の波は永久に起こさない。_restart()の中のdirector.reset()が
     // betweenWavesを2.0へ戻すので、必ずこの順で上書きする
     this.director.betweenWaves = Infinity;
-    // 進行係。武器の番号は「持ち物の並び」から渡す（1=ライフル、2=ピストル）
+    // 進行係。武器の番号は「持ち物の並び」から渡す（1=ライフル、2=ピストル、3=ナイフ）
     this._tutMachine ??= new TutorialMachine({
       rifleIndex: this.weapons.carry[0],
       pistolIndex: this.weapons.carry[1],
+      knifeIndex: this.weapons.carry[2],
     });
     this._tutMachine.reset();
-    this._tutFlags = { threw: false, healed: false };
+    this._tutFlags = { nadeKill: false, healed: false };
     this._tutDoneHold = 0;
+    this._tutFinishT = null;
     this._tutKills = 0;
     this._spawnTutorialTargets();
   }
@@ -1386,6 +1393,11 @@ class Game {
       if (!t.deathSettled) t.update(dt, this.player, { octree: this.level.octree });
       else if ((t._respawnT += dt) > 2.5) this._placeTarget(t, t._spot);
     }
+    // 手榴弾の課題の間は投げ放題（訓練場と同じ形）。「倒したらクリア」に
+    // なったので、外し続けても弾切れで詰まないようにする
+    if (this._tutMachine.step?.id === 'nade' && this.weapons.nades < NADE.PER_ROUND) {
+      this.weapons.addNades(NADE.PER_ROUND);
+    }
     const w = this.weapons;
     const p = this.player;
     const res = this._tutMachine.update({
@@ -1398,15 +1410,19 @@ class Game {
       onFloor: p.onFloor,
       sprinting: p.sprinting,
       crouching: p.crouching,
+      // S/A/Dの課題は「そのキーで動けた距離」で見る（押している印＋実速度）
+      keyA: this.input.down('KeyA'),
+      keyS: this.input.down('KeyS'),
+      keyD: this.input.down('KeyD'),
       shots: this.shotsFired,
       kills: this._tutKills,
       adsFactor: w.adsFactor,
       reloading: w.reloading,
       weaponIndex: w.index,
-      threw: this._tutFlags.threw,
+      nadeKilled: this._tutFlags.nadeKill,
       healed: this._tutFlags.healed,
     });
-    this._tutFlags.threw = false;
+    this._tutFlags.nadeKill = false;
     this._tutFlags.healed = false;
     if (res === 'advance') {
       /* できた合図。前は中央のバナー(達成)と小さいカチッだけで、
@@ -1418,21 +1434,41 @@ class Game {
       this.audio.lobbyJoin();
       this._tutDoneHold = TUT_DONE_HOLD_S;
       const s = this._tutMachine.step;
-      if (!s) { this._finishTutorial(); return; }
-      // 包帯の課題は、体力が満タンだと巻き始め自体を断られる(startHeal)。
-      // 課題に入る時に少し削っておく（チュートリアル中は死なないので安全）
-      if (s.id === 'heal') this.player.health = Math.min(this.player.health, 55);
-      // 手榴弾の課題も同じ理由で配り直す。ここまでの課題の途中で2発とも
-      // 投げてしまうと、握ることさえできなくなって課題が詰む
-      if (s.id === 'nade') this.weapons.addNades(NADE.PER_ROUND);
+      if (!s) {
+        /* 最後（包帯）を終えてもすぐ修了画面を出さない。
+           「巻いてから終了画面までが短い。回復したことがわからない」
+           と言われた(2026-08-09)。左下のゲージが体力だと教えて、
+           増えたのを見届ける間を置いてから修了へ */
+        this._tutFinishT = TUT_FINISH_HOLD_S;
+      } else {
+        // 包帯の課題は、体力が満タンだと巻き始め自体を断られる(startHeal)。
+        // 課題に入る時に少し削っておく（チュートリアル中は死なないので安全）
+        if (s.id === 'heal') this.player.health = Math.min(this.player.health, 55);
+        // 手榴弾の課題も同じ理由で配り直す（以後は上の投げ放題が面倒を見る）
+        if (s.id === 'nade') this.weapons.addNades(NADE.PER_ROUND);
+      }
+    }
+    if (this._tutFinishT != null) {
+      this._tutFinishT -= dt;
+      if (this._tutFinishT <= 0) {
+        this._tutFinishT = null;
+        this._finishTutorial();
+        return;
+      }
     }
     if ((this._tutDoneHold ?? 0) > 0) {
       // ✓を見せている間は文言を書き換えない（クリアした課題の文のまま光らせる）
       this._tutDoneHold -= dt;
     } else {
-      const l = this._tutMachine.done
-        ? { main: '自由練習', sub: 'ESCを押して「ホームへ戻る」で終了' }
-        : this._tutMachine.label();
+      let l;
+      if (this._tutMachine.done) {
+        // 修了前の間は体力ゲージの案内、修了画面を閉じた後は自由練習
+        l = this._tutFinishT != null
+          ? { main: '回復した！左下のゲージが体力', sub: '減ったら物陰で F の包帯。これで修了' }
+          : { main: '自由練習', sub: 'ESCを押して「ホームへ戻る」で終了' };
+      } else {
+        l = this._tutMachine.label();
+      }
       this.hud.tutorial(l.main, l.sub);
     }
   }
@@ -3272,8 +3308,8 @@ class Game {
       this.audio.click(2800, 0.3, 0.03);
       return;
     }
-    // チュートリアルの課題「投げる」の判定はこの1フレームの印で拾う
-    if (this.tutorial) this._tutFlags.threw = true;
+    // チュートリアルの手榴弾の課題は「投げたら」ではなく「爆風で的を倒したら」
+    // クリアになった(2026-08-09)。印を立てるのは_explodeSoloの側
     const cam = this.camera;
     _throwOrigin.setFromMatrixPosition(cam.matrixWorld);
     _throwDir.set(0, 0, -1).applyQuaternion(cam.quaternion);
@@ -3351,7 +3387,17 @@ class Game {
       if (this._terrainRay(pos, _throwDir, len)) continue;
 
       const dmg = Math.max(NADE.MIN_DMG, NADE.BLAST_DMG * (1 - d / NADE.BLAST_R));
-      if (e.hit(dmg, 'chest')) this._onKill(e);
+      if (e.hit(dmg, 'chest')) {
+        /* 的（チュートリアル・訓練場）の時は_onKillを呼ばない。的は自分の
+           onDeathで音と札を出すので、両方呼ぶと「的を撃破」と「敵兵を排除」が
+           二重に出て、得点まで入る（的に得点は無い）。
+           手榴弾の課題「爆風で倒す」の判定はここの印で拾う */
+        if (this._shootables) {
+          if (this.tutorial) this._tutFlags.nadeKill = true;
+        } else {
+          this._onKill(e);
+        }
+      }
     }
 
     // 自分も巻き込まれる。ただし訓練場は無敵（足元に落としてもノーダメ。
