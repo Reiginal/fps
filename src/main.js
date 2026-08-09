@@ -1824,7 +1824,7 @@ class Game {
     this.menu.setBusy(false);
   }
 
-  _onMatchEnd({ rows }) {
+  _onMatchEnd({ rows, got, coins }) {
     // 通算へ流し込む区切り。順位はラウンド取得数→撃破数の順で並ぶので、
     // 先頭が自分なら勝ち。**hud側の並べ方と同じ順にする**
     // （別々に並べると、画面では1位なのに勝ちが増えない、が起きる）
@@ -1835,7 +1835,17 @@ class Game {
     this._checkAchievements();
     // 重さの報告は_flushStatsの中で送られる（先に送ってから標本を捨てる順）
     this._flushStats();
-    this.hud.matchEnd(rows, true, `${MATCH.ROUND_WINS}本先取で決着`);
+    /* 稼いだコイン。**ログインしている人にだけ届く。**
+       届かない時は今まで通りの1行だけ出す（「0コイン」と出すと、
+       貯まらない理由がログインだと分からないまま「壊れている」に見える）。
+       ホームの残高もここで合わせておく。次に開いた時に古い数字が出ていると、
+       増えたのか増えていないのかが読めない */
+    let note = `${MATCH.ROUND_WINS}本先取で決着`;
+    if (typeof got === 'number' && got > 0) {
+      note += `　＋${got}コイン（ぜんぶで${(coins ?? 0).toLocaleString()}枚）`;
+      this.account?.setCoins(coins);
+    }
+    this.hud.matchEnd(rows, true, note);
     // 次の試合が始まったら畳む。サーバーはINTERMISSION後に0点を配って再開する。
     // 前のタイマーが残っていると、続けて2試合終わった時に早い方が新しい順位を消す
     clearTimeout(this._endTimer);

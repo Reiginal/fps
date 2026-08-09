@@ -81,6 +81,12 @@ export class Room {
     this.phase = PHASE.WAIT;
     this.timeLeft = 0;
     this.round = 0;
+    /* 試合が終わった時に、コインを配る係を呼ぶ口。**外から差し込む。**
+       server/index.js が入れる（中身は server/wallet.js）。
+       ここを null のままにしておけるので、台帳を持たないサーバーでも、
+       部屋を動かす検査の中でも、部屋はそのまま動く。
+       返す物: Promise<Map<slot, {got, coins}>>（got=今回の枚数、coins=残高） */
+    this.onMatchEnd = null;
     // 飛んでいる手榴弾。投げた順に並ぶ
     this.nades = [];
     this.nextNadeId = 1;
@@ -1553,9 +1559,28 @@ export class Room {
       for (const s of this.slots.values()) if (!best || s.rounds > best.rounds) best = s;
       logs.add('match', { winner: best ? `${best.name}(${best.rounds})` : '', why });
     }
-    for (const s of this.slots.values()) {
-      s.conn.send({ t: Sv.MATCHEND, rows, why, next: MATCH.MATCH_BREAK_S });
-    }
+    /* 稼いだコインを配る。**この部屋は台帳を知らない。**
+       誰にいくら足すかは server/index.js が決めて書く（server/wallet.js）。
+       ここでDBを触ると、部屋を動かす検査（tools/check-*.mjs）が
+       台帳無しでは走らなくなる。
+
+       **書き終わってから配る。** 「+120枚」と出したのに増えていない方が、
+       何も出ないより悪い。書けなかった時は枚数を載せずに送る */
+    const finish = (paid) => {
+      for (const s of this.slots.values()) {
+        const p = paid?.get(s);
+        s.conn.send({
+          t: Sv.MATCHEND, rows, why, next: MATCH.MATCH_BREAK_S,
+          got: p?.got, coins: p?.coins,
+        });
+      }
+    };
+    const paying = this.onMatchEnd?.(this.slots);
+    if (!paying) { finish(null); return; }
+    paying.then(finish).catch((e) => {
+      console.warn(`[wallet] 配れなかった: ${e && e.message}`);
+      finish(null);
+    });
   }
 }
 
