@@ -17,22 +17,21 @@ targets.push({ name: 'kill', label: 'キル音', play: (a) => a.kill(false) });
 targets.push({ name: 'kill-head', label: 'キル音(頭)', play: (a) => a.kill(true) });
 targets.push({ name: 'hit', label: '命中', play: (a) => a.hitmarker(false) });
 targets.push({ name: 'hit-head', label: '命中(頭)', play: (a) => a.hitmarker(true) });
-targets.push({
-  name: 'gun-rifle',
-  label: '銃声(ライフル)',
-  play: (a) => a.gunshot({
-    volume: 0.7, bodyFreq: 300, crackFreq: 3600, bodyDecay: 0.2, tailDecay: 0.6,
-    thumpFrom: 110, thumpTo: 44,
-  }, null, null),
-});
-targets.push({
-  name: 'gun-shotgun',
-  label: '銃声(ショットガン)',
-  play: (a) => a.gunshot({
-    volume: 0.85, bodyFreq: 210, crackFreq: 2600, bodyDecay: 0.3, tailDecay: 0.8,
-    thumpFrom: 95, thumpTo: 38,
-  }, null, null),
-});
+/* 銃声は**武器の表から引く。** ここに数字を写していた頃は、
+   ライフルとショットガンの2挺ぶんだけが手で書いてあって、しかも中身が古かった
+   （volume 0.7と書いてあるが本物は0.78）。**聴いて確かめるための道具なのに、
+   本物と違う音を書き出していた**ので、ピストルと狙撃銃は聴く手段が無かった。
+   尾の長い銃（狙撃銃は1.5秒引く）は2秒だと切れるので、長さも表から決める */
+const { WEAPONS } = await import('../src/player/weapons.js');
+for (const w of WEAPONS) {
+  if (!w.sound || w.melee) continue;
+  targets.push({
+    name: `gun-${w.id}`,
+    label: `銃声(${w.nick || w.name})`,
+    seconds: Math.max(2.0, (w.sound.tailDecay || 0.4) * 1.6 + 0.8),
+    play: (a) => a.gunshot(w.sound, null, null),
+  });
+}
 targets.push({ name: 'explosion', label: '爆発', play: (a) => a.explosion(null, null) });
 // 自分が倒れた時の音。**一番長く聴かされる音**（結果画面まで鳴っている）なのに
 // 一度も測っていなかった。3秒取るのは、耳鳴りの尻尾まで含めて見るため

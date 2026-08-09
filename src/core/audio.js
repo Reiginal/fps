@@ -457,10 +457,21 @@ export class AudioEngine {
   gunshot(profile = {}, position = null, camera = null) {
     if (!this.ready || !this.enabled) return;
     const ctx = this.ctx;
+    /* 層ごとの大きさと長さ。**既定値は今までの音そのまま**なので、
+       書かなかった武器の鳴り方は1ミリも変わらない。
+       大口径（狙撃銃）だけ、腹に来る低音と尾を伸ばして「1発が重い」を作る。
+       どの数字が何に効くかは tools/check-sound.mjs の[4]が測っている */
     const {
       volume = 1, bodyFreq = 620, crackFreq = 3600,
       bodyDecay = 0.13, tailDecay = 0.42, thumpFrom = 105, thumpTo = 44,
       mech = true,
+      // 立ち上がりの鋭さ・尾の大きさ
+      crackVol = 0.49, tailVol = 0.38,
+      // 腹に来る低音の長さ（秒）と、その下のサブベースの大きさ・長さ・遅らせる量
+      thumpTime = 0.085, subVol = 0.44, subTime = 0.14, subDelay = 0,
+      // 撃った後に遊底を送る音を重ねるまでの秒数（0で鳴らさない）。
+      // 手で1発ずつ送る銃だけ、撃つ動作の一部として鳴る
+      boltAfter = 0,
     } = profile;
 
     const spatial = !!(position && camera);
@@ -505,7 +516,10 @@ export class AudioEngine {
     // tailDecayとのmaxを取るのは、開けていない・揺らぎが小さい側では
     // tailLenがtailDecayを下回ることがあり、そちらまで縮めたくないため
     const tailLen = tailDecay * jDecay * lerp(0.6, 1.7, this.openness) * lerp(1, 1.9, step(8, 50, dist));
-    const life = Math.max(Math.max(tailDecay, tailLen) * 2.4, bodyDecay * 3) + 0.6;
+    // サブベースを伸ばした武器では、そちらが一番長く残る層になる。
+    // ここに入れ忘れると、伸ばしたぶんの低音が途中でオシレータごと切られて
+    // 「重くしたはずなのにブツッと止まる」になる
+    const life = Math.max(Math.max(tailDecay, tailLen) * 2.4, bodyDecay * 3, subTime * 4) + 0.6;
     const stopAt = t + life;
 
     // 1. 立ち上がりの鋭いクラック。近距離だけの成分で、遠くでは空気に食われて消える
@@ -524,7 +538,7 @@ export class AudioEngine {
       hlp.Q.value = 0.6;
       const crackGain = ctx.createGain();
       crack.connect(hp); hp.connect(hlp); hlp.connect(crackGain); crackGain.connect(bus);
-      this._env(crackGain, t, 0.49 * wCrack, 0.0005, rnd(0.026, 0.042));
+      this._env(crackGain, t, crackVol * wCrack, 0.0005, rnd(0.026, 0.042));
       crack.start(t, Math.random() * 1.5); crack.stop(t + 0.25);
     }
 
@@ -553,7 +567,7 @@ export class AudioEngine {
       const tailGain = ctx.createGain();
       tail.connect(tf); tf.connect(tailGain); tailGain.connect(bus);
       // tailLenはstopAtを決める所で先に出してある（同じ式）
-      this._env(tailGain, t + rnd(0.004, 0.022), 0.38 * wTail, 0.006, tailLen);
+      this._env(tailGain, t + rnd(0.004, 0.022), tailVol * wTail, 0.006, tailLen);
       tail.start(t, Math.random() * 1.5); tail.stop(stopAt);
     }
 
@@ -562,24 +576,40 @@ export class AudioEngine {
       const osc = ctx.createOscillator();
       osc.type = 'sine';
       osc.frequency.setValueAtTime(thumpFrom * rnd(0.92, 1.1), t);
-      osc.frequency.exponentialRampToValueAtTime(thumpTo * rnd(0.9, 1.1), t + 0.09);
+      // 落ちきるまでの時間も長さに合わせる。ここだけ0.09秒に固定していると、
+      // 減衰だけ伸ばしても「一瞬で底まで落ちた低音が長く残る」になって、
+      // 押される感じではなく唸りに聞こえる
+      osc.frequency.exponentialRampToValueAtTime(thumpTo * rnd(0.9, 1.1), t + thumpTime);
       const oscGain = ctx.createGain();
       osc.connect(oscGain); oscGain.connect(bus);
-      this._env(oscGain, t, 0.78 * wSub, 0.002, 0.085 * jDecay);
-      osc.start(t); osc.stop(t + 0.2);
+      this._env(oscGain, t, 0.78 * wSub, 0.002, thumpTime * jDecay);
+      osc.start(t); osc.stop(t + thumpTime * 3 + 0.12);
 
       // サブベース。閃光の一瞬だけ床が鳴るような圧を足す。
       // 単体では聞こえないくらいで良い（聞こえると安いブーストになる）
       const sub = ctx.createOscillator();
       sub.type = 'sine';
-      sub.frequency.setValueAtTime(56, t);
-      sub.frequency.exponentialRampToValueAtTime(29, t + 0.16);
+      /* 少し遅らせられるようにしてある（subDelay）。
+         破裂と低音が同じ瞬間に山を作ると、波の頭が足し算されて出口の限界に当たり、
+         **音を大きくしたつもりが潰れて小さく聞こえる**（実測で山0.92まで来た）。
+         30ms遅らせると山が下がるうえに、耳には「割れた後に低音が来る」順で届く */
+      const st = t + subDelay;
+      sub.frequency.setValueAtTime(56, st);
+      sub.frequency.exponentialRampToValueAtTime(29, st + subTime * 1.15);
       const subGain = ctx.createGain();
       sub.connect(subGain); subGain.connect(bus);
       // 出しすぎるとコンプが低音に反応して他の音まで毎発沈むので控えめに
-      this._env(subGain, t, 0.44 * wSub, 0.006, 0.14);
-      sub.start(t); sub.stop(t + 0.32);
+      this._env(subGain, st, subVol * wSub, 0.006, subTime);
+      sub.start(st); sub.stop(st + subTime * 3 + 0.2);
     }
+
+    /* 遊底を送る音。**撃った後の動作を音でも見せる。**
+       手で1発ずつ送る銃は、撃つ→送る が1つの流れになっていて、
+       銃声だけだと「1発しか出ない銃」の理由が音から消える。
+       装填の時に鳴らしている物と同じ部品を、少し遅らせて重ねるだけ。
+       自分の銃の時だけ（遠くの人の遊底まで聞こえたら嘘になる） */
+    // 大きさは銃声の半分以下に。素のままだと銃声より大きい音が毎発鳴る
+    if (boltAfter > 0 && dist < 3 && busy < 7) this._bolt(t + boltAfter, 0.42);
 
     // 5. 遠距離のドスン。高域は全部落ちて低い塊だけが届く。
     //    距離減衰で消えないよう、低域は減りにくい前提で持ち上げる
@@ -755,9 +785,13 @@ export class AudioEngine {
     });
   }
 
-  // ボルト。バネがジャッと鳴ってから、前進して硬く止まる
-  _bolt(t) {
-    this._thunk(t + 0.055, 146, 82, 0.70, 0.055);
+  /* ボルト。バネがジャッと鳴ってから、前進して硬く止まる。
+     volは全体の大きさ。装填の一工程として鳴らす時は1.0のまま。
+     **撃った直後に重ねる時は下げる。** 実測すると、この音は素のままだと
+     山0.92で、狙撃銃の銃声そのもの(0.78)より大きかった。
+     1発ごとに鳴る物が銃声より大きいのは、迫力ではなくただの騒音になる */
+  _bolt(t, vol = 1) {
+    this._thunk(t + 0.055, 146, 82, 0.70 * vol, 0.055);
     const ctx = this.ctx;
     const src = this._noiseSource(rnd(1.1, 1.4));
     const f = ctx.createBiquadFilter();
@@ -767,7 +801,7 @@ export class AudioEngine {
     f.Q.value = 2.2;
     const g = ctx.createGain();
     src.connect(f); f.connect(g);
-    this._env(g, t, 0.24, 0.004, 0.04);
+    this._env(g, t, 0.24 * vol, 0.004, 0.04);
     this._out(g, 0.14, 0.1);
     src.start(t, Math.random() * 1.5);
     src.stop(t + 0.3);
@@ -775,7 +809,7 @@ export class AudioEngine {
     this._metal(t + rnd(0.05, 0.07), {
       // 4本の高い倍音をring 0.62で鳴らすと、閉鎖ではなく金属の鐘になる。
       // 閉鎖は重い塊が受けに当たって止まる音なので、低い2本を短く切る
-      partials: [268, 640], vol: 0.55, decay: 0.020,
+      partials: [268, 640], vol: 0.55 * vol, decay: 0.020,
       ring: 0.08, noiseFreq: 2600, noiseQ: 1.0, wet: 0.10,
     });
   }
