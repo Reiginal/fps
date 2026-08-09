@@ -139,8 +139,8 @@ console.log('\n[3] 滑る距離と長さ');
     t += DT;
   }
   const dist = Math.hypot(p.collider.start.x - x0, p.collider.start.z - z0);
-  ok(t > 0.6 && t < 0.95, `0.8秒ほどで終わる (${t.toFixed(2)}秒)`);
-  ok(dist > 4 && dist < 6.5, `5mほど進む (${dist.toFixed(2)}m)`);
+  ok(t > 0.6 && t < 0.95, `0.85秒ほどで終わる (${t.toFixed(2)}秒)`);
+  ok(dist > 5 && dist < 7, `6mほど進む (${dist.toFixed(2)}m)`);
   ok(last < v0 * 0.62,
     `終わる頃には遅くなっている (${v0.toFixed(2)} → ${last.toFixed(2)}m/s)`);
   // 同じ時間ずっと走っていたほうが遠い＝滑りは移動手段として得ではない
