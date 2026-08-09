@@ -18,7 +18,11 @@ export class HUD {
       health: $('health'), healthFill: $('healthFill'), healthBlock: $('healthBlock'),
       ammo: $('ammo'), reserve: $('reserve'), ammoWrap: $('ammoWrap'),
       weapon: $('weapon'), reloading: $('reloading'),
-      slots: document.querySelectorAll('.slot'),
+      // 武器の札は数が変わる（ソロは波が進むと1本増え、ガンゲームは1本しか持たない）。
+      // 入れ物だけ掴んでおいて、中身は weaponSlots() が組む。
+      // querySelectorAll('.slot')で最初の4枚を控えていた頃は、
+      // 増えた札に印が付かず、減らした札に印が残っていた
+      slotBox: $('slots'),
       wave: $('wave'), remain: $('remain'), score: $('score'),
       killfeed: $('killfeed'),
       banner: $('banner'), bannerMain: $('bannerMain'), bannerSub: $('bannerSub'),
@@ -50,6 +54,9 @@ export class HUD {
     this._tutKey = '';
     this._lastHealth = -1;
     this._lastAmmo = -1;
+    // 武器の札。今出ている並びと、印が付いている位置
+    this._slotKey = '';
+    this._slotOn = -1;
     this.mode = 'solo';
     // 名札は毎フレーム作り直すと1秒に60回DOMを捨てることになるので、idで使い回す
     this.plateEls = new Map();
@@ -230,10 +237,11 @@ export class HUD {
       this._lastReserve = rest;
       this.el.reserve.textContent = rest;
     }
-    if (this.el.weapon.textContent !== name) {
-      this.el.weapon.textContent = name;
-      this.el.slots.forEach((s, i) => s.classList.toggle('on', i === slotIndex));
+    if (slotIndex !== this._slotOn) {
+      this._slotOn = slotIndex;
+      this._markSlot();
     }
+    if (this.el.weapon.textContent !== name) this.el.weapon.textContent = name;
     // 装填中かどうかも、変わった時だけ触る
     const loading = reloadT > 0;
     if (loading !== this._lastLoading) {
@@ -241,6 +249,53 @@ export class HUD {
       if (loading) this.el.reloading.textContent = 'リロード中';
       this.el.reloading.style.opacity = loading ? 1 : 0;
     }
+  }
+
+  /** 今持っている札に印を付ける。札を組み直した時と、持ち替えた時だけ呼ぶ */
+  _markSlot() {
+    const box = this.el.slotBox;
+    if (!box) return;
+    for (let i = 0; i < box.children.length; i++) {
+      box.children[i].classList.toggle('on', i === this._slotOn);
+    }
+  }
+
+  /**
+   * 武器の札を組み直す。**持ち物が変わった時だけ**触る（毎フレーム呼ばれる）。
+   *
+   * 札の数が動くのは3つの場面:
+   *   ・ソロで波が進んで狙撃銃が増えた（4枚→5枚）
+   *   ・ガンゲームで今の段の1本だけになる（1枚）
+   *   ・手榴弾を使い切った（枚数はそのままで、その1枚が薄くなる）
+   *
+   * 最後のを「札を消す」にしないのは、消すと後ろの番号が繰り上がって、
+   * 押し慣れた数字と出てくる武器が変わってしまうため。
+   *
+   * items … [{ name:'ライフル', out:false }, ...] 並びがそのまま1,2,3…になる
+   */
+  weaponSlots(items) {
+    const box = this.el.slotBox;
+    if (!box) return;
+    const key = items.map((it) => `${it.name}${it.out ? '/x' : ''}`).join('|');
+    if (key === this._slotKey) return;
+    this._slotKey = key;
+    // lastChildではなくchildrenで消す。本物のDOMではタグの間の改行が
+    // テキストの子として入っていて、lastChildだとそれを消しにいく
+    while (box.children.length > items.length) {
+      box.children[box.children.length - 1].remove();
+    }
+    while (box.children.length < items.length) {
+      const el = document.createElement('div');
+      el.className = 'slot';
+      box.appendChild(el);
+    }
+    for (let i = 0; i < items.length; i++) {
+      const el = box.children[i];
+      const text = `${i + 1} ${items[i].name}`;
+      if (el.textContent !== text) el.textContent = text;
+      el.classList.toggle('out', !!items[i].out);
+    }
+    this._markSlot();
   }
 
   /**

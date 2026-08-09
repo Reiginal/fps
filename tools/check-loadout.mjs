@@ -40,6 +40,11 @@ ok(carry.length === LOADOUT_IDS.length,
   `全部の番号が引けた (${carry.join(', ')})`);
 ok(new Set(LOADOUT_IDS).size === LOADOUT_IDS.length, '同じ武器が2回入っていない');
 
+console.log('\n[1.5] 短い呼び名が全部の武器にある');
+// 画面の札はこれを読む。欠けると札に長い正式名（MK-4 カービン）が並んで
+// 1行に収まらなくなる
+for (const d of WEAPONS) ok(!!d.nick && d.nick.length <= 8, `${d.id} … 呼び名「${d.nick}」`);
+
 console.log('\n[2] 持って出ない武器が、表からは消えていない');
 // 消してしまうとガンゲームで配れない。**持って出ないだけで、在る**
 const benched = ids.filter((id) => !LOADOUT_IDS.includes(id));
@@ -49,9 +54,11 @@ for (const id of benched) {
   ok(i >= 0 && !!WEAPONS[i].build, `${id} … 表にあって組み立ても持っている`);
 }
 
-// 短い呼び名と武器の対応。画面の札にも操作説明にも、この言葉で出す。
-// 完全一致を求めないのは、札が「1 ライフル」のように数字を含むため
-const NICK = { rifle: 'ライフル', pistol: 'ピストル', knife: 'ナイフ', nade: '手榴弾', shotgun: 'ショットガン' };
+/* 短い呼び名。画面の札にも操作説明にも、この言葉で出す。
+   **武器の表(WEAPONS)のnickが唯一の出どころ。** ここに写しを持っていた頃は、
+   index.html・HUD・この検査の3箇所に同じ言葉が散っていて、
+   武器を1本足すたびに手で揃えることになっていた */
+const NICK = Object.fromEntries(WEAPONS.map((d) => [d.id, d.nick]));
 
 console.log('\n[3] 画面の札と並びが一致している');
 // ここがずれると、押した数字と出てくる武器が違う。

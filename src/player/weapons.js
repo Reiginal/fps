@@ -5,7 +5,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { muzzleFlashTexture, radialTexture, smokeTexture } from '../world/textures.js';
 import { tryModelOverride } from './glbview.js';
 // 持ち物の決まりだけ取り込む。protocol.jsはこちらを読まないので輪にならない
-import { loadoutOf } from '../net/protocol.js';
+import { loadoutOf, NADE } from '../net/protocol.js';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -1482,6 +1482,156 @@ function addOptic(g, y, z) {
   g.userData.sight = sight;
 }
 
+/* ------------------------------------------------------------ 望遠照準 */
+
+/* 狙撃銃に載せる長い筒。**上の addOptic と同じ決まりの上に立っている**ので、
+   触る前にあちらの【ケラレの不変条件】を読むこと。要点は同じで、
+   覗いた時に見えるのは接眼リム（内半径EYE_R）を頂点に前へ広がる円錐の内側だけ。
+   そこへ置いてよいのは筒の内壁とレンズとレティクルに限られる。
+
+   **ドットとの違いは筒が長いこと。** ここで一度間違えたので書いておく:
+   穴の広さを決めるのは接眼リムではなく、**直筒の一番前の縁**だった。
+   リムを通った斜めの光線は、そのまま進んで内壁の前端にぶつかる。
+   実測（tools/check-scope.mjs が目からレイを撃って測る）でも、
+   赤ドットの理屈上の開口は5.97度なのに実際に抜けているのは4.6度までで、
+   差はちょうどこの直筒の長さ分だった。
+
+   なので見るのは3箇所。**どれか1つでも小さいと、そこが穴の大きさになる:**
+
+     直筒の前端  r=EYE_R*s / (adsDist + 0.035*s) = 0.0126 / 0.151 → 4.77度
+     対物リム    r=OBJ_R*s / (adsDist + 0.115*s) = 0.0216 / 0.199 → 6.19度
+     接眼リム    r=EYE_R*s / (adsDist - 0.075*s) = 0.0126 / 0.085 → 8.44度
+
+   一番狭い4.77度が答えで、実測でも4.7度。赤ドット(4.6度)とほぼ同じ角度になる。
+
+   **同じ角度でも、画面に写る大きさは3倍違う。**
+   覗くとビューモデル側の画角も一緒に絞られる（_animateの末尾。55度→adsFov*0.9）ので、
+   赤ドットでは41.4度の画面に4.6度＝画面の高さの21%だが、
+   こちらは14.4度の画面に4.7度＝**65%**になる。
+   つまり覗いた時に「丸い窓の中に景色が見える」画になるのはこの銃だけで、
+   狙撃銃らしさはここから出ている。
+
+   **構えの寸法(view.adsDist/adsScale)を動かすとこの3つが全部変わる。**
+   動かしたら tools/check-scope.mjs を走らせて、抜けている角度を測り直すこと */
+function addScope(g, y, z) {
+  const cy = y + 0.026;
+  const SEG = 36;
+  const EYE_Z = 0.075, OBJ_Z = -0.115;   // 接眼リムと対物リムの位置（zからの差）
+  const EYE_R = 0.0210, OBJ_R = 0.036;   // 内壁の半径。上の計算がこの2つ
+  const TUBE_R = 0.0260, BELL_R = 0.0410; // 外皮
+
+  /* ---- マウント。レールを前後2箇所で跨ぐ。
+     ここを板や箱で筒の上まで回すと、視線の円錐へ食い込んで開口の縁が欠ける。
+     筒に触るのは外周を巻くリングだけにしておけば、原理的にそれが起きない */
+  g.add(part(cboxG(0.038, 0.012, 0.105), MATS.anodized, 0, y - 0.016, z + 0.008));
+  for (const rz of [0.045, -0.020]) {
+    g.add(part(torG(TUBE_R + 0.004, 0.004, 6, 24), MATS.anodized, 0, cy, z + rz));
+    g.add(part(cboxG(0.015, 0.030, 0.016), MATS.anodized, 0, cy - 0.028, z + rz));
+    addScrewX(g, 0.020, cy - 0.030, z + rz, 0.0032);
+    addScrewX(g, -0.020, cy - 0.030, z + rz, 0.0032);
+  }
+
+  /* ---- 内壁。接眼側は直筒、対物側は前へ開くベル。
+     必ず両端を開けること（openEnded）。蓋が付くと覗いた瞬間に黒い円板が立つ */
+  g.add(part(cylG(EYE_R, EYE_R, 0.113, SEG, true), MATS.opticTube, 0, cy, z + 0.0215, Math.PI / 2));
+  g.add(part(cylG(EYE_R, OBJ_R, 0.080, SEG, true), MATS.opticTube, 0, cy, z - 0.075, Math.PI / 2));
+  // 外皮。内壁と分けると筒に厚みが出る
+  g.add(part(cylG(TUBE_R, TUBE_R, 0.115, SEG, true), MATS.gunmetal, 0, cy, z + 0.0205, Math.PI / 2));
+  g.add(part(cylG(TUBE_R, BELL_R, 0.082, SEG, true), MATS.gunmetal, 0, cy, z - 0.076, Math.PI / 2));
+  // 接眼側の張り出し（目を当てる所）。内径は筒の外皮まで開けておく。
+  // ここを細くすると、接眼リムより手前で視線を絞ることになって輪が出る
+  g.add(part(cylG(0.032, TUBE_R, 0.030, SEG, true), MATS.gunmetal, 0, cy, z + 0.062, Math.PI / 2));
+  g.add(part(torG(0.0322, 0.0030, 6, 26), MATS.anodized, 0, cy, z + EYE_Z + 0.002));
+  // 対物リムの面取り。縁に細い鏡面ラインを走らせる
+  g.add(part(torG(BELL_R - 0.001, 0.0028, 6, 30), MATS.anodized, 0, cy, z + OBJ_Z + 0.004));
+  g.add(part(torG(BELL_R - 0.004, 0.0014, 5, 30), MATS.steel, 0, cy, z + OBJ_Z + 0.010));
+  // 胴とベルの継ぎ目
+  g.add(part(torG(TUBE_R + 0.002, 0.0022, 5, 26), MATS.anodized, 0, cy, z - 0.035));
+  // 倍率環のローレット。接眼寄りに1本。刻みは外皮の厚みの中へ収める
+  for (let i = 0; i < 18; i++) {
+    const a = (i / 18) * Math.PI * 2;
+    g.add(part(boxG(0.0026, 0.0026, 0.016), MATS.knurl,
+      Math.cos(a) * (TUBE_R + 0.005), cy + Math.sin(a) * (TUBE_R + 0.005), z + 0.048, 0, 0, a));
+  }
+
+  /* ---- 調整ツマミ。内壁(EYE_R)より外なので視線の円錐には入らない */
+  g.add(part(cylG(0.0105, 0.0112, 0.020, 14), MATS.anodized, 0, cy + 0.028, z + 0.008));
+  g.add(part(cylG(0.0090, 0.0090, 0.005, 14), MATS.steel, 0, cy + 0.040, z + 0.008));
+  g.add(part(boxG(0.0030, 0.0016, 0.014), MATS.enamel, 0, cy + 0.0425, z + 0.008));
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    g.add(part(boxG(0.0022, 0.018, 0.0022), MATS.knurl,
+      Math.cos(a) * 0.0109, cy + 0.028, z + 0.008 + Math.sin(a) * 0.0109, 0, -a, 0));
+  }
+  // 横のツマミ。内側の面は外皮(TUBE_R)より外で止める
+  g.add(part(cylG(0.0100, 0.0108, 0.016, 14), MATS.anodized, TUBE_R + 0.008, cy, z + 0.008, 0, 0, Math.PI / 2));
+  addStampX(g, TUBE_R - 0.0002, cy - 0.008, z - 0.008, 0.020, 0.010, 2);
+
+  /* ---- レンズ。対物ベルの内側いっぱいに張る */
+  const lensR = OBJ_R - 0.001;
+  const DOME = 0.30;
+  g.add(part(domeG(lensR, DOME, SEG), MATS.glass, 0, cy, z + OBJ_Z + 0.006 + DOME, -Math.PI / 2));
+  const edge = part(circG(lensR, SEG), MATS.lensEdge, 0, cy, z + OBJ_Z + 0.008);
+  edge.renderOrder = 16;
+  edge.userData.keep = true;
+  g.add(edge);
+  const coat = part(circG(lensR - 0.0008, SEG), MATS.coating, 0, cy, z + OBJ_Z + 0.0092);
+  coat.renderOrder = 17;
+  coat.userData.keep = true;
+  g.add(coat);
+  const sheen = part(circG(0.024, 24), MATS.sheen, -0.010, cy + 0.010, z + OBJ_Z + 0.0104);
+  sheen.scale.set(1.0, 0.42, 1);
+  sheen.rotation.z = -0.7;
+  sheen.renderOrder = 18;
+  sheen.userData.keep = true;
+  g.add(sheen);
+  g.userData.sheen = sheen;
+
+  /* ---- レティクル。狙撃銃なので点ではなく十字にする。
+     真ん中を空けて（中心を隠さない）、外側だけ太くする実物の形にすると、
+     細い線でも背景に負けずに追える。
+     線の長さは「その面で見えている円」の内側に収めること。
+     この面での円の半径は 開口の傾き(0.0834) × 目からの距離(0.3167) = 0.0264 なので、
+     一番外の線でも0.0245で止める（はみ出すと筒の内壁に刺さって途中で切れる） */
+  const bars = [];
+  const bar = (len, th, off, vertical) => {
+    for (const s of [1, -1]) {
+      const m = part(
+        planeG(vertical ? th : len, vertical ? len : th), MATS.reticle,
+        vertical ? 0 : s * (off + len / 2), cy + (vertical ? s * (off + len / 2) : 0),
+        z + OBJ_Z + 0.015,
+      );
+      m.renderOrder = 20;
+      m.userData.keep = true;
+      g.add(m);
+      bars.push(m);
+    }
+  };
+  /* 内側の細い線と、外側の太い線。太いほうが視線を中心へ導く。
+
+     **太さは実測して決めた。** 覗くとビューモデルの画角が14.4度まで絞られるので、
+     720pだと1度が50画素になる（腰だめの55度なら13画素）。
+     最初に置いた0.0010は、そこで9画素の帯になって的を隠していた。
+     細い線2.5画素・太い線5画素・芯4画素に収まる寸法まで詰める。
+     太さを変えた時は _spike ではなく tools/check-scope.mjs で測り直すこと */
+  bar(0.012, 0.00028, 0.0035, false);
+  bar(0.012, 0.00028, 0.0035, true);
+  bar(0.008, 0.00055, 0.0165, false);
+  bar(0.008, 0.00055, 0.0165, true);
+  // 芯。十字の交点は空けてあるので、狙点そのものはこの点が受け持つ
+  const dot = part(planeG(0.00045, 0.00045), MATS.dot, 0, cy, z + OBJ_Z + 0.016);
+  dot.renderOrder = 20;
+  dot.userData.keep = true;
+  g.add(dot);
+  bars.push(dot);
+  g.userData.reticle = bars;
+
+  const sight = new THREE.Object3D();
+  sight.position.set(0, cy, z);
+  g.add(sight);
+  g.userData.sight = sight;
+}
+
 /* ------------------------------------------------------------ ライフル */
 
 // 銃身の芯の高さ。先台の八角断面の中心をここに合わせる
@@ -1909,6 +2059,203 @@ function buildShotgun() {
   return g;
 }
 
+/* ------------------------------------------------------------ 狙撃銃 */
+
+// 銃身の芯。ライフルより1mm低い（この銃は機関部が厚いので、
+// 同じ高さにすると先台が握れる太さに収まらない）
+const S_BORE = 0.020;
+
+/* 手動で1発ずつ送り出す銃。ライフルとの違いは長さと太さで作る。
+   **同じ形を細長くしただけにしない。** 遠くから見ても別物と分かるように、
+   ・銃身を露出させて太くする（ライフルは先台の中に隠れている）
+   ・先台を筒ではなく角張った台にする（伏せて撃つ道具に見せる）
+   ・銃床に頬当てを立てる（覗く姿勢の銃であることが形から読める）
+   の3つを効かせる */
+function buildSniper() {
+  const g = new THREE.Group();
+
+  /* ---- 機関部。ライフルより背が高く、上面を厚い台にする */
+  g.add(part(cboxG(0.050, 0.056, 0.260), MATS.enamel, 0, 0.006, -0.020));
+  g.add(part(cboxG(0.044, 0.012, 0.260), MATS.anodized, 0, 0.038, -0.020));
+  g.add(part(cboxG(0.048, 0.020, 0.052), MATS.anodized, 0, 0.030, 0.086));
+  addRail(g, 0.045, -0.140, 0.060, 0.024);
+  addStampX(g, 0.0255, -0.004, -0.050, 0.044, 0.020, 4);
+  addStampX(g, -0.0255, -0.004, -0.050, 0.044, 0.020, 4);
+  // 機関部と銃身の継ぎ目（バレルナット）
+  g.add(part(cylG(0.030, 0.030, 0.026, 14), MATS.steel, 0, S_BORE, -0.158, Math.PI / 2));
+  g.add(part(cylG(0.032, 0.032, 0.006, 14), MATS.phosphate, 0, S_BORE, -0.144, Math.PI / 2));
+
+  /* ---- 排莢口。手動で送るので、ライフルのような排莢口カバーは付かない */
+  g.add(part(boxG(0.005, 0.026, 0.070), MATS.enamel, 0.023, 0.022, 0.020));
+  g.add(part(cboxG(0.014, 0.026, 0.030), MATS.anodized, 0.026, 0.030, 0.062, 0, 0, 0.30));
+
+  /* ---- 操作部 */
+  g.add(part(boxG(0.006, 0.020, 0.030), MATS.anodized, -0.026, -0.006, 0.030));
+  g.add(part(cylG(0.0058, 0.0058, 0.010, 10), MATS.steel, -0.030, -0.006, 0.030, 0, 0, Math.PI / 2));
+  addSlingLoop(g, -0.026, 0.000, 0.098);
+  addScrewX(g, 0.024, -0.012, -0.110);
+  addScrewX(g, -0.024, -0.012, -0.110);
+
+  /* ---- 先台。角張った台にする。伏せ撃ちの道具に見せたいので、
+     ライフルの八角筒ではなく、底が平らな箱を主にして角を立てる */
+  g.add(part(cboxG(0.050, 0.048, 0.290), MATS.polymerTan, 0, S_BORE - 0.004, -0.300));
+  g.add(part(cboxG(0.038, 0.014, 0.280), MATS.polymerTan, 0, S_BORE - 0.030, -0.300));
+  // 天面のレール（前半分）。載せる物のためではなく、金属の直線を1本通して
+  // 樹脂の台が「ただの塊」に見えないようにするため
+  addRail(g, S_BORE + 0.022, -0.400, -0.170, 0.022);
+  // M-LOKの長穴。側面と底面に彫り込む
+  for (let i = 0; i < 4; i++) {
+    const z = -0.200 - i * 0.052;
+    g.add(part(boxG(0.052, 0.004, 0.030), MATS.enamel, 0, S_BORE - 0.026, z));
+    addVentX(g, 0.0252, S_BORE - 0.002, z, 0.0055);
+    addVentX(g, -0.0252, S_BORE - 0.002, z, 0.0055);
+  }
+  addSlingLoop(g, -0.028, S_BORE - 0.022, -0.420, 0.0075);
+  // 手が止まる出っ張り。掴む位置がここだと形で分かる
+  g.add(part(cboxG(0.028, 0.026, 0.024), MATS.polymer, 0, S_BORE - 0.038, -0.360, -0.45));
+
+  /* ---- 銃身。**露出した太い円筒がこの銃の顔になる。**
+     溝(フルート)を彫って、単なる棒に見えないようにする */
+  g.add(part(cylG(0.0155, 0.0155, 0.400, 20), MATS.phosphate, 0, S_BORE, -0.590, Math.PI / 2));
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    g.add(part(boxG(0.0055, 0.0055, 0.230), MATS.enamel,
+      Math.cos(a) * 0.0150, S_BORE + Math.sin(a) * 0.0150, -0.610, 0, 0, a));
+  }
+  g.add(part(torG(0.0165, 0.0026, 5, 20), MATS.steel, 0, S_BORE, -0.420));
+  g.add(part(torG(0.0158, 0.0022, 5, 20), MATS.steel, 0, S_BORE, -0.760));
+  // 制退器。横穴を開けて、真横から見た時のシルエットに情報を足す
+  g.add(part(cylG(0.0215, 0.0205, 0.062, 20), MATS.steel, 0, S_BORE, -0.808, Math.PI / 2));
+  for (let i = 0; i < 3; i++) {
+    const z = -0.792 - i * 0.016;
+    g.add(part(boxG(0.048, 0.009, 0.008), MATS.enamel, 0, S_BORE + 0.010, z));
+    g.add(part(boxG(0.048, 0.009, 0.008), MATS.enamel, 0, S_BORE - 0.010, z));
+  }
+  g.add(part(torG(0.0210, 0.0026, 5, 20), MATS.phosphate, 0, S_BORE, -0.836));
+
+  /* ---- 握把と用心鉄。垂直に近い狙撃用の握り */
+  g.add(part(cboxG(0.036, 0.104, 0.038), MATS.polymer, 0, -0.092, 0.132, -0.16));
+  g.add(part(boxG(0.030, 0.090, 0.008), MATS.rubber, 0, -0.090, 0.153, -0.16));
+  for (let i = 0; i < 3; i++) {
+    g.add(part(cylG(0.005, 0.005, 0.034, 8), MATS.polymer,
+      0, -0.066 - i * 0.026, 0.114 + i * 0.004, 0, 0, Math.PI / 2));
+  }
+  g.add(part(cboxG(0.038, 0.011, 0.040), MATS.polymer, 0, -0.146, 0.126, -0.16));
+  g.add(part(torG(0.021, 0.0038, 6, 14, Math.PI), MATS.enamel,
+    0, -0.040, 0.082, 0, Math.PI / 2, Math.PI));
+
+  /* ---- 引金（動く） */
+  const trg = new THREE.Group();
+  trg.position.set(0, -0.030, 0.092);
+  trg.add(part(boxG(0.007, 0.026, 0.008), MATS.steel, 0, -0.013, -0.004, 0.18));
+  trg.add(part(cylG(0.005, 0.005, 0.010, 8), MATS.steel, 0, 0, 0, 0, 0, Math.PI / 2));
+  g.add(trg);
+  g.userData.trigger = trg;
+
+  /* ---- 遊底（動く）。**この銃の「1発ずつ送る」を画で見せる部品。**
+     撃つたびに後ろへ引かれて戻る（view.boltTravelがその量）。
+     右へ突き出した握りを付けておくと、動きが真横から読める */
+  const bolt = new THREE.Group();
+  bolt.add(part(cylG(0.0125, 0.0125, 0.120, 12), MATS.steel, 0.006, 0.028, 0.030, Math.PI / 2));
+  bolt.add(part(cylG(0.0090, 0.0090, 0.048, 10), MATS.steel, 0.030, 0.024, 0.062, 0, 0, Math.PI / 2 - 0.35));
+  bolt.add(part(sphG(0.0115, 10, 8), MATS.phosphate, 0.052, 0.010, 0.062));
+  bolt.add(part(cboxG(0.020, 0.014, 0.026), MATS.phosphate, 0.006, 0.036, 0.086));
+  g.add(bolt);
+  g.userData.bolt = bolt;
+  g.userData.boltRest = 0;
+
+  /* ---- 弾倉（動く）。5発しか入らないので、ライフルの半分の丈にする。
+     短いぶん底板を厚くして、抜き差しの取っ手として読ませる */
+  const mg = new THREE.Group();
+  mg.position.set(0, -0.048, 0.018);
+  mg.add(part(chamferBoxG(0.038, 0.052, 0.062, MAG_CHAMFER), MATS.polymer, 0, -0.026, 0.004, 0.08));
+  mg.add(part(chamferBoxG(0.036, 0.050, 0.060, MAG_CHAMFER), MATS.polymer, 0, -0.070, 0.008, 0.14));
+  mg.add(part(chamferBoxG(0.044, 0.013, 0.076, 0.0030), MATS.polymerTan, 0, -0.100, 0.012, 0.14));
+  for (let i = 0; i < 2; i++) {
+    mg.add(part(boxG(0.040, 0.004, 0.010), MATS.polymer, 0, -0.040 - i * 0.036, 0.006, 0.10));
+    mg.add(part(cylG(0.0048, 0.0048, 0.004, 10), MATS.brass, 0.0190, -0.040 - i * 0.036, 0.006, 0, 0, Math.PI / 2));
+  }
+  g.add(mg);
+  g.userData.mag = mg;
+  g.userData.magRest = [0, -0.048, 0.018];
+
+  /* ---- 銃床。**頬当てと肩当てで「覗く銃」だと形から分かるようにする。**
+     覗くと目の後ろに来るので、ADS中はまとめて消える（_animateが見ている） */
+  const rear = new THREE.Group();
+  rear.add(part(cboxG(0.046, 0.056, 0.110), MATS.enamel, 0, 0.004, 0.150));
+  // 骨組み。中を抜いた枠にすると、塊ではなく道具に見える
+  rear.add(part(cboxG(0.038, 0.016, 0.150), MATS.polymer, 0, 0.026, 0.240));
+  rear.add(part(cboxG(0.038, 0.018, 0.150), MATS.polymer, 0, -0.034, 0.236, 0.10));
+  rear.add(part(cboxG(0.042, 0.080, 0.020), MATS.polymer, 0, -0.004, 0.312));
+  // 頬当て。支柱を2本立てて、高さを調整できる物に見せる
+  rear.add(part(cboxG(0.040, 0.024, 0.110), MATS.polymer, 0, 0.056, 0.230));
+  for (const zz of [0.190, 0.268]) {
+    rear.add(part(cylG(0.0055, 0.0055, 0.028, 8), MATS.steel, 0.014, 0.040, zz));
+    rear.add(part(cylG(0.0055, 0.0055, 0.028, 8), MATS.steel, -0.014, 0.040, zz));
+  }
+  // 肩当て。段差を彫ってゴムらしくする
+  rear.add(part(cboxG(0.046, 0.096, 0.016), MATS.rubber, 0, 0.000, 0.330));
+  for (let i = 0; i < 3; i++) {
+    rear.add(part(boxG(0.048, 0.005, 0.005), MATS.rubber, 0, 0.028 - i * 0.028, 0.337));
+  }
+  addSlingLoop(rear, -0.026, -0.024, 0.300);
+  g.add(rear);
+  g.userData.rear = rear;
+
+  /* 望遠照準。高さの決め方はライフルと同じで、覗いた時の円錐から
+     レールと左手を外へ出せる所まで上げる。位置(z)はマウントがレールに載る所。
+
+     **高さは実測で決めた。** 最初は0.062（光軸が銃身芯の6.6cm上）に置いていて、
+     狙点のまわりが全周素通しなのは2.2度までだった（ライフルは3.0度）。
+     差の正体は制退器で、この銃のほうが太い（半径21.5mm対16.5mm）ぶん
+     視線の円錐へ深く入っていた。1cm上げるとライフルと同じ3.0度になる。
+     数字は tools/check-scope.mjs が出す */
+  addScope(g, 0.072, -0.020);
+
+  const muzzle = new THREE.Object3D();
+  muzzle.position.set(0, S_BORE, -0.845);
+  g.add(muzzle);
+  g.userData.muzzle = muzzle;
+  const eject = new THREE.Object3D();
+  eject.position.set(0.040, 0.026, 0.030);
+  g.add(eject);
+  g.userData.eject = eject;
+
+  /* ---- 手。右は握把、左は先台の下側を掴む。
+     先台を箱にしてあるので、掴む半径はライフル(0.031)より少し細く取る */
+  const handR = buildHand(1, {
+    gripR: 0.021, wrap: 0.50, trigger: true, armDir: [0.38, -0.62, 0.92], armLen: 0.62,
+  });
+  handR.position.set(0.008, -0.066, 0.120);
+  handR.rotation.set(-0.26, 0, 0);
+  g.add(handR);
+  g.userData.handR = handR;
+
+  const handL = buildHand(-1, {
+    gripR: 0.029, wrap: 0.62, tip: -0.32, roll: 0.52, skew: 0.22,
+    wrist: [0.046, -0.052, -0.038], armDir: [-0.38, -0.86, -0.78],
+  });
+  handL.position.set(0, S_BORE - 0.008, -0.300);
+  handL.rotation.set(-Math.PI / 2 + 0.10, 0, 0.12);
+  g.add(handL);
+  g.userData.handL = handL;
+
+  // 装填中に左手が辿る握り位置。弾倉が短いぶん、抜く所もライフルより浅い
+  g.userData.holdL = {
+    rest: [[0, S_BORE - 0.008, -0.300], [-Math.PI / 2 + 0.10, 0, 0.12]],
+    mag: [[0.014, -0.120, 0.024], [0.30, 0.22, -0.20]],
+    low: [[0.034, -0.280, 0.070], [0.55, 0.38, -0.30]],
+    charge: [[0.030, 0.030, 0.060], [0.85, 0.10, 0.30]],
+  };
+
+  bakeStatic(rear);
+  bakeStatic(bolt);
+  bakeStatic(mg);
+  bakeStatic(trg);
+  bakeStatic(g);
+  return g;
+}
+
 /* ---------------------------------------------------------- 武器定義 */
 
 /* ------------------------------------------------------------------ 短剣 */
@@ -2172,7 +2519,10 @@ function buildGrenade(view = {}) {
 
 export const WEAPONS = [
   {
-    id: 'rifle', name: 'MK-4 カービン', build: buildRifle,
+    // nickは画面の札と操作説明に出る短い呼び名。**表がここ1箇所を持つ。**
+    // 前は index.html と検査がそれぞれ「ライフル」と書いていて、
+    // 武器を足すたびに3箇所を手で揃えることになっていた
+    id: 'rifle', name: 'MK-4 カービン', nick: 'ライフル', build: buildRifle,
     damage: 27, headMult: 2.4, rpm: 640, auto: true, pellets: 1,
     // 予備は5マガジン分。240発(8マガジン)は「撃ち切る心配をしない」量で、
     // 弾を数える場面が最後まで来なかった。5本だと、当てずに撃ち続けると
@@ -2231,7 +2581,7 @@ export const WEAPONS = [
     },
   },
   {
-    id: 'shotgun', name: 'M870 ショットガン', build: buildShotgun,
+    id: 'shotgun', name: 'M870 ショットガン', nick: 'ショットガン', build: buildShotgun,
     damage: 13, headMult: 1.6, rpm: 78, auto: false, pellets: 9,
     // ライフルと同じで5マガジン分（56発＝8本から落とす）
     //
@@ -2259,7 +2609,7 @@ export const WEAPONS = [
     },
   },
   {
-    id: 'pistol', name: 'P-9 サイドアーム', build: buildPistol,
+    id: 'pistol', name: 'P-9 サイドアーム', nick: 'ピストル', build: buildPistol,
     // ライフルとショットガンの間に「軽くて素早いが火力が低い」枠が無かった。
     // 体力130に対して胴26＝5発。ライフルと同じ発数だが、
     // 連射が400/分（ライフルは640）なので**当て続ける時間が1.6倍かかる**。
@@ -2299,7 +2649,7 @@ export const WEAPONS = [
     },
   },
   {
-    id: 'knife', name: 'ナイフ', build: buildKnife, melee: true,
+    id: 'knife', name: 'ナイフ', nick: 'ナイフ', build: buildKnife, melee: true,
     // 胴で2回、頭なら1回。体力130に対して胴70×2＝140。
     // 1回で倒せると近づくだけで勝ててしまい、銃が要らなくなる
     // autoをtrueに。長押しで振り続けられないと、近接なのに
@@ -2348,7 +2698,7 @@ export const WEAPONS = [
     },
   },
   {
-    id: 'nade', name: '手榴弾', build: buildGrenade, melee: true, thrown: true,
+    id: 'nade', name: '手榴弾', nick: '手榴弾', build: buildGrenade, melee: true, thrown: true,
     // ダメージはサーバーのNADEが持つ。ここの値は使われないが、
     // 表の形を揃えないと他の武器と同じ道を通れない
     damage: 0, headMult: 1, rpm: 40, auto: false, pellets: 1,
@@ -2377,6 +2727,56 @@ export const WEAPONS = [
       bob: 1.10, sway: 0.85, kickK: 320, kickD: 20,
       kickUp: 0.40, kickSide: 0.30,
       boltTravel: 0, boltTime: 0, lower: 0.18,
+    },
+  },
+  {
+    id: 'sniper', name: 'SR-12 マークスマン', nick: 'スナイパー', build: buildSniper,
+    /* **1発の重さで勝負する銃。** 数字の決め方はこう:
+       ソロの敵は波が進むほど固くなり、体力は 100+min(波*12,120) で最大220。
+       胴110なら一番固い敵でもちょうど2発、頭は110*2.0=220で1発で倒れる。
+       ここを110より下げると、波が進んだ途端に「胴3発・頭2発」に化けて、
+       持っている意味が薄れる（一番当たらない銃が一番手数も要ることになる）。
+       対戦には出ないが、出したくなった時のために書いておくと、
+       人の体力は130なので胴2発・頭1発で同じ手触りになる */
+    damage: 110, headMult: 2.0, rpm: 48, auto: false, pellets: 1,
+    // 5発。予備は5弾倉ぶん（他の銃と同じ数え方）
+    mag: 5, reserve: 25, reloadTime: 3.0,
+    /* 腰だめは捨てる。0.055は20m先で1.1mに散る量で、当たったら事故という広さ。
+       覗いた時だけ0.0004（20m先で8mm）まで締まる。
+       **「覗かないと何もできない代わりに、覗けば当たる」**を数字で作る */
+    spreadHip: 0.055, spreadAds: 0.0004, spreadPerShot: 0.010, spreadMax: 0.075, spreadRecover: 0.22,
+    recoilPitch: 0.055, recoilYaw: 0.010, kick: 0.13,
+    /* ここが「アサルトより遠くまで覗ける」の実体。
+       ライフルの46度に対して16度なので、覗いた時の見え方は約3倍の大きさになる。
+       覗き終わるまでの時間も長くする（重い銃を担ぎ上げる分）*/
+    adsFov: 16, adsTime: 0.34,
+    /* 覗いている間の視点の効き。既定は0.45（＝感度55%）だが、3倍に伸びた画で
+       同じ効きだと、画面上では3倍の速さで景色が流れて狙いが定まらない。
+       0.72（＝28%）まで落とす。**倍率を上げる時はここも一緒に動かすこと** */
+    adsSlow: 0.72,
+    // 遠くでも威力が落ちにくい。100mまで素通し、180mで8割
+    range: 200, falloffStart: 100, falloffEnd: 180, falloffMin: 0.8,
+    // 低い胴と長い余韻。腹に来る帯(thump)も一番深く取る。
+    // 遠くまで届く音なので、他の銃より減衰を伸ばして「割れて残る」形にする
+    sound: { volume: 0.95, bodyFreq: 240, crackFreq: 3000, bodyDecay: 0.30, tailDecay: 1.05, thumpFrom: 130, thumpTo: 32 },
+    casing: true,
+    reloadKind: 'mag', holdOpen: true,
+    // 重い。担いでいる間は少し遅くなる
+    moveMul: 0.92,
+    view: {
+      /* 全長がライフルの1.27倍あるので、同じ縮尺だと画面から銃身がはみ出す。
+         縮尺を落として、そのぶん構えを手前へ引かない（引くと今度は銃床が目に近づく）。
+         adsScale/adsDistは望遠照準の寸法とセットで決まっている値で、
+         **動かすと addScope のケラレの計算が変わる。** あちらのコメントを読むこと */
+      scale: 0.78, adsScale: 0.60, adsDist: 0.130,
+      // 構えの向きはライフルとほぼ同じ。銃身とクロスヘアのズレは0.72度
+      hip: [0.205, -0.150, -0.505], hipRot: [-0.006, 0.011, 0.10],
+      // 重い銃なので揺れは大きく、跳ね返りは遅い
+      bob: 1.65, sway: 1.30, kickK: 180, kickD: 15,
+      // 1発が重いので大きく蹴り上げる。ショットガン(2.20)より上に置く
+      kickUp: 2.60, kickSide: 0.50,
+      // 遊底の行程。撃つたびに5.5cm引かれて戻る（_animatePartsが動かす）
+      boltTravel: 0.055, boltTime: 0.30, lower: 0.30,
     },
   },
 ];
@@ -2601,6 +3001,16 @@ export class WeaponSystem {
     this.swing = 0;
     // 手榴弾を長押しで構えている最中か。trueの間に離すと投げる
     this._throwCharging = false;
+    /* 投げ物の残り。**弾倉と違って武器ではなく持ち主が持つ物**なので、
+       Weaponではなくこちらに置く（拾った時も1箇所を足せば済む）。
+       ソロは投げた瞬間に、対戦はサーバーが「飛んだ」と言ってきた時に減る。
+       0になったら手から下ろす（takeNade を参照）*/
+    this.nades = NADE.PER_ROUND;
+    // 投げ切ったので、投げ終わったら手から下ろす、の印
+    this._holsterThrown = false;
+    // 自分から持ち替えた時に知らせる先。対戦では持っている物をサーバーへ
+    // 伝え直さないと、画面と当たり判定が別々の武器になる
+    this.onSwitched = null;
     this.flashTimer = 0;
     this.flashLife = 0.035;
     this.flashBase = 1;
@@ -2796,6 +3206,9 @@ export class WeaponSystem {
     // ここを外しても向こうで弾かれる（画面だけ持ち替わって当たり判定が
     // 元の武器のまま、という一番読めない食い違いになる）
     if (!this.carry.includes(i)) return false;
+    // 使い切った投げ物は握らない。**無い物を持って構えるのが一番おかしい。**
+    // 札は残したまま（残りの数を見せるため）、握るのだけ断る
+    if (this.weapons[i].def.thrown && this.nades <= 0) return false;
     if (this.switching > 0) return false;
     this.reloading = 0;
     this.shellReload = false;
@@ -2821,6 +3234,34 @@ export class WeaponSystem {
    * 増やした側が閉じる）
    */
   cancelThrowHold() { this._throwCharging = false; }
+
+  /**
+   * 投げ物を1つ使う。使えたらtrue。
+   *
+   * **使い切ったらその場で手から下ろす。** 遊んで「2発使い切ったら手榴弾持つのやめて。
+   * 無くなってんだから」と言われた所で、それまでは0本になっても構え続けていて、
+   * 左クリックのたびに空撃ちのカチッだけが鳴っていた。
+   *
+   * 持ち替え先は持ち物の先頭（＝主武器）。倒される直前に投げ切ることもあるので、
+   * 手ぶらに近い物へ落とすのではなく、すぐ撃てる物へ戻す
+   */
+  takeNade() {
+    if (this.nades <= 0) return false;
+    this.nades--;
+    /* **その場では替えない。** switchTo は持ち替えを跨いで前の武器の動きが
+       残らないよう swing を0に戻すので、ここで呼ぶと投げる動作が
+       始まった瞬間に消えて、玉だけ飛んで手は動かない絵になる。
+       印だけ立てて、投げ終わり（update側）で替える */
+    if (this.nades <= 0 && this.def.thrown) this._holsterThrown = true;
+    return true;
+  }
+
+  /** 拾って増える。上限は1回の出撃で持てる数（超えたぶんは捨てる） */
+  addNades(n) {
+    const before = this.nades;
+    this.nades = Math.min(NADE.PER_ROUND, this.nades + Math.max(0, n | 0));
+    return this.nades - before;
+  }
 
   /**
    * 装填を始める。始められたらtrue。
@@ -2970,6 +3411,9 @@ export class WeaponSystem {
     player.adsFactor = this.adsFactor;
     // 移動速度の倍率も武器から渡す。持ち替えた次のフレームから効く
     player.moveMul = d.moveMul || 1;
+    // 覗いている間に視点の効きをどれだけ落とすか。倍率の高い照準ほど、
+    // 同じ手の動きで景色が速く流れるので、武器ごとに変えられるようにしてある
+    player.adsSlow = d.adsSlow ?? 0.45;
 
     /* ---------------------------------------- スプレッドの回復 */
     // 発砲より前で回復させる。後ろに置くと、撃って足した0.0055を同じフレームで削ってから
@@ -3090,6 +3534,15 @@ export class WeaponSystem {
           if (w.reserve > 0 && this.reload()) this.playReloadSound(ctx.audio);
         }
       }
+    }
+
+    /* 投げ切った後の持ち替え。**投げる動作が終わってから**替える
+       （takeNade のコメント参照）。無い物を構え続けるのをやめるための物なので、
+       持ち替えが済んだ時点で用済み */
+    if (this._holsterThrown && this.swing <= 0 && this.switching <= 0) {
+      this._holsterThrown = false;
+      const to = this.carry[0];
+      if (d.thrown && to != null && this.switchTo(to)) this.onSwitched?.(to);
     }
 
     // 自動リロード（撃ち切ったら勝手に入れ替える）
@@ -3692,6 +4145,8 @@ export class WeaponSystem {
       w.flash.visible = false;
       w.restPose();
     }
+    // 投げ物も配り直す。**弾と同じ扱い**（出撃のたびに満タンから始まる）
+    this.nades = NADE.PER_ROUND;
     this.index = 0;
     this.current.model.visible = true;
     this.reloading = 0;

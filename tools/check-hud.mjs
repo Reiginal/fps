@@ -166,6 +166,46 @@ ok(pips.children.filter((p) => p._classes.has('on')).length === 3, '点いてい
 hud.bandage(1, 0, 2.4, false, 2);
 ok(pips.children.length === 2, `玉が2つに戻る (${pips.children.length}個)`);
 
+console.log('\n[11] 武器の札 … 数が変わる');
+/* 札はもう固定の4枚ではない。ソロは第2波で狙撃銃が増えて5枚になり、
+   ガンゲームは今の段の1本しか持たないので1枚になる。
+   手榴弾を投げ切った時は**枚数を変えずに薄くする**（消すと後ろの番号が繰り上がって、
+   押し慣れた数字と出てくる武器が変わってしまう） */
+{
+  const box = document.getElementById('slots');
+  const h3 = new HUD();
+  const items = (...names) => names.map((n) => ({ name: n, out: false }));
+
+  h3.weaponSlots(items('ライフル', 'ピストル', 'ナイフ', '手榴弾'));
+  ok(box.children.length === 4, `4枚組み上がる (${box.children.length}枚)`);
+  ok(box.children[0].textContent === '1 ライフル', `番号が付く (${box.children[0].textContent})`);
+  ok(box.children[3].textContent === '4 手榴弾', `4枚目まで付く (${box.children[3].textContent})`);
+
+  // 持ち替えると印が動く
+  h3.ammo(30, 90, 'MK-4 カービン', 0, 0, false);
+  ok(box.children[0]._classes.has('on'), '1枚目に印が付く');
+  h3.ammo(15, 75, 'P-9 サイドアーム', 1, 0, false);
+  ok(!box.children[0]._classes.has('on') && box.children[1]._classes.has('on'), '印が2枚目へ移る');
+
+  // 増える（第2波の支給）
+  h3.weaponSlots(items('ライフル', 'ピストル', 'ナイフ', '手榴弾', 'スナイパー'));
+  ok(box.children.length === 5, `5枚に増える (${box.children.length}枚)`);
+  ok(box.children[4].textContent === '5 スナイパー', `5番が出る (${box.children[4].textContent})`);
+  ok(box.children[1]._classes.has('on'), '増やしても印は残る');
+
+  // 使い切った札は薄くする（枚数は変えない）
+  const withOut = items('ライフル', 'ピストル', 'ナイフ', '手榴弾', 'スナイパー');
+  withOut[3].out = true;
+  h3.weaponSlots(withOut);
+  ok(box.children.length === 5, '薄くしても枚数は変わらない');
+  ok(box.children[3]._classes.has('out'), '手榴弾の札が薄くなる');
+  ok(box.children[3].textContent === '4 手榴弾', '番号も文字もそのまま');
+
+  // 減る（ガンゲームは1本だけ）
+  h3.weaponSlots(items('ライフル'));
+  ok(box.children.length === 1, `1枚まで減らせる (${box.children.length}枚)`);
+}
+
 console.log('\n[軽さ] 毎フレームの無駄をしていない');
 /* **遊ぶ人のPCが熱くなったら、その時点で他が全部どうでもよくなる。**
    HUDは毎フレーム呼ばれるので、ここでの「同じ値をもう一度書く」がそのまま
@@ -210,6 +250,21 @@ console.log('\n[軽さ] 毎フレームの無駄をしていない');
     ok(count() <= 1, `押しっぱなしでも作り直さない（10回呼んで${count()}回）`);
     h2.scoreboard([{ ...rows[0], kills: 3 }], true);
     ok(count() === 2, '点が動いたら作り直す');
+  }
+
+  // 武器の札。持ち物が変わっていない限り、DOMには指1本触れない。
+  // ここは毎フレーム呼ばれる（main.jsの_weaponSlotsHud）ので、
+  // 作り直すと1秒に60回divを捨てて作り直すことになる
+  {
+    const h2 = new HUD();
+    const box = el('slots');
+    const items = ['ライフル', 'ピストル', 'ナイフ', '手榴弾'].map((n) => ({ name: n, out: false }));
+    h2.weaponSlots(items);
+    const count = writes(box.children[0], 'textContent');
+    for (let i = 0; i < 10; i++) h2.weaponSlots(items);
+    ok(count() === 0, `同じ持ち物なら10回呼んでも書かない（${count()}回）`);
+    h2.weaponSlots([...items, { name: 'スナイパー', out: false }]);
+    ok(count() >= 0 && box.children.length === 5, '増えた時はちゃんと組み直す');
   }
 
   // 地図。**毎フレーム塗り直さない**（塗るたびに絵を画面へ送り直すことになる）

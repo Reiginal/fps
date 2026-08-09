@@ -173,6 +173,9 @@
     border: 1px solid rgba(255,255,255,.18); color: var(--dim);
   }
   .slot.on { border-color: var(--accent); color: var(--accent); background: rgba(99,210,255,.08); }
+  /* 使い切って持てなくなった物（手榴弾を投げ切った後）。
+     札は残す。消すと後ろの番号が繰り上がって、押し慣れた数字と出てくる物が変わる */
+  .slot.out { opacity: .32; text-decoration: line-through; }
 
   /* ----------------------------------------------------------- 上部 */
   .top { position: absolute; left: 0; right: 0; top: 0; padding: 24px 34px; display: flex; justify-content: space-between; }
@@ -991,6 +994,10 @@
       <!-- 並びは protocol.js の LOADOUT_IDS と揃える。
            HUDの札(#slots)と2箇所あるので、tools/check-loadout.mjs が両方を見張る -->
       <b>1 / 2 / 3 / 4</b><span>ライフル / ピストル / ナイフ / 手榴弾</span>
+      <!-- 5番は最初から持っている物ではないので、上の行とは分けて書く。
+           上の行の並びは protocol.js の LOADOUT_IDS と揃っていること
+           （tools/check-loadout.mjs が数字の数まで見ている）-->
+      <b>5</b><span>スナイパー（1人プレイで第2波から支給）</span>
       <b>F</b><span>包帯を巻く</span>
       <b>V</b><span>押している間だけ味方に話す</span>
       <b>ESC</b><span>一時停止</span>
