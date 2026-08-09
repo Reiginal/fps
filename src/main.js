@@ -38,7 +38,8 @@ import { RemotePlayers } from './net/remote.js';
 import { preloadCharModel, SOLO_MODEL } from './ai/glbchar.js';
 import { FarShadowGate } from './world/shadowgate.js';
 import {
-  K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, HP, outsideZone, CHARACTERS,
+  K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, HP, blastDamage,
+  outsideZone, CHARACTERS,
   TEAM_NAMES, soloUnlocksAt,
 } from './net/protocol.js';
 
@@ -3446,7 +3447,9 @@ class Game {
       // 遮蔽の有無だけ分かればよいのでoctreeで見る
       if (this._terrainRay(pos, _throwDir, len)) continue;
 
-      const dmg = Math.max(NADE.MIN_DMG, NADE.BLAST_DMG * (1 - d / NADE.BLAST_R));
+      // 1人用なので倍率は掛けない。敵(enemy.js)の体力は波で増える別の作りなので、
+      // 対戦の体力に合わせて持ち上げると、こちらの手応えまで巻き添えになる
+      const dmg = blastDamage(d);
       if (e.hit(dmg, 'chest')) {
         /* 的（チュートリアル・訓練場）の時は_onKillを呼ばない。的は自分の
            onDeathで音と札を出すので、両方呼ぶと「的を撃破」と「敵兵を排除」が
@@ -3465,7 +3468,7 @@ class Game {
     const me = this.player.collider.start;
     const dm = Math.hypot(me.x - pos.x, me.y + 0.5 - pos.y, me.z - pos.z);
     if (dm <= NADE.BLAST_R && this.player.alive && !this.range) {
-      this.player.damage(Math.max(NADE.MIN_DMG, NADE.BLAST_DMG * (1 - dm / NADE.BLAST_R)));
+      this.player.damage(blastDamage(dm));
       this.damageFlash = Math.min(0.6, this.damageFlash + 0.4);
       if (!this.player.alive) this._onPlayerDown();
     }
