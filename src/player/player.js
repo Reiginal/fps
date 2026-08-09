@@ -99,8 +99,21 @@ const SLIDE_FRICTION = 1.2;
 const SLIDE_STEER = 2.2;
 // 終わってから次に滑れるまで
 const SLIDE_COOLDOWN_S = 1.1;
-// 1回ぶんの息。3回続けて滑ると息が切れる量
-const SLIDE_STAMINA = 0.34;
+/* 1回ぶんの息。**ほとんど取らない。**
+
+   元は0.34（走り1秒ぶん）にしていたが、滑るには先に6.3m/sまで走る必要があるので、
+   **1回滑るのに走りの3秒のうち2秒を払う**ことになっていた。実測すると
+   「1.5秒走る→滑る→また走る」で滑り終わりの1秒後に息が尽き、
+   7.4m/sから4.7m/sへ落ちてそこから3秒走れない。
+   2.5秒走ってから滑ろうとすると、息が足りずにそもそも滑れなかった。
+
+   遊ぶ側からは**「滑ったあと止まる」**としか見えない。
+   一番使いたい「走って詰めて滑り込む」が、一番できない形になっていた。
+
+   連打の歯止めは息ではなく待ち時間(SLIDE_COOLDOWN_S)が持っている。
+   滑り終わりの4.0m/sから6.3m/sまで走り直すのに約0.5秒かかるので、
+   待ち1.1秒と合わせて1回あたり2秒近く空く。息まで取る必要が無い */
+const SLIDE_STAMINA = 0.10;
 
 /* ------------------------------------------------------------ 落下ダメージ */
 
@@ -568,9 +581,15 @@ export class Player {
     }
 
     /* ---------------------------------------------------- しゃがみ */
-    // MetaはMacのCommand。対戦側の割り当て(protocol.jsのKEY_CODES)と揃えてある
-    const crouchKey = this.alive && (input.down('ControlLeft') || input.down('KeyC')
-      || input.down('MetaLeft') || input.down('MetaRight'));
+    /* しゃがみはCtrlとC。対戦側の割り当て(protocol.jsのKEY_CODES)と揃えてある。
+
+       **Command(Meta)は外してある。** 前は「Macの小指が自然に届く」ので入れていたが、
+       Commandでしゃがむと**離した瞬間に完全に止まる**（実測v=0）。
+       input.jsがCommandのkeyupで押しているキーを全部落としているためで、
+       あれはMacがCommand押下中に他キーのkeyupを送らない事への対策として要る。
+       つまりCommandをゲームの操作に使うこと自体が噛み合っていない。
+       走りながらしゃがんだ瞬間に棒立ちになるより、キーが1つ減るほうが軽い */
+    const crouchKey = this.alive && (input.down('ControlLeft') || input.down('KeyC'));
     this._slideCd = Math.max(0, this._slideCd - dt);
     /* **滑り出しに使った押し下げを、滑り終わった後まで持ち越さない。**
 

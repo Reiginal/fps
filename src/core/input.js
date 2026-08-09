@@ -77,7 +77,12 @@ export class Input {
       // 前へ走り続ける（戦域の外へ出て力尽きる）。
       // Commandが離れた時点で全部落とす。取りこぼした物がここで必ず消える。
       // 本当に押し続けていたキーまで落ちるが、押し直せば戻る。
-      // 「勝手に走り続ける」より「一瞬止まる」のほうが被害が小さい
+      // 「勝手に走り続ける」より「一瞬止まる」のほうが被害が小さい。
+      //
+      // **だからCommandはゲームの操作に割り当てない。** 一時期しゃがみに入れていたが、
+      // 走りながらしゃがんだ瞬間にここが走って、手を離していないのに棒立ちになった
+      // （実測で速度が0まで落ちる）。しゃがみはCtrlとCだけにしてある
+      // （protocol.jsのKEY_CODES）。ここは「Cmd+Tabで抜けた時の後始末」専用
       if (e.code === 'MetaLeft' || e.code === 'MetaRight') this.keys.clear();
     });
     addEventListener('blur', () => { this.keys.clear(); this.buttons.fill(false); });
