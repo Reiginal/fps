@@ -28,7 +28,9 @@ async function api(path, { method = 'GET', body } = {}) {
     credentials: 'same-origin',
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
-  // 404は「この置き場に会員証の仕組みが無い」。中身は読まない
+  /* 404は「この置き場に会員証の仕組みが無い」。中身は読まない。
+     「/api/me」はこれを返さない（台帳が無くても200で accounts:false と答える）。
+     ここへ来るのは登録・ログイン・ログアウトの口だけ */
   if (res.status === 404) return { off: true };
   let json = null;
   try { json = await res.json(); } catch { /* 中身が無い返事もある */ }
@@ -77,7 +79,9 @@ export class AccountMenu {
       // 繋がらない。会員証は無いものとして扱う（遊べなくはならない）
       r = { off: true };
     }
-    this.available = !r.off;
+    /* accounts:false は「この置き場に台帳が無い」。off は繋がらなかった時。
+       どちらでも行ごと出さない（押しても何も起きないボタンは、無いより分かりにくい） */
+    this.available = !r.off && r.accounts !== false;
     this.user = r.user || null;
     this._paint();
     this._verifiedNote();

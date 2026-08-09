@@ -113,12 +113,17 @@ async function serveStatic(req, res) {
     // ここが誰でも叩けて全部屋の合言葉と人数が取れていた。
     // 今は部屋が1つなので隠す物も無いが、外に増やす口を作らない方針は変えない
 
-    /* 会員証の口。**台帳(DATABASE_URL)が無ければ、口ごと無かったことにする。**
-       404を返すのは/logsと同じ考えで、「有るけど使えない」より
-       「無い」の方が外から見て手掛かりが減る。
-       遊ぶ側は/api/meが404なら、ログインの行そのものを画面に出さない */
+    /* 会員証の口。**台帳(DATABASE_URL)が無ければ、書き込む口は無かったことにする。**
+       「有るけど使えない」より「無い」の方が、外から見て手掛かりが減る。
+
+       **ただし /api/me だけは、台帳が無くても200で「ここには無い」と答える。**
+       ここも404にしていたら、台帳を置いていない本番で
+       **遊ぶ人全員のコンソールに毎回404が1件出た**（e2eが止めた）。
+       毎回出るエラーは、本当のエラーがそこに紛れて読めなくなるので害が大きい。
+       しかも/api/meは隠す中身が何も無い（ログインの画面は誰にでも見える）ので、
+       404にして得られる物が最初から無かった */
     if (url.startsWith('/api/')) {
-      if (!accountsOn) { res.writeHead(404).end('not found'); return; }
+      if (!accountsOn && url !== '/api/me') { res.writeHead(404).end('not found'); return; }
       await handleApi(url, req, res);
       return;
     }
@@ -274,8 +279,11 @@ async function routeApi(url, req, res) {
 
   if (url === '/api/me') {
     if (req.method !== 'GET') { res.writeHead(405).end('get only'); return; }
+    /* 台帳を置いていない置き場。**エラーではなく「無い」と答える。**
+       遊ぶ側はこれを見て、ログインの行そのものを画面に出さない */
+    if (!accountsOn) { sendJson(res, 200, { ok: true, accounts: false, user: null }); return; }
     if (!meLimit.allow(`me|${ip}`, Date.now())) { sendJson(res, 429, { ok: false, error: '少し待ってください' }); return; }
-    sendJson(res, 200, { ok: true, user: await auth.sessionUser(db.query, token) });
+    sendJson(res, 200, { ok: true, accounts: true, user: await auth.sessionUser(db.query, token) });
     return;
   }
 

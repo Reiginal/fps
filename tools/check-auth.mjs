@@ -337,8 +337,17 @@ console.log('\n[13] 台帳の作り替えの手順');
 console.log('\n[14] 台帳が無ければ、口ごと消える');
 {
   const src = readFileSync(new URL('../server/index.js', import.meta.url), 'utf8');
-  ok(/if \(!accountsOn\) \{ res\.writeHead\(404\)/.test(src),
-    '**/api/ は accountsOn が立っていなければ404**（「有るけど使えない」を作らない）');
+  ok(/if \(!accountsOn && url !== '\/api\/me'\) \{ res\.writeHead\(404\)/.test(src),
+    '**書き込む口は accountsOn が立っていなければ404**（「有るけど使えない」を作らない）');
+
+  /* 「/api/me」だけは404にしない。
+     ここを404にすると、台帳を置いていない本番で遊ぶ人全員のコンソールに
+     毎回404が1件出る（実際にe2eがデプロイを止めた）。
+     毎回出るエラーは、本当のエラーがそこに紛れて読めなくなる */
+  ok(/if \(!accountsOn\) \{ sendJson\(res, 200, \{ ok: true, accounts: false/.test(src),
+    '**/api/me は台帳が無くても200で「無い」と答える**（コンソールに404を出さない）');
+  const ui = readFileSync(new URL('../src/ui/account.js', import.meta.url), 'utf8');
+  ok(/r\.accounts !== false/.test(ui), '画面はその返事を読んで、行ごと出さない');
   ok(/accountsOn = true/.test(src) && src.indexOf('await db.setup()') < src.indexOf('accountsOn = true'),
     '表を作り終えて初めて口が開く（繋げなかった時に開きっぱなしにしない）');
 
