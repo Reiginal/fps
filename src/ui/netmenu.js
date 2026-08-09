@@ -113,6 +113,26 @@ export class NetMenu {
   /** 入力欄の名前。1人で遊ぶ時は必須ではないので、空のこともある */
   get playerName() { return this.el.name.value.trim(); }
 
+  /**
+   * ログインしている人の名前を差し込む。**打てなくする所まで含めて1つの操作。**
+   *
+   * ログイン中はサーバーが台帳の名前で上書きする（server/index.jsのonJoin）ので、
+   * ここで打てるままにしておくと「変えたのに変わらない」になる。
+   *
+   * @param name ログインしている人の名前。ログアウトしたらnullで戻す
+   */
+  setAccountName(name) {
+    if (name) {
+      // 打っていた名前は消さずに覚えておく。ログアウトしたら戻す
+      if (this._typedName == null) this._typedName = this.el.name.value;
+      this.el.name.value = name;
+      this.el.name.disabled = true;
+    } else {
+      this.el.name.disabled = false;
+      if (this._typedName != null) { this.el.name.value = this._typedName; this._typedName = null; }
+    }
+  }
+
   /** 接続中はボタンを止める。連打されると同じ部屋へ何本も繋ぎにいく */
   setBusy(on) {
     this.busy = !!on;
@@ -143,6 +163,10 @@ export class NetMenu {
   }
 
   _store() {
+    /* **ログイン中はこの端末の名前を上書きしない。**
+       上書きすると、ログアウトした時に打っていた名前が
+       アカウントの名前に化けて戻ってくる */
+    if (this._typedName != null) return;
     save(SAVE.name, this.el.name.value.trim());
   }
 }

@@ -24,6 +24,9 @@ import {
 } from './report.js';
 import { logs, canViewLogs, isLocal, renderPage } from './logs.js';
 import { WEAPONS, weaponsSource } from './sim.js';
+import * as db from './db.js';
+import * as auth from './auth.js';
+import { sendVerifyMail } from './mail.js';
 import {
   C, Sv, decode, encode, TIMEOUT_MS, CHAT_MAX, CHAT_GAP_MS,
 } from '../src/net/protocol.js';
@@ -110,6 +113,16 @@ async function serveStatic(req, res) {
     // ここが誰でも叩けて全部屋の合言葉と人数が取れていた。
     // 今は部屋が1つなので隠す物も無いが、外に増やす口を作らない方針は変えない
 
+    /* 会員証の口。**台帳(DATABASE_URL)が無ければ、口ごと無かったことにする。**
+       404を返すのは/logsと同じ考えで、「有るけど使えない」より
+       「無い」の方が外から見て手掛かりが減る。
+       遊ぶ側は/api/meが404なら、ログインの行そのものを画面に出さない */
+    if (url.startsWith('/api/')) {
+      if (!accountsOn) { res.writeHead(404).end('not found'); return; }
+      await handleApi(url, req, res);
+      return;
+    }
+
     // 配ってよい物か。ここを通らない物は、存在していても無いものとして返す
     const rel = publicPath(req.url);
     if (!rel) {
@@ -185,6 +198,152 @@ async function handleReport(req, res) {
   res.writeHead(204).end();
 }
 
+/* ---------------------------------------------------------- 会員証 */
+
+// 判定は全部 server/auth.js が持つ（server/index.js は読み込むと起動するので、
+// 判定をここに書くと検査から叩けない。serve-rules.js / report.js と同じ）。
+// ここがやるのは「受け取る・呼ぶ・返す」だけ。
+
+/* 会員証が本当に使えるか。**DATABASE_URLがあるだけでは足りない。**
+   台帳に繋げなかった時にここがtrueのままだと、
+   ログインの画面は出るのに押すたびに500が返る（一番たちが悪い形）。
+   起動時に表を作り終えて初めてtrueになる */
+let accountsOn = false;
+
+// 送られてくる本文の上限。メアドとパスワードと名前しか来ないので小さくてよい
+const AUTH_BODY_MAX = 2 * 1024;
+/* 総当たりの見張り。**ログインだけ厳しくする。**
+   2回/秒まで落とせば、8文字のパスワードを総当たりするのに何万年もかかる。
+   同じ家から2人が同時に入る時に1回待たされるが、429の文言で分かるようにしてある */
+const loginLimit = new ReportLimiter(500);
+// 入会はもっと遅くていい。連続で作られると台帳がゴミで埋まる
+const registerLimit = new ReportLimiter(5000);
+// 「今誰か」を聞くのは画面を開くたびなので緩く。それでも叩き放題にはしない
+const meLimit = new ReportLimiter(200);
+
+/* Flyの向こうにいる時、本当の送り元と本当の道筋はヘッダに入る。
+   secure を取り違えると、httpsなのにCookieにSecureが付かない（危ない）か、
+   手元(http)なのにSecureが付いてCookieが1つも保存されない（ログインできない）*/
+const clientIp = (req) => String(req.headers['fly-client-ip'] || req.socket.remoteAddress || '?');
+const isHttps = (req) => String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
+
+const sendJson = (res, code, obj, extra) => {
+  res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...extra });
+  res.end(JSON.stringify(obj));
+};
+
+/** 本文をJSONとして読む。壊れていたらnull（呼ぶ側が400を返す） */
+async function readJson(req, res) {
+  let body = '';
+  for await (const chunk of req) {
+    body += chunk;
+    if (body.length > AUTH_BODY_MAX) { res.writeHead(413).end('too big'); return undefined; }
+  }
+  try {
+    const o = JSON.parse(body || '{}');
+    return (o && typeof o === 'object' && !Array.isArray(o)) ? o : null;
+  } catch { return null; }
+}
+
+/* 他所のページから勝手に叩かれていないか。
+   CookieのSameSite=Laxでほぼ防げているが、**入口でも一応見る。**
+   Originが付いていない古い相手は通す（付けてくる相手だけ突き合わせる） */
+function sameOrigin(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  try { return new URL(origin).host === String(req.headers.host || ''); } catch { return false; }
+}
+
+/* 台帳が一瞬落ちても、返すのは500の1件だけにする。
+   投げっぱなしにすると serveStatic の catch が404を返しにいって、
+   **既にヘッダを送った後だともう一度投げる**（そこは誰も拾わない） */
+async function handleApi(url, req, res) {
+  try {
+    await routeApi(url, req, res);
+  } catch (e) {
+    console.warn(`[auth] ${url} で例外: ${e && e.message}`);
+    logs.add('error', { message: e && e.message, where: url });
+    if (!res.headersSent) sendJson(res, 500, { ok: false, error: '今うまくいきませんでした。少し待ってからもう一度' });
+  }
+}
+
+async function routeApi(url, req, res) {
+  const ip = clientIp(req);
+  const secure = isHttps(req);
+  const token = auth.readCookie(req.headers.cookie);
+
+  if (url === '/api/me') {
+    if (req.method !== 'GET') { res.writeHead(405).end('get only'); return; }
+    if (!meLimit.allow(`me|${ip}`, Date.now())) { sendJson(res, 429, { ok: false, error: '少し待ってください' }); return; }
+    sendJson(res, 200, { ok: true, user: await auth.sessionUser(db.query, token) });
+    return;
+  }
+
+  if (url === '/api/verify') {
+    if (req.method !== 'GET') { res.writeHead(405).end('get only'); return; }
+    const t = new URL(req.url, 'http://x').searchParams.get('t') || '';
+    const user = await auth.verifyEmail(db.query, t);
+    /* **踏んだ人はブラウザで見ている。**JSONを返すと生の中括弧が画面に出る。
+       ホームへ戻す。合言葉が古い時も同じ所へ戻して、印だけ変える */
+    res.writeHead(303, { location: user ? '/?verified=1' : '/?verified=0' }).end();
+    if (user) logs.add('auth', { message: 'メールを確認した', name: user.name });
+    return;
+  }
+
+  // ここから下は全部POST
+  if (req.method !== 'POST') { res.writeHead(405).end('post only'); return; }
+  if (!sameOrigin(req)) { res.writeHead(403).end('forbidden'); return; }
+
+  if (url === '/api/logout') {
+    await auth.logout(db.query, token);
+    sendJson(res, 200, { ok: true, user: null }, { 'set-cookie': auth.clearCookieHeader({ secure }) });
+    return;
+  }
+
+  if (url === '/api/register') {
+    if (!registerLimit.allow(`reg|${ip}`, Date.now())) {
+      sendJson(res, 429, { ok: false, error: '続けて登録はできません。少し待ってください' });
+      return;
+    }
+    const body = await readJson(req, res);
+    if (body === undefined) return;
+    if (!body) { sendJson(res, 400, { ok: false, error: '送られた中身が読めません' }); return; }
+
+    const r = await auth.register(db.query, body);
+    if (!r.ok) { sendJson(res, 400, r); return; }
+    /* **メールが送れなくても登録は成功のまま返す。**
+       ここで失敗にすると、台帳には会員が居るのに画面には「登録できませんでした」と出て、
+       もう一度登録しても「登録済みです」で詰む */
+    await sendVerifyMail(r.user.email, r.emailToken);
+    // 入会したらそのままログイン状態にする。登録の直後にもう一度
+    // メアドとパスワードを打たせる理由が無い
+    const s = await auth.login(db.query, { email: body.email, password: body.password });
+    logs.add('auth', { message: '入会した', name: r.user.name });
+    sendJson(res, 200, { ok: true, user: r.user },
+      s.ok ? { 'set-cookie': auth.cookieHeader(s.token, { secure }) } : undefined);
+    return;
+  }
+
+  if (url === '/api/login') {
+    if (!loginLimit.allow(`log|${ip}`, Date.now())) {
+      sendJson(res, 429, { ok: false, error: '続けて試しすぎです。少し待ってください' });
+      return;
+    }
+    const body = await readJson(req, res);
+    if (body === undefined) return;
+    if (!body) { sendJson(res, 400, { ok: false, error: '送られた中身が読めません' }); return; }
+
+    const r = await auth.login(db.query, body);
+    // 401は「合っていない」。中身は言い分けない（auth.jsの説明の通り）
+    if (!r.ok) { sendJson(res, 401, r); return; }
+    logs.add('auth', { message: 'ログインした', name: r.user.name });
+    sendJson(res, 200, { ok: true, user: r.user }, { 'set-cookie': auth.cookieHeader(r.token, { secure }) });
+    return;
+  }
+
+  res.writeHead(404).end('not found');
+}
+
 /* ------------------------------------------------------ 値の検査 */
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -222,6 +381,13 @@ class Conn {
     this.pingSentAt = 0;
     this.msgCount = 0;
     this.msgWindowAt = Date.now();
+    /* 会員かどうかを調べている最中の約束。**繋いだ時点で調べ始める。**
+       台帳が寝ていると起きるのに数百ミリ秒かかるので、
+       JOINが来てから調べ始めると、そのぶん入場が遅れる。
+       ログインしていない人・台帳が無い時は null に解決する */
+    this.userReady = Promise.resolve(null);
+    this.user = null;
+    this.joining = false;
   }
 
   send(msg) {
@@ -251,9 +417,27 @@ const conns = new Set();
 const _o = new THREE.Vector3();
 const _d = new THREE.Vector3();
 
-wss.on('connection', (ws) => {
+/* **WebSocketの最初の一回は普通のHTTPリクエスト。**
+   だからブラウザはそこにCookieを勝手に付けてくる。
+   会員かどうかはここで読むだけで分かり、遊ぶ側は何も送らなくていい。
+
+   前は名前が自己申告で、送られた文字列をそのまま信じていた
+   （src/net/client.jsのJOIN）。ログインしている人はここで分かるので、
+   onJoinが名前を上書きする＝**名乗りのなりすましが消える** */
+wss.on('connection', (ws, req) => {
   const conn = new Conn(ws);
   conns.add(conn);
+
+  if (accountsOn) {
+    const token = auth.readCookie(req?.headers?.cookie);
+    if (token) {
+      // 台帳が落ちていても対戦は続くべきなので、失敗は「ログインしていない」に倒す
+      conn.userReady = auth.sessionUser(db.query, token).catch((e) => {
+        console.warn('[auth] 札を読めなかった:', e.message);
+        return null;
+      });
+    }
+  }
 
   ws.on('message', (raw) => {
     try {
@@ -292,6 +476,10 @@ function onMessage(conn, raw) {
   if (!m) return;   // 壊れたJSONはdecodeがnullを返す
 
   switch (m.t) {
+    /* JOINだけ待ちが入る（会員かどうかを台帳へ聞く）。
+       **上のtry/catchは約束の中の失敗を拾えないので、onJoinが自分で拾う。**
+       並びは他の受け口と同じ形に揃えてある（tools/check-protocol.mjs が
+       この形で受け口を数えているので、崩すと受け口が1本消えたことになる） */
     case C.JOIN: return onJoin(conn, m);
     case C.INPUT: return onInput(conn, m);
     case C.SHOT: return onShot(conn, m);
@@ -309,36 +497,65 @@ function onMessage(conn, raw) {
   }
 }
 
-function onJoin(conn, m) {
+async function onJoin(conn, m) {
   if (conn.slot) return;   // 二重参加は無視
+  /* 会員かどうかを待っている間にもう1通JOINが来ると、両方が席を取りにいく。
+     その時点ではまだ conn.slot が立っていないので、上の行では止まらない */
+  if (conn.joining) return;
+  conn.joining = true;
 
   // 名前から制御文字を剥がす。他人の端末に表示される文字列なので、
   // 端末の表示を壊す文字や改行を混ぜられないようにする
-  const name = typeof m.name === 'string'
+  let name = typeof m.name === 'string'
     // eslint-disable-next-line no-control-regex -- 制御文字を消すのが目的の正規表現
     ? m.name.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 16) || '名無し'
     : '名無し';
-  // 前に入った時の合言葉。回線が切れて入り直した時、これが合えば
-  // 席・点数・ラウンド数が返る。文字でなければ黙って無視する
-  const token = typeof m.tk === 'string' ? m.tk.slice(0, 64) : null;
-  // 部屋はサーバーに1つだけ。繋いだ人は全員そこへ入る
-  const room = getRoom(world);
-  const slot = room.join(conn, name, token);
-  if (!slot) {
-    conn.send({ t: Sv.FULL, why: 'この部屋は満員' });
-    conn.close('full');
-    return;
+  /* **ログインしている人の名前は、送られた物ではなく台帳の物を使う。**
+     会員証を作った一番わかりやすい見返りがここで、
+     「他人の名前を名乗って入る」が成立しなくなる。
+
+     **失敗はここで拾いきる。** onMessage の try/catch は
+     この関数が返した約束の中の失敗を拾えないので、外へ出すと誰も受けない */
+  try {
+    conn.user = await conn.userReady;
+  } catch (e) {
+    console.warn(`[auth] 札を読めなかった: ${e && e.message}`);
+    conn.user = null;
   }
-  conn.slot = slot;
-  conn.room = room;
-  conn.send(room.welcome(slot));
-  // ロビーはお迎えの後で配る。順番が逆だと、入ってきた本人の画面は
-  // まだ受け口を繋いでいないので、先にいた人が誰も映らないまま始まる
-  room.sendLobby();
-  // 復帰かどうかをログに残す。「切れた人が戻れているのか」は
-  // 遊んでいる本人に聞いても「なんか切れた」しか返ってこないので、ここでしか分からない
-  console.log(`[net] ${name} が${slot.back ? '戻ってきた' : '入った'} (${room.slots.size}人)`);
-  logs.add('join', { name, count: room.slots.size, back: slot.back || undefined });
+  if (conn.user) name = conn.user.name;
+
+  // 待っている間に切れていることがある。席を取る前に確かめる
+  if (conn.ws.readyState !== 1) { conn.joining = false; return; }
+
+  /* ここから先も、待った後なので**失敗が外へ出ても誰も受けない。**
+     1人の入場でプロセスごと落とさないよう、この関数の中で拾いきる */
+  try {
+    // 前に入った時の合言葉。回線が切れて入り直した時、これが合えば
+    // 席・点数・ラウンド数が返る。文字でなければ黙って無視する
+    const token = typeof m.tk === 'string' ? m.tk.slice(0, 64) : null;
+    // 部屋はサーバーに1つだけ。繋いだ人は全員そこへ入る
+    const room = getRoom(world);
+    const slot = room.join(conn, name, token);
+    if (!slot) {
+      conn.send({ t: Sv.FULL, why: 'この部屋は満員' });
+      conn.close('full');
+      return;
+    }
+    conn.slot = slot;
+    conn.room = room;
+    conn.send(room.welcome(slot));
+    // ロビーはお迎えの後で配る。順番が逆だと、入ってきた本人の画面は
+    // まだ受け口を繋いでいないので、先にいた人が誰も映らないまま始まる
+    room.sendLobby();
+    // 復帰かどうかをログに残す。「切れた人が戻れているのか」は
+    // 遊んでいる本人に聞いても「なんか切れた」しか返ってこないので、ここでしか分からない
+    console.log(`[net] ${name} が${slot.back ? '戻ってきた' : '入った'} (${room.slots.size}人)`);
+    logs.add('join', { name, count: room.slots.size, back: slot.back || undefined });
+  } catch (e) {
+    console.warn(`[net] 入場で例外: ${e && e.message}`);
+    logs.add('net', { message: e && e.message, who: name });
+    conn.joining = false;
+  }
 }
 
 /* 声の合図を相手へ渡すだけ。**中身(m.d)は読まない。**
@@ -615,6 +832,8 @@ function shutdown(signal) {
     for (const c of wss.clients) {
       try { c.close(1001, 'server shutdown'); } catch { /* 既に切れている */ }
     }
+    // 台帳への線も畳む。畳まないとプロセスがいつまでも終わらない
+    db.close().catch(() => {});
     server.close(() => process.exit(0));
     // 閉じ切らない接続が残っても、いつかは落ちる
     setTimeout(() => process.exit(0), 3000).unref();
@@ -631,6 +850,28 @@ server.listen(PORT, async () => {
   // デプロイのたびに全部消える。**その境目がどこかを表の上で分かるようにしておく**。
   // これが無いと「静かだ」なのか「さっき消えた」なのかが読めない
   logs.add('boot', { weapons: weaponsSource, port: PORT });
+
+  /* 台帳を最新の形まで持っていく。**繋げなくても遊べる状態で続ける。**
+     ここで投げると、DBが一瞬落ちているだけでゲームごと起動しなくなる。
+     アカウントの口は/api/*が404になるだけで、対戦も1人プレイも今まで通り動く */
+  if (db.isEnabled()) {
+    try {
+      await db.setup();
+      accountsOn = true;
+      console.log('  会員証            使える（DATABASE_URLあり）');
+      /* 期限の切れた札を捨てる。放っておくとログインのたびに1行増えて二度と減らない。
+         1時間ごとで足りる（30日の札なので、少し遅れても誰も困らない）。
+         unref を付けてあるのは、この待ちがあるせいでプロセスが終われなくなるのを防ぐため */
+      setInterval(() => {
+        auth.sweepExpired(db.query).catch((e) => console.warn('[db] 掃除で失敗:', e.message));
+      }, 3600_000).unref();
+    } catch (e) {
+      console.warn(`[db] 台帳に繋げなかった。アカウント機能は畳んで続ける: ${e.message}`);
+      logs.add('error', { message: `台帳に繋げなかった: ${e.message}`, where: 'db.setup' });
+    }
+  } else {
+    console.log('  会員証            使わない（DATABASE_URLが無い）');
+  }
 
   const lan = await lanAddress();
   console.log('\n  BLACKOUT');

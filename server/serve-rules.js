@@ -10,8 +10,10 @@
 // 誰でも取れる。当たり判定の中身が読めると、当たったことにする細工を作るのが楽になる。
 import { normalize } from 'node:path';
 
-// 配ってよい単体のファイル
-const FILES = new Set(['/index.html']);
+// 配ってよい単体のファイル。
+// privacy.html は個人情報の扱い。メールアドレスを預かる以上、掲示が要る。
+// ゲーム本体とは別の1枚にしてあるので、ここに名前を足さないと404になる
+const FILES = new Set(['/index.html', '/privacy.html']);
 
 // 配ってよいディレクトリ。この下は全部通す
 const DIRS = [
