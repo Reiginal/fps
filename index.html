@@ -173,6 +173,9 @@
      1〜4と同じ見た目にすると武器と混ざるので、枠を点線にして区別する */
   #slots2 { display: flex; gap: 6px; margin-top: 5px; }
   #slots2 .slot { border-style: dashed; }
+  /* 支給されるまでは畳んでおく。場所だけ空けておくと、
+     何も無い枠が最初から1つ並んでいることになる */
+  #slots2 .slot.hide { display: none; }
   #slots2 .slot.ready { border-color: rgba(126,224,138,.7); color: #9fe8a8; }
   #slots2 .slot.busy { border-color: var(--accent); color: var(--accent); background: rgba(99,210,255,.10); }
   .slot {
@@ -992,6 +995,11 @@
         <div class="slot">4 手榴弾</div>
       </div>
       <div id="slots2">
+        <!-- 数字キーに載らない物の行。**1〜4の札の下**に置く。
+             支給された狙撃銃(Q)は普段は畳んであって、第2波で出てくる。
+             ここに置いてあるのは、番号の続きに並べると「5」に見えるのに
+             5では出ない、という嘘になるため -->
+        <div class="slot hide" id="slotQuick">Q スナイパー</div>
         <!-- ここは「Fで包帯が出せる」を覚えてもらうための札。
              状態(持っている/巻いている/進み具合)は体力の隣にまとめてあるので、
              こちらの文字は最後まで変えない。変えると武器の行ごと横に動く -->
