@@ -71,6 +71,7 @@ node tools/map.mjs 発砲    # 「発砲」を含む区切りがどのファイ�
 | 画面の数字・撃破表示・順位表 | `src/ui/hud.js` | hud |
 | 通れない・すり抜ける・地形 | `src/world/level.js` | doors, world, rays, worldgeo |
 | 1人用の敵 | `src/ai/enemy.js` | swarm |
+| 対戦のCPU（動かない・撃たない・強すぎる） | `server/bot.js` | bots |
 | 席・ラウンド・勝敗・復帰 | `server/room.js` | lobby, modes, teams, rejoin |
 | 遊び方の決まり | `server/modes.js`（**サーバーだけが持つ**） | modes |
 | 送る項目を足す・食い違う | `src/net/protocol.js` を**両側同時に** | protocol |
