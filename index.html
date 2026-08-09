@@ -608,6 +608,38 @@
   .lkitem.on { color: var(--accent); border-color: var(--accent); background: rgba(99,210,255,.1); }
   /* 色の見本。3Dの絵が出るまでの間も、どんな色かがここで読める */
   .lkitem .sw { width: 13px; height: 13px; border: 1px solid rgba(255,255,255,.25); }
+  /* 値段。ストアの面だけ出る */
+  .lkitem .pr { color: var(--accent); }
+  .lkitem .pr::after { content: 'コイン'; color: var(--dim); font-size: 9px; margin-left: 2px; }
+
+  /* 装備とストアの切り替え */
+  .lktabs { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .lktab {
+    padding: 8px 18px;
+    font-family: var(--mono); font-size: 12px; letter-spacing: .18em;
+    color: var(--dim); background: transparent;
+    border: 1px solid rgba(255,255,255,.18); cursor: pointer;
+  }
+  .lktab:hover { color: var(--hud); }
+  .lktab.on { color: var(--accent); border-color: var(--accent); background: rgba(99,210,255,.1); }
+  /* 残高は右端。**買う画面でいくら持っているかが見えないと選べない** */
+  .lkcoins { margin-left: auto; font-size: 10px; letter-spacing: .12em; color: var(--dim); }
+
+  /* どの武器を触っているか。数が6つあるので折り返す */
+  .lkguns { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-bottom: 12px; }
+  .lkgun {
+    padding: 6px 10px;
+    font-family: var(--mono); font-size: 10px; letter-spacing: .1em;
+    color: var(--dim); background: transparent;
+    border: 1px solid rgba(255,255,255,.14); cursor: pointer;
+  }
+  .lkgun:hover { color: var(--hud); }
+  .lkgun.on { color: var(--hud); border-color: rgba(255,255,255,.5); background: rgba(255,255,255,.06); }
+
+  /* 並べる物が1つも無い時の文言。空欄のままだと壊れて見える */
+  .lkempty { font-size: 10px; letter-spacing: .1em; color: var(--dim); padding: 10px 0; }
+  #lkStatus { font-size: 11px; letter-spacing: .1em; line-height: 1.7; color: var(--accent); min-height: 22px; margin: 4px 0; }
+  #lkStatus.bad { color: var(--warn); }
 
   /* --------------------------------------------------------- 設定 */
   /* 接続画面と同じ見た目にする。開ける場所が2つ（ホームと一時停止）あるので、
@@ -1255,6 +1287,16 @@
     <div class="title">見た目</div>
     <div class="subtitle">武器のスキン</div>
 
+    <!-- 装備とストアは1枚の画面の2つの面。分けると3Dの場面を2つ持つことになる -->
+    <div class="lktabs">
+      <button id="lkTabEquip" class="lktab on" type="button">装備</button>
+      <button id="lkTabStore" class="lktab" type="button">ストア</button>
+      <div class="lkcoins" id="lkCoins"></div>
+    </div>
+
+    <!-- どの武器の見た目を触っているか。武器ごとに別のスキンを着けられる -->
+    <div class="lkguns" id="lkGuns"></div>
+
     <canvas id="lkView" width="420" height="200"></canvas>
 
     <div class="lkname" id="lkName"></div>
@@ -1262,9 +1304,9 @@
 
     <div class="lklist" id="lkList"></div>
 
-    <div class="hint">押すとその場で決まります。次に構えた時から変わります</div>
+    <div id="lkStatus"></div>
 
-    <div class="netbtns" style="margin-top:14px">
+    <div class="netbtns" style="margin-top:6px">
       <button id="lkClose" class="netbtn main" type="button">閉じる</button>
     </div>
   </div>

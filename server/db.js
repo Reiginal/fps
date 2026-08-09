@@ -68,6 +68,24 @@ export async function query(sql, params) {
 }
 
 /**
+ * 1本の接続を借りて、その上で何かをする。**取引(BEGIN/COMMIT)を使う時は必ずこれ。**
+ *
+ * query() はプールへ投げるので、BEGIN と COMMIT が別々の線へ散る。
+ * そうなると取引にならず、途中で落ちた時に半端が残る。
+ *
+ * @param fn (query) => Promise<T>。渡ってくるqueryは1本の線に紐づいている
+ */
+export async function withClient(fn) {
+  const client = await getPool().connect();
+  try {
+    return await fn((sql, params) => client.query(sql, params));
+  } finally {
+    // 借りた線は必ず返す。返さないと2本しかない線が減ったまま戻らない
+    client.release();
+  }
+}
+
+/**
  * 起動時に1回だけ呼ぶ。表を最新の形まで持っていく。
  *
  * **プールではなく1本の接続を取ってから流す。**
@@ -78,15 +96,11 @@ export async function query(sql, params) {
  */
 export async function setup() {
   if (!isEnabled()) return null;
-  const client = await getPool().connect();
-  try {
-    const ran = await migrate((sql, params) => client.query(sql, params));
+  return withClient(async (q) => {
+    const ran = await migrate(q);
     if (ran.length) console.log(`[db] 台帳を更新した: ${ran.join(', ')}番`);
     return ran;
-  } finally {
-    // 借りた線は必ず返す。返さないと2本しかない線が減ったまま戻らない
-    client.release();
-  }
+  });
 }
 
 /** 終わる時に線を閉じる。閉じないとプロセスが終わらない */

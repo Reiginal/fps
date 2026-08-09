@@ -1,41 +1,76 @@
-// 見た目の画面。今は武器のスキンだけ。
+// 見た目の画面。武器ごとにスキンを装備する所と、買う所。
 //
 // **選んだ物が見えないと選べない。** 色の名前を並べるだけでは
 // 「デザート」がどんな色なのか分からないので、実物の銃を3Dで出して回す。
 // ロビーの兵士のプレビュー（src/ui/charview.js）と同じ作りで、
-// あちらの「描くのはロビーにいる間だけ」も踏襲する
-// （開いていない間も描き続けると、遊んでいる裏で2つ目の場面を描くことになる）。
+// あちらの「描くのは開いている間だけ」も踏襲する
+// （閉じた後も描き続けると、ホームに居るだけでパソコンが熱くなる）。
 //
-// ホームから開く。**ロビーではなくホームに置いた**のは、
-// ロビーは対戦に入らないと出ないので、1人で遊ぶ人が一生辿り着けないため。
+// 装備とストアを**1枚の画面の2つの面**にしてある。分けると
+// 「買った物がどう見えるか」を見に行くのに画面を行き来することになるし、
+// 3Dの場面を2つ持つことになる（そのぶん重い）。
+//
+// **持っていない物は着けられない。** 画面でも押せなくしてあるが、
+// あれは親切であって守りではない（守るのはサーバー側のserver/store.js）。
 import * as THREE from 'three';
 import { WEAPONS } from '../player/weapons.js';
-import { SKINS, applySkin, loadSkin, saveSkin } from '../player/skins.js';
+import {
+  SKINS, applySkin, skinFor, hasSkin, wearSkin, setOwned, ownedSkus,
+} from '../player/skins.js';
+import { SKINNABLE, DEFAULT_SKIN, skuOf } from '../net/protocol.js';
 
 const $ = (id) => document.getElementById(id);
 
-// 見せる武器。**ライフル1本。** 持ち替えて見せる形にすると、
-// 選ぶ物が2つ（武器とスキン）になって、何を選んでいるのか読めなくなる
-const SHOW_ID = 'rifle';
+/* 返事を待つ間の上限。返らないサーバーを待ち続けると
+   押した本人には「固まった」としか見えない（account.jsと同じ） */
+const TIMEOUT_MS = 15_000;
+
+async function api(path, body) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    credentials: 'same-origin',
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (res.status === 404) return { off: true };
+  let json = null;
+  try { json = await res.json(); } catch { /* 中身が無い返事もある */ }
+  return { status: res.status, ...(json || {}) };
+}
 
 export class LookMenu {
   constructor() {
     this.el = {
       root: $('look'),
       canvas: $('lkView'),
+      tabEquip: $('lkTabEquip'), tabStore: $('lkTabStore'),
+      guns: $('lkGuns'),
       list: $('lkList'),
-      name: $('lkName'),
-      note: $('lkNote'),
+      name: $('lkName'), note: $('lkNote'),
+      status: $('lkStatus'), coins: $('lkCoins'),
       close: $('lkClose'),
     };
     this.ready = false;
     this.running = false;
-    this.current = loadSkin();
-    /** 選び直した時に呼ぶ。今持っている銃へ反映するのは呼ぶ側の仕事 */
+    this.store = false;          // 今ストアの面か
+    this.weapon = SKINNABLE[0];  // 今見ている武器
+    this.busy = false;
+    /** ログインしているか。ストアはログインしていないと使えない */
+    this.user = null;
+    /** 装備を変えた時に呼ぶ。今持っている銃へ掛け直すのは呼ぶ側の仕事 */
     this.onChange = () => {};
 
-    this._buildList();
+    this._buildGuns();
     this.el.close.onclick = () => this.hide();
+    this.el.tabEquip.onclick = () => this._setTab(false);
+    this.el.tabStore.onclick = () => this._setTab(true);
+  }
+
+  /** 会員証の状態が変わったら呼ばれる（main.jsが繋ぐ） */
+  setUser(user) {
+    this.user = user;
+    if (this.isOpen) this._paint();
   }
 
   /* 3Dの道具は初めて開いた時に作る。起動時に作ると、
@@ -72,56 +107,182 @@ export class LookMenu {
     this.scene.add(rim);
     this.scene.add(new THREE.AmbientLight(0x6d7d92, 1.2));
 
-    // 銃そのもの。**本番と同じ組み立てを使う。**
-    // 見せるためだけの別モデルを作ると、選んだ物と実際に出る物がずれる
-    const def = WEAPONS.find((w) => w.id === SHOW_ID) || WEAPONS[0];
-    this.gun = def.build(def.view);
-    // 手は消す。ここで見たいのは銃であって、握り方ではない
-    this.gun.traverse((o) => { if (o.userData?.isHand) o.visible = false; });
     this.holder = new THREE.Group();
-    this.holder.add(this.gun);
-    // 銃は原点が機関部あたりにあるので、少し引いて枠へ収める
-    this.gun.position.set(0, 0, 0.06);
     this.scene.add(this.holder);
+    /* 組んだ銃の置き場。**一度組んだら使い回す。**
+       武器のタブを押すたびに組み直すと、押すたびに引っかかる */
+    this.guns = new Map();
     this._spin = 0;
-    applySkin(this.gun, this.current);
+    this._showGun();
   }
 
-  _buildList() {
-    this.el.list.innerHTML = '';
-    this.btns = SKINS.map((s) => {
+  /* 見せる銃を差し替える。**本番と同じ組み立てを使う。**
+     見せるためだけの別モデルを作ると、選んだ物と実際に出る物がずれる */
+  _showGun() {
+    for (const g of this.guns.values()) g.visible = false;
+    let g = this.guns.get(this.weapon);
+    if (!g) {
+      const def = WEAPONS.find((w) => w.id === this.weapon);
+      if (!def) return;
+      g = def.build(def.view);
+      // 手は消す。ここで見たいのは銃であって、握り方ではない
+      g.traverse((o) => { if (o.userData?.isHand) o.visible = false; });
+      // 銃は原点が機関部あたりにあるので、少し引いて枠へ収める
+      g.position.set(0, 0, 0.06);
+      this.holder.add(g);
+      this.guns.set(this.weapon, g);
+    }
+    g.visible = true;
+    this.gun = g;
+    applySkin(g, this._shown());
+  }
+
+  /* 今プレビューに出すスキン。ストアの面では、選んでいる商品を試着させる */
+  _shown() { return this.preview || skinFor(this.weapon); }
+
+  _buildGuns() {
+    this.el.guns.innerHTML = '';
+    this.gunBtns = SKINNABLE.map((id) => {
+      const def = WEAPONS.find((w) => w.id === id);
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'lkitem';
-      b.innerHTML = `<span class="sw" style="background:${s.swatch}"></span>`
-        + `<span class="nm">${s.name}</span>`;
-      b.onclick = () => this.select(s.id);
-      this.el.list.appendChild(b);
+      b.className = 'lkgun';
+      b.textContent = def?.nick || id;
+      b.onclick = () => this.selectWeapon(id);
+      this.el.guns.appendChild(b);
       return b;
     });
+  }
+
+  selectWeapon(id) {
+    if (!SKINNABLE.includes(id)) return;
+    this.weapon = id;
+    this.preview = null;
+    if (this.ready) this._showGun();
     this._paint();
   }
 
+  _setTab(store) {
+    this.store = !!store;
+    this.preview = null;
+    if (this.ready) applySkin(this.gun, this._shown());
+    this._say('');
+    this._paint();
+  }
+
+  /* 画面を全部描き直す。**ここだけが「今どうなっているか」を描く。**
+     押した時に個別に書き換える形にすると、必ずどこかで食い違う */
   _paint() {
-    const at = SKINS.findIndex((s) => s.id === this.current);
-    this.btns.forEach((b, i) => b.classList.toggle('on', i === at));
-    const s = SKINS[at] || SKINS[0];
+    const { tabEquip, tabStore, list, coins } = this.el;
+    tabEquip.classList.toggle('on', !this.store);
+    tabStore.classList.toggle('on', this.store);
+    this.gunBtns.forEach((b, i) => b.classList.toggle('on', SKINNABLE[i] === this.weapon));
+    coins.textContent = this.user
+      ? `コイン ${Number(this.user.coins ?? 0).toLocaleString()}枚`
+      : 'ログインすると買えます';
+
+    list.innerHTML = '';
+    const shown = this._shown();
+    for (const s of SKINS) {
+      const have = hasSkin(this.weapon, s.id);
+      // ストアの面には、持っていない物と標準以外を並べる
+      if (this.store && (have || s.id === DEFAULT_SKIN)) continue;
+      // 装備の面には、持っている物だけ
+      if (!this.store && !have) continue;
+
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'lkitem';
+      if (s.id === shown) b.classList.add('on');
+      b.innerHTML = `<span class="sw" style="background:${s.swatch}"></span>`
+        + `<span class="nm">${s.name}</span>`
+        + (this.store ? `<span class="pr">${s.price.toLocaleString()}</span>` : '');
+      b.onclick = () => (this.store ? this._buy(s) : this._wear(s.id));
+      list.appendChild(b);
+    }
+
+    if (!list.children.length) {
+      const p = document.createElement('div');
+      p.className = 'lkempty';
+      p.textContent = this.store
+        ? 'この武器のスキンは全部持っています'
+        : '持っているスキンがありません。ストアで買えます';
+      list.appendChild(p);
+    }
+
+    const s = SKINS.find((x) => x.id === shown) || SKINS[0];
     this.el.name.textContent = s.name;
     this.el.note.textContent = s.note;
   }
 
-  /** 選ぶ。**その場で覚える。**「決定」を押させると、押し忘れて戻る人が出る */
-  select(id) {
-    this.current = saveSkin(id);
-    if (this.gun) applySkin(this.gun, this.current);
+  _say(text, bad = false) {
+    this.el.status.textContent = text || '';
+    this.el.status.classList.toggle('bad', !!bad);
+  }
+
+  /** 装備する。**その場で決まる。**「決定」を押させると押し忘れる人が出る */
+  async _wear(id) {
+    if (this.busy) return;
+    if (!wearSkin(this.weapon, id)) { this._say('持っていません', true); return; }
+    this.preview = null;
+    applySkin(this.gun, this._shown());
     this._paint();
-    this.onChange(this.current);
+    this.onChange();
+    // ログインしていれば台帳にも覚えさせる。していなければこの端末だけ
+    if (!this.user) return;
+    try { await api('/api/equip', { weapon: this.weapon, skin: id }); } catch { /* 手元は変わっている */ }
+  }
+
+  async _buy(s) {
+    if (this.busy) return;
+    if (!this.user) { this._say('買うにはログインしてください', true); return; }
+
+    /* 1回目は試着。**押した瞬間に買わない。**
+       値段だけ見て押した人が、確かめる間もなく買わされるのは避ける */
+    if (this.preview !== s.id) {
+      this.preview = s.id;
+      applySkin(this.gun, s.id);
+      this._paint();
+      this._say(`${s.name} … もう一度押すと${s.price.toLocaleString()}コインで買います`);
+      return;
+    }
+
+    this.busy = true;
+    this._say('買っています…');
+    let r;
+    try {
+      r = await api('/api/buy', { sku: skuOf(this.weapon, s.id) });
+    } catch {
+      this.busy = false;
+      this._say('サーバーに繋がりません。少し待ってからもう一度', true);
+      return;
+    }
+    this.busy = false;
+    if (r.off) { this._say('この置き場では買えません', true); return; }
+    // 文言はサーバーが作った物をそのまま出す。こちらでも同じ判定を書くと食い違う
+    if (!r.ok) { this._say(r.error || 'うまくいきませんでした', true); return; }
+
+    setOwned(r.owned);
+    if (this.user) this.user.coins = r.coins;
+    this.preview = null;
+    // 買ったらそのまま着ける。買った直後にもう一度押させる理由が無い
+    wearSkin(this.weapon, s.id);
+    applySkin(this.gun, this._shown());
+    this.onChange();
+    this._say(`${s.name} を買いました`);
+    // 買い終わったら装備の面へ戻す（ストアからはその商品が消えるので）
+    this.store = false;
+    this._paint();
+    try { await api('/api/equip', { weapon: this.weapon, skin: s.id }); } catch { /* 手元は変わっている */ }
   }
 
   get isOpen() { return !this.el.root.classList.contains('hidden'); }
 
   show() {
     this._init();
+    this.preview = null;
+    this._say('');
+    this._setTab(false);
     this.el.root.classList.remove('hidden');
     this.running = true;
   }
@@ -130,6 +291,8 @@ export class LookMenu {
     this.el.root.classList.add('hidden');
     // 閉じたら描くのをやめる。**畳み忘れるとホームの裏で回り続ける**
     this.running = false;
+    this.preview = null;
+    if (this.ready) applySkin(this.gun, this._shown());
   }
 
   /** 開いている間だけ呼ばれる */
@@ -141,3 +304,6 @@ export class LookMenu {
     this.renderer.render(this.scene, this.camera);
   }
 }
+
+// 検査から「持ち物の一覧を読む口があるか」を見るために出しておく
+export { ownedSkus };

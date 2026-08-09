@@ -651,6 +651,55 @@ export const CHARACTERS = [
 /** 番号から兵士を引く。範囲の外は0番へ寄せる（知らない番号が来ても姿が消えない） */
 export const characterAt = (i) => CHARACTERS[(i | 0) >= 0 && (i | 0) < CHARACTERS.length ? (i | 0) : 0];
 
+/* ------------------------------------------------------ スキンの品揃え */
+
+/* **武器のスキン。値段と品揃えはここ1箇所が持つ。**
+ *
+ * なぜ共有ファイルに置くか: 見た目（どんな色か）はクライアントが持つが、
+ * **値段と「そんな商品が実在するか」はサーバーが持たないと意味が無い。**
+ * 別々の表にすると、片方だけ直した時に「画面では300コインなのに
+ * 引かれるのは1500コイン」が起きる。CHARACTERSをここに置いてあるのと同じ理由。
+ *
+ * 色の中身（どう塗るか）は src/player/skins.js が持つ。
+ * こちらは値段と名前だけで、three.jsを読み込まない
+ * （サーバーがここを読むので、読み込んだ瞬間にテクスチャを焼き始めては困る）。
+ */
+export const SKIN_LIST = [
+  // 標準は商品ではない。**最初から全員が持っている**（買う物が無い状態を作らない）
+  { id: 'stock', name: '標準', price: 0 },
+  { id: 'desert', name: 'デザート', price: 300 },
+  { id: 'urban', name: 'アーバン', price: 300 },
+  // 色を変えずに擦れだけ上げた物。手間は同じだが、見た目の主張が強いので高い
+  { id: 'veteran', name: '歴戦', price: 600 },
+  { id: 'gold', name: 'ゴールド', price: 1500 },
+];
+export const SKIN_IDS = SKIN_LIST.map((s) => s.id);
+export const DEFAULT_SKIN = 'stock';
+export const skinInfo = (id) => SKIN_LIST.find((s) => s.id === id) || SKIN_LIST[0];
+
+/* スキンを着せられる武器。**武器の表(weapons.js)そのものは読まない。**
+   あちらを読むとサーバーがテクスチャを焼き始める。
+   名前がずれていないかは tools/check-store.mjs が突き合わせる */
+export const SKINNABLE = ['rifle', 'shotgun', 'pistol', 'sniper', 'knife', 'nade'];
+
+/* 商品1つを指す文字列。**武器ごとに別の商品**なので、両方が要る。
+   「デザートのライフル」と「デザートのピストル」は別々に買う */
+export const skuOf = (weapon, skin) => `${weapon}:${skin}`;
+
+/** 商品の文字列を分解する。実在しない組み合わせならnull */
+export function parseSku(sku) {
+  const parts = String(sku ?? '').split(':');
+  // **ちょうど2つでなければ断る。** 3つ目を素通しすると
+  // 'rifle:gold:なんでも' が全部同じ商品として通ってしまう
+  if (parts.length !== 2) return null;
+  const [weapon, skin] = parts;
+  if (!SKINNABLE.includes(weapon)) return null;
+  if (!SKIN_IDS.includes(skin)) return null;
+  // 標準は商品ではないので、買う対象としては存在しない
+  if (skin === DEFAULT_SKIN) return null;
+  return { weapon, skin, price: skinInfo(skin).price };
+}
+
 /* -------------------------------------------------------------- 発言 */
 
 // 1回の発言の長さ。長文を投げられると画面が埋まる。

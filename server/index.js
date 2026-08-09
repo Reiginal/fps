@@ -27,6 +27,7 @@ import { WEAPONS, weaponsSource } from './sim.js';
 import * as db from './db.js';
 import * as auth from './auth.js';
 import { addCoins, getCoins, coinsFor } from './wallet.js';
+import { buy, equip, ownedOf, equippedOf } from './store.js';
 import { sendVerifyMail } from './mail.js';
 import {
   C, Sv, decode, encode, TIMEOUT_MS, CHAT_MAX, CHAT_GAP_MS,
@@ -226,6 +227,10 @@ const loginLimit = new ReportLimiter(500);
 const registerLimit = new ReportLimiter(5000);
 // 「今誰か」を聞くのは画面を開くたびなので緩く。それでも叩き放題にはしない
 const meLimit = new ReportLimiter(200);
+/* 買う・装備する。**連打を止めるのが主目的。**
+   二重購入そのものは台帳の主キーが断るが、
+   押すたびに取引が1つ立つのは無駄なので入口でも絞る */
+const buyLimit = new ReportLimiter(300);
 
 /* Flyの向こうにいる時、本当の送り元と本当の道筋はヘッダに入る。
    secure を取り違えると、httpsなのにCookieにSecureが付かない（危ない）か、
@@ -285,8 +290,14 @@ async function routeApi(url, req, res) {
     if (!accountsOn) { sendJson(res, 200, { ok: true, accounts: false, user: null }); return; }
     if (!meLimit.allow(`me|${ip}`, Date.now())) { sendJson(res, 429, { ok: false, error: '少し待ってください' }); return; }
     const me = await auth.sessionUser(db.query, token);
-    // 残高も一緒に返す。別の口にすると、画面を開くたびに往復が2回になる
-    if (me) me.coins = await getCoins(db.query, me.id);
+    /* 残高・持ち物・装備も一緒に返す。**別の口に分けない。**
+       分けると画面を開くたびに往復が4回になり、
+       Neonが寝ている時はその全部が起きるのを待つことになる */
+    if (me) {
+      me.coins = await getCoins(db.query, me.id);
+      me.owned = await ownedOf(db.query, me.id);
+      me.equipped = await equippedOf(db.query, me.id);
+    }
     sendJson(res, 200, { ok: true, accounts: true, user: me });
     return;
   }
@@ -333,6 +344,38 @@ async function routeApi(url, req, res) {
     logs.add('auth', { message: '入会した', name: r.user.name });
     sendJson(res, 200, { ok: true, user: r.user },
       s.ok ? { 'set-cookie': auth.cookieHeader(s.token, { secure }) } : undefined);
+    return;
+  }
+
+  /* ここから下はログインしている人だけ。**先に誰かを確かめる。**
+     ログインしていない人に「そんな商品はありません」と返すと、
+     何が悪いのか分からないまま押し続けることになる */
+  if (url === '/api/buy' || url === '/api/equip') {
+    if (!buyLimit.allow(`buy|${ip}`, Date.now())) {
+      sendJson(res, 429, { ok: false, error: '続けて押しすぎです。少し待ってください' });
+      return;
+    }
+    const me = await auth.sessionUser(db.query, token);
+    if (!me) { sendJson(res, 401, { ok: false, error: 'ログインしてください' }); return; }
+    const body = await readJson(req, res);
+    if (body === undefined) return;
+    if (!body) { sendJson(res, 400, { ok: false, error: '送られた中身が読めません' }); return; }
+
+    if (url === '/api/buy') {
+      /* **買うのは1本の接続の上で。** 取引(BEGIN/COMMIT)を使うので、
+         プールへ投げるとBEGINとCOMMITが別々の線へ散る */
+      const r = await db.withClient((q) => buy(q, me.id, body.sku));
+      if (!r.ok) { sendJson(res, 400, r); return; }
+      logs.add('coin', { message: `${body.sku} を買った`, name: me.name });
+      sendJson(res, 200, {
+        ok: true, coins: r.coins, owned: await ownedOf(db.query, me.id),
+      });
+      return;
+    }
+
+    const r = await equip(db.query, me.id, String(body.weapon ?? ''), String(body.skin ?? ''));
+    if (!r.ok) { sendJson(res, 400, r); return; }
+    sendJson(res, 200, { ok: true, equipped: await equippedOf(db.query, me.id) });
     return;
   }
 
