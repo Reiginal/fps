@@ -905,6 +905,19 @@
     text-shadow: 0 0 5px rgba(0,0,0,.95), 0 1px 2px rgba(0,0,0,.9);
     white-space: nowrap;
   }
+  /* 相手が今なにを持っているか。**ガンゲームで一番要る情報。**
+     倒すたびに武器が替わる遊び方なのに、他人の姿はどの銃でもほぼ同じ形
+     （専用の見た目があるのはショットガン・ナイフ・手榴弾だけで、
+     ライフルもピストルもスナイパーも同じライフルの形で出る）。
+     名前より小さく薄くして、読みにいけば分かる程度に留める */
+  .plate .pgun {
+    display: inline-block; font-size: .74em; line-height: 1.1; letter-spacing: .1em;
+    margin-top: 2px; padding: 0 5px; color: #9fb0c0;
+    background: rgba(4,7,10,.45);
+    text-shadow: 0 0 5px rgba(0,0,0,.95);
+    white-space: nowrap;
+  }
+  .plate .pgun.hidden { display: none; }
   .plate .pbar { height: 2px; margin: 3px auto 0; background: rgba(0,0,0,.55); }
   .plate .pfill { height: 100%; background: var(--hud); }
   .plate.hurt .pfill { background: var(--warn); }

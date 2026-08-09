@@ -311,10 +311,14 @@ console.log('\n[軽さ・名札] 相手の頭上の名札も、変わった時�
    位置はtransformへ移し、全部を前回値と比べてから書く */
 {
   const h2 = new HUD();
-  const mk = (hp) => [{ id: 7, x: 320, y: 180, name: 'nana', hp, dist: 20, fade: 1, mate: false }];
+  const mk = (hp) => [{
+    id: 7, x: 320, y: 180, name: 'nana', hp, dist: 20, fade: 1, mate: false, gun: 'ライフル',
+  }];
   h2.nameplates(mk(100));
   const root = document.getElementById('plates').lastChild;
-  ok(!!root && root.children.length === 2, '札が組み上がる（名前とバー）');
+  // 名前・武器・体力のバーの3つ。武器はガンゲームで相手の段を読むのに要る
+  ok(!!root && root.children.length === 3, '札が組み上がる（名前と武器とバー）');
+  ok(root.children[1]?.textContent === 'ライフル', '持っている武器が出る');
   ok(typeof root.style.transform === 'string' && root.style.transform.includes('320px'),
     `位置がtransformで入る（${root.style.transform}）`);
   ok(!('left' in root.style) && !('top' in root.style),

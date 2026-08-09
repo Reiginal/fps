@@ -1666,6 +1666,17 @@ class Game {
     this.shotsFired = 0; this.shotsHit = 0;
     this.damageFlash = 0;
     this.weapons.resetAll();
+    /* **Qの支給品を畳む。** あれは1人用だけの物で、波2まで凌ぐとスナイパーが載る
+       （protocol.jsのSOLO_UNLOCKS）。resetAll()はあえてquickIndexを消さない
+       ——湧き直しで波は変わらないので——ので、**1人用で波2まで行った後に対戦へ入ると
+       Qでスナイパーが出たままになる。** ガンゲームだと段が進んでも
+       ずっとスナイパーを持てることになり、遊び方そのものが壊れる。
+
+       しかも持てているのは手元だけで、サーバーは持ち物に無い武器を拒む
+       （sim.jsのsetWeapon）。画面はスナイパーなのに弾はライフルの強さで飛ぶ、
+       という一番読めない食い違いになる */
+    this.weapons.quickIndex = null;
+    this.weapons.quickBack = null;
     // 対戦の体力は1人用の倍。**サーバー側(SimPlayer)と同じ値を入れる。**
     // 入れ忘れると、画面の体力の棒だけ130を上限に描かれて、
     // 満タンなのに半分減っているように見える（落下ダメージの量もずれる）
@@ -2151,6 +2162,14 @@ class Game {
     // 対戦側を state で見ると、倒れている間ずっと state が 'dead' のままになり、
     // 生き返った後もカメラが地面に転がったままになる
     const down = this.mode === 'versus' ? !this.player.alive : this.state === 'dead';
+    /* **倒れている間は手元の武器を描かない。**
+       手元の武器は自分専用の別の場面(viewScene)に浮かんでいて、
+       カメラがどこへ行こうが必ず画面の手前に付いてくる。
+       だから観戦で味方の目線を借りている間も**自分の武器が写り続けていて、
+       見ている相手が自分と同じ武器を持っているように見える**（ガンゲームだと
+       相手が今どの段にいるのかが分からなくなる）。
+       場面ごと消せば、腕も銃も包帯もまとめて消える */
+    if (this.viewScene) this.viewScene.visible = !down;
     // 生き返ったら見回しも畳む。ここで落とさないと、湧いた後もカメラが
     // 倒れていた時の向きで上書きされ続けて、動いているのに景色が回らない
     if (!down) { this.deathT = null; this.deathLook = null; return; }
@@ -3045,6 +3064,13 @@ class Game {
         name: this.net.nameOf(st.id),
         hp: st.hp,
         dist,
+        /* 今なにを持っているか。**ガンゲームで一番要る情報。**
+           倒すたびに武器が替わる遊び方なのに、他人の姿はどの銃でもほぼ同じ形で
+           出る（専用の見た目があるのはショットガン・ナイフ・手榴弾だけ。
+           ライフルもピストルもスナイパーも同じライフルの形。remote.jsの_applyWeapon）。
+           姿を作り分けるのが本筋だが、そこは兵士のモデルを組み直す話になるので、
+           まず名前で分かるようにする */
+        gun: WEAPONS[st.weapon]?.nick || WEAPONS[st.weapon]?.name || '',
         // 発砲からの残り具合。点と同じ速さで消えていく。味方は薄れさせない
         fade: mate ? 1 : this._blips.get(st.id).t,
         // 味方かどうか。札の色を変えるのに使う（2対2でだけ立つ）
