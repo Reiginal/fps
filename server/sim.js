@@ -49,6 +49,11 @@ export const FALLBACK_WEAPONS = [
     mag: 9999, reloadTime: 0, adsTime: 0.16,
     range: 0, falloffStart: 0, falloffEnd: 0, falloffMin: 1,
   },
+  {
+    id: 'sniper', name: 'SR-12 マークスマン', damage: 110, rpm: 48, pellets: 1,
+    mag: 5, reloadTime: 3.0, adsTime: 0.34,
+    range: 200, falloffStart: 100, falloffEnd: 180, falloffMin: 0.8,
+  },
 ];
 
 // weapons.jsは別チームが触っている最中に構文エラーで読めないことがある。

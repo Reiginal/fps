@@ -128,6 +128,9 @@ export class Player {
     this.adsFactor = 0;      // 外から武器が書き込む 0..1
     // 持っている武器から入る移動速度の倍率。武器側が毎フレーム書き込む
     this.moveMul = 1;
+    // 覗いている間に視点の効きを落とす量。これも武器側が毎フレーム書き込む。
+    // 既定の0.45は「覗くと感度55%」の意味で、狙撃銃だけここが大きい
+    this.adsSlow = 0.45;
 
     // 体力を100から130へ。武器のダメージ表は触らない。
     // ライフルは胴27なので4発→5発、SMGは18で6発→8発になり、
@@ -412,8 +415,10 @@ export class Player {
 
     if (lookEnabled) {
       const look = input.takeLook();
-      // 覗き込み中は感度を落とす。これが無いとADSで狙いが定まらない
-      const scale = 1 - this.adsFactor * 0.45;
+      /* 覗き込み中は感度を落とす。これが無いとADSで狙いが定まらない。
+         落とす量は武器が決める（adsSlow）。倍率の高い照準ほど、同じ手の動きで
+         景色が速く流れるので、狙撃銃だけ0.72＝感度28%まで落としてある */
+      const scale = 1 - this.adsFactor * (this.adsSlow ?? 0.45);
       this.yaw += look.yaw * scale;
       this.pitch = clamp(this.pitch + look.pitch * scale, -1.5, 1.5);
     } else {

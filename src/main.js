@@ -14,7 +14,7 @@ import {
 } from './core/deathcam.js';
 import { Capsule } from 'three/addons/math/Capsule.js';
 import { Player } from './player/player.js';
-import { WeaponSystem } from './player/weapons.js';
+import { WeaponSystem, WEAPONS } from './player/weapons.js';
 import { Director, Enemy } from './ai/enemy.js';
 import { HUD } from './ui/hud.js';
 import { NetMenu, NET_MSG } from './ui/netmenu.js';
@@ -38,7 +38,7 @@ import { preloadCharModel, SOLO_MODEL } from './ai/glbchar.js';
 import { FarShadowGate } from './world/shadowgate.js';
 import {
   K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, outsideZone, CHARACTERS,
-  TEAM_NAMES,
+  TEAM_NAMES, soloCarryAt,
 } from './net/protocol.js';
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -866,7 +866,15 @@ class Game {
         this.player.refill();
         this.weapons.resetAll();
       }
-      this.hud.banner(`第${n}波`, healed ? '体力と弾薬を補給した' : `敵 ${count}名 接近中`);
+      // 波が進むと持ち物が増える（今は第2波の狙撃銃1本）。
+      // 増えた本人が何番に増えたかを知らせる。増えたのに気づかれないと、
+      // 画面の隅に札が1枚増えただけで終わる
+      const got = this._applySoloCarry(n);
+      if (got) {
+        this.hud.banner(`第${n}波`, `${got.name}を支給（${got.slot}キー）`);
+      } else {
+        this.hud.banner(`第${n}波`, healed ? '体力と弾薬を補給した' : `敵 ${count}名 接近中`);
+      }
       this.audio.click(600, 0.4, 0.4);
     };
 
@@ -884,11 +892,17 @@ class Game {
     this._dropMeshes = new Map();
     // ソロで飛んでいる手榴弾。サーバーがいないので手元で持つ
     this._soloNades = [];
-    /* ソロで投げられる手榴弾の残り。対戦はサーバーがNADE.PER_ROUNDで数えているのに、
-       ソロは数える人がいなくて投げ放題だった（「2発ぐらいにしておいて」）。
-       出撃ごとにPER_ROUNDへ戻る。両モードで同じ数になる */
-    this._soloNadeLeft = NADE.PER_ROUND;
     this._soloNadeId = 1;
+    /* 手榴弾の残りは WeaponSystem が持つ（weapons.nades）。
+       **持ち物の話なので、持ち物を持っている側に置く。** ここに数を置いていた頃は
+       ソロぶんしか無く、対戦は数える人がサーバーにしかいなかったので、
+       撃ち尽くしても手元は握ったままだった。
+       減らすのは、ソロは投げた瞬間・対戦はサーバーが「飛んだ」と言ってきた時 */
+    this.weapons.onSwitched = (i) => {
+      if (this.mode === 'versus') this.net?.sendWeapon(i);
+    };
+    // 対戦で、自分が投げた物として数え終わったgid。湧き直すたびに空にする
+    this._myNadeIds = new Set();
     // 毎フレーム作り直さないための入れ物
     this._mapMe = { x: 0, z: 0, yaw: 0 };
     this._outsideFor = 0;
@@ -1381,6 +1395,9 @@ class Game {
       // 包帯の課題は、体力が満タンだと巻き始め自体を断られる(startHeal)。
       // 課題に入る時に少し削っておく（チュートリアル中は死なないので安全）
       if (s.id === 'heal') this.player.health = Math.min(this.player.health, 55);
+      // 手榴弾の課題も同じ理由で配り直す。ここまでの課題の途中で2発とも
+      // 投げてしまうと、握ることさえできなくなって課題が詰む
+      if (s.id === 'nade') this.weapons.addNades(NADE.PER_ROUND);
     }
     const l = this._tutMachine.done
       ? { main: '自由練習', sub: 'ESCを押して「ホームへ戻る」で終了' }
@@ -1996,8 +2013,11 @@ class Game {
     this.player.refill();
     this.player.yaw = 0; this.player.pitch = 0;
     this.player.teleport(this.level.playerSpawn);
-    this._soloNadeLeft = NADE.PER_ROUND;
     this.weapons.resetAll();
+    /* 持ち物も出撃前の4本へ戻す。**resetAllは弾を戻すだけで持ち物は触らない**
+       （対戦ではサーバーが決めている物なので、手元で戻すと壊れる）。
+       ここを忘れると、前の回で第2波まで行った人だけ最初から狙撃銃を持っている */
+    this._applySoloCarry(0);
     this.director.reset();
     this.effects.clear();
     // 前の試合で空中に残っていた玉を消す。残すと次の開始直後に爆発する
@@ -2531,6 +2551,18 @@ class Game {
 
       case EV.NADE:
         if (Array.isArray(ev.p)) this._syncNade(ev.gid, ev.p);
+        /* 自分の投げた物が本当に飛んだ時だけ、手元の残りを1つ減らす。
+           **投げた瞬間ではなくここで減らす**のが要点で、サーバーは
+           「残り0」「倒れている」「ラウンド外」を黙って捨てるので、
+           送った回数で数えると持っていない物まで減って表示が食い違う。
+
+           この電文は**飛んでいる間ずっと毎刻み届く**位置の知らせなので、
+           gidを覚えて1個につき1回だけ数える（1つ前のgidと比べる形だと、
+           2つ同時に飛んでいる間に交互に届いて何度も減る） */
+        if (ev.by === me && !this._myNadeIds.has(ev.gid)) {
+          this._myNadeIds.add(ev.gid);
+          this.weapons.takeNade();
+        }
         break;
 
       // 声で繋ぐ相手が変わった。**誰と繋いでよいかを決めるのはサーバー**
@@ -2544,13 +2576,13 @@ class Game {
 
       case EV.TAKE: {
         const g = this._dropMeshes.get(ev.did);
-        // 拾ったのが自分なら、その場で弾を戻す。
-        // **弾の数はサーバーが持っていない**（撃った回数は手元が数えている）ので、
+        // 拾ったのが自分なら、その場で弾と手榴弾を戻す。
+        // **数はサーバーが持っていない**（撃った回数は手元が数えている）ので、
         // 「拾った」という知らせを受けて手元が戻す形になる。
         // 増やせる上限は武器の表が持っているので、ここで数は決めない
         if (ev.by === me) {
           const got = this.weapons.refillReserve();
-          const nades = g?.userData.nades | 0;
+          const nades = this.weapons.addNades(g?.userData.nades | 0);
           this.audio.click(1500, 0.4, 0.05);
           // 何が増えたのかを言う。「補給」とだけ出すと、
           // 弾が満タンの時に拾っても同じ文字が出て、何も起きていないのに起きた気になる
@@ -2587,6 +2619,9 @@ class Game {
         // 包帯もここで戻す。サーバーは湧き直しで2本に戻しているので、
         // 手元だけ0のままだとFを押しても手元が断って、一生使えなくなる
         this.player.refill();
+        // 手榴弾の数もresetAllが戻す。数えた印は捨てる（gidは試合で通しなので、
+        // 残しておいても害は無いが、増え続ける物を残す理由も無い）
+        this._myNadeIds.clear();
         this.weapons.resetAll();
         this.damageFlash = 0;
         this.net.resetPrediction?.();
@@ -2909,11 +2944,13 @@ class Game {
     // 画面の札に印を付ける位置は「持ち物の何番目か」。武器の番号そのものだと、
     // 持って出ない武器のぶんずれて、別の札が光る
     const slotAt = this.weapons.carry.indexOf(this.weapons.index);
+    this._weaponSlotsHud();
     this.hud.ammo(
       w.ammo, w.reserve, w.def.name, slotAt, this.weapons.reloading, !!w.def.melee,
-      // ソロの手榴弾だけ残りの数を出す。対戦は数をサーバーが持っていて
-      // 手元に写しが無いので、今まで通り横線のまま
-      w.def.thrown && this.mode !== 'versus' ? this._soloNadeLeft : null,
+      // 投げ物は弾数ではなく残りの数を出す。**対戦でも出す。**
+      // 数える人がサーバーにしかいなかった頃は横線だったが、
+      // 手元も「飛んだ」の知らせで数えるようになったので出せる
+      w.def.thrown ? this.weapons.nades : null,
     );
     this.hud.bandage(
       this.player.bandages, this.player.healing, HEAL.TIME_S,
@@ -2922,6 +2959,39 @@ class Game {
     this._minimapFrame(dt);
     this._updateNadeArc();
     this.hud.update(dt);
+  }
+
+  /* 画面の武器の札を今の持ち物に合わせる。**毎フレーム呼ばれる。**
+     中身が変わっていなければHUD側が何も触らないので、ここでは作る手間だけを見る
+     （札の名前は武器の表が持っているnick。ここで別の呼び名を作らない） */
+  _weaponSlotsHud() {
+    const carry = this.weapons.carry;
+    const items = this._slotItems ||= [];
+    items.length = 0;
+    for (const i of carry) {
+      const d = WEAPONS[i];
+      if (!d) continue;
+      // 使い切った投げ物は薄く。札そのものは残す（消すと後ろの番号がずれる）
+      items.push({ name: d.nick || d.name, out: !!d.thrown && this.weapons.nades <= 0 });
+    }
+    this.hud.weaponSlots(items);
+  }
+
+  /**
+   * ソロの持ち物を今の波に合わせる。増えた物があればその中身を返す。
+   *
+   * **持ち物を決める表は protocol.js の SOLO_UNLOCKS。** ここに条件を書かないのは、
+   * 画面を持たない所（tools/check-sniper.mjs）から確かめられるようにするため
+   */
+  _applySoloCarry(wave) {
+    if (this.mode === 'versus') return null;
+    const before = this.weapons.carry;
+    const next = soloCarryAt(WEAPONS, wave);
+    const added = next.filter((i) => !before.includes(i));
+    this.weapons.carry = next;
+    if (added.length === 0) return null;
+    const d = WEAPONS[added[0]];
+    return { name: d.nick || d.name, slot: next.indexOf(added[0]) + 1 };
   }
 
   /**
@@ -3034,12 +3104,12 @@ class Game {
   /** ソロの手榴弾。判定を持つ相手がいないので、飛翔も爆発もここで完結させる */
   _throwNadeSolo() {
     // 残りが無ければ投げない。対戦のサーバーが黙って捨てるのと同じ扱いだが、
-    // ソロは手元なので空撃ちのカチッだけ返す（押したのに無反応、を作らない）
-    if (this._soloNadeLeft <= 0) {
+    // ソロは手元なので空撃ちのカチッだけ返す（押したのに無反応、を作らない）。
+    // takeNade()は使い切った時に手から下ろすところまでやる
+    if (!this.weapons.takeNade()) {
       this.audio.click(2800, 0.3, 0.03);
       return;
     }
-    this._soloNadeLeft--;
     // チュートリアルの課題「投げる」の判定はこの1フレームの印で拾う
     if (this.tutorial) this._tutFlags.threw = true;
     const cam = this.camera;
