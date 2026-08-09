@@ -521,6 +521,36 @@ console.log('\n[5.5] 手榴弾は押した瞬間ではなく離した瞬間に�
   ok(ws._throwCharging === false, '持ち替えると構えの印が消える');
 }
 
+console.log('\n[5.8] Qで直前の武器と往復できる');
+/* 遊んで「5を押すのは指的に遠い」と言われて足した往復キー。
+   **押して何も起きない場面を作らないこと**が肝で、直前の物が持てない時でも
+   持ち物の中の別の1本へ逃がす（黙って効かない操作は壊れて見える） */
+{
+  const gun = ws.weapons.findIndex((w) => !w.def.melee);
+  const other = ws.weapons.findIndex((w, i) => !w.def.melee && i !== gun);
+  ws.carry = [gun, other];
+  ws.resetAll();
+  ws.switching = 0; ws.index = gun; ws._pendingIndex = null;
+
+  ok(ws.switchTo(other) === true, 'まず別の銃へ持ち替える');
+  ws.switching = 0; ws.index = other; ws._pendingIndex = null;
+  ok(ws.lastIndex === gun, '出ていった方を覚えている');
+  ok(ws.swapLast() === gun, 'Qで元の銃へ戻る');
+  ws.switching = 0; ws.index = gun; ws._pendingIndex = null;
+  ok(ws.lastIndex === other, '戻った時も往復の相手が入れ替わる');
+  ok(ws.swapLast() === other, 'もう一度押すとまた行ける');
+  ws.switching = 0; ws.index = other; ws._pendingIndex = null;
+
+  // 直前の物が持ち物から消えた時（拾われた・段が進んだ）は別の1本へ逃がす
+  ws.lastIndex = ws.weapons.length + 5;
+  const to = ws.swapLast();
+  ok(to != null && to !== other, `持てない物を指していても何かへ替わる (${to})`);
+  ws.switching = 0; ws.index = to; ws._pendingIndex = null;
+
+  ws.carry = ws.weapons.map((_, i) => i);
+  ws.index = 0; ws.switching = 0; ws._pendingIndex = null;
+}
+
 console.log('\n[5.7] 手榴弾を使い切ったら手から下ろす');
 /* 遊んで「2発使い切ったら手榴弾持つのやめて。無くなってんだから」と言われた所。
    それまでは0本になっても構え続けていて、左クリックのたびに

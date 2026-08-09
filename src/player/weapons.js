@@ -3001,6 +3001,10 @@ export class WeaponSystem {
     // ガンゲームや将来の武器選択画面はここを差し替えるだけで済む
     this.carry = loadoutOf(WEAPONS);
     this.index = this.carry[0] ?? 0;
+    /* 直前に持っていた武器の番号（Qで往復する先）。
+       始まりは持ち物の2本目にしておく。nullのままだと最初の1回だけ
+       Qが「持ち物の中の最初の1本」へ逃げる形になって、行き先が読めない */
+    this.lastIndex = this.carry[1] ?? null;
     this.current.model.visible = true;
 
     this.adsFactor = 0;
@@ -3232,6 +3236,8 @@ export class WeaponSystem {
     // 札は残したまま（残りの数を見せるため）、握るのだけ断る
     if (this.weapons[i].def.thrown && this.nades <= 0) return false;
     if (this.switching > 0) return false;
+    // 出ていく方を覚えておく。Qで往復するのに使う（swapLast）
+    this.lastIndex = this.index;
     this.reloading = 0;
     this.shellReload = false;
     this._shellLower = 0;
@@ -3246,6 +3252,27 @@ export class WeaponSystem {
     this._throwCharging = false;
     this._pendingIndex = i;
     return true;
+  }
+
+  /**
+   * 直前に持っていた武器へ戻る（Qキー）。替われたらその番号、駄目ならnull。
+   *
+   * **数字キーの代わりではなく、往復のための道具。**
+   * 遊んで「5を押すのは指的に遠い」と言われた所で、実際の遊び方が
+   * 「近い敵はライフル、遠い敵はスナイパー」の往復なので、
+   * その2挺を1キーで行き来できれば5まで指を伸ばす場面が無くなる。
+   *
+   * 直前の物が持てない時（拾われて持ち物から消えた・手榴弾を使い切った）は、
+   * 持ち物の中で今と違う最初の1本へ逃がす。**押して何も起きないのを作らない**
+   * （黙って効かない操作は、遊ぶ側からは壊れているようにしか見えない）
+   */
+  swapLast() {
+    const want = this.lastIndex;
+    if (want != null && this.switchTo(want)) return want;
+    for (const i of this.carry) {
+      if (i !== this.index && this.switchTo(i)) return i;
+    }
+    return null;
   }
 
   /**
@@ -4170,6 +4197,9 @@ export class WeaponSystem {
     // 投げ物も配り直す。**弾と同じ扱い**（出撃のたびに満タンから始まる）
     this.nades = NADE.PER_ROUND;
     this.index = 0;
+    // Qの行き先も出撃前へ戻す。前の回の最後に持っていた物が残っていると、
+    // 湧いた直後のQが「さっきまで持っていた（もう持っていない）武器」を指す
+    this.lastIndex = this.carry[1] ?? null;
     this.current.model.visible = true;
     this.reloading = 0;
     this.shellReload = false;

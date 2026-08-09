@@ -10,6 +10,7 @@
 // ブラウザ無しでそのまま引ける。
 //
 //   node tools/check-sniper.mjs
+import { readFileSync } from 'node:fs';
 import '../server/dom-stub.js';
 import { LOADOUT_IDS, loadoutOf, soloCarryAt, SOLO_UNLOCKS } from '../src/net/protocol.js';
 
@@ -42,6 +43,22 @@ console.log('\n[2] 第2波で増える');
   ok(soloCarryAt(WEAPONS, 30).length === base.length + 1, '第30波でも本数は同じ');
   ok(SOLO_UNLOCKS.every((u) => WEAPONS.some((w) => w.id === u.id)),
     '解放表に載っている名前が全部、武器の表にある');
+}
+
+console.log('\n[2.5] 5番まで指を伸ばさずに握れるか');
+/* 遊んで「5押すのは流石に指的に遠い」と言われた所。
+   往復キー(Q)の中身は武器側が持っている（tools/check-weapons.mjsの[5.8]）ので、
+   ここで見るのは**繋ぎ込みの3点**だけ。どれか1つ抜けると、
+   キーはあるのに効かない・支給されたのにQが別の武器を指す、になる */
+{
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  ok(/input\.pressed\('KeyQ'\)/.test(main), 'Qを見ている');
+  ok(/KeyQ[\s\S]{0,400}?swapLast\(\)/.test(main), 'Qで往復を呼んでいる');
+  // 支給された瞬間にQの行き先をそこへ向ける。無いと最初の1回だけ5を押すことになる
+  ok(/added\.length === 0[\s\S]{0,400}?lastIndex = added\[0\]/.test(main),
+    '支給された物がQの行き先になる');
+  ok(/<b>Q<\/b>/.test(html), '起動画面の操作説明にQがある');
 }
 
 console.log('\n[3] 注文どおりの手数か');
