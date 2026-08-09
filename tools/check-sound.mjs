@@ -229,6 +229,47 @@ for (const w of GUNS) {
   );
 }
 
+console.log('\n[4.5] 狙撃銃が一番重い1発になっているか');
+/* 遊んで「銃声もっとかっこよくして欲しい。1発のプレミア感というか、派手に」と
+   言われた所。**言われた言葉は測れないが、言われた中身は測れる。**
+
+   1発が重い銃を数字にすると3つになる:
+     ・低い帯の取り分がライフルより明らかに多い（腹に来る層があるか）
+     ・重心がライフルより低い（明るい破裂だけの音になっていないか）
+     ・実効値がライフルより大きい（同じ距離で単純に大きいか）
+
+   音量を上げるだけでは3つ目しか動かず、しかも山が出口の限界に当たって
+   潰れる（＝大きくしたつもりが小さく聞こえる）。実際に一度そうなった。
+   ここが赤くなったら、上げるのは音量ではなく低い層と尾のほう */
+{
+  /* **2挺に同じ乱数を配る。** 1発ごとの揺らぎ（音程・減衰・フィルタ）は
+     ±3%あって、1回ずつ測って比べると差が揺らぎに埋もれる。
+     実際、平均では狙撃のほうが重心が130Hz低いのに、1回ずつだと逆に出た。
+     測る直前に種を同じ値へ戻せば、2挺が同じ揺らぎを受けるので、
+     残った差は設定の差だけになる（測り直しても同じ数字が出る） */
+  // 種を戻すのはこの節の中だけ。**後ろの節へ持ち越さない。**
+  // 持ち越すと、下の[5]が測る山の高さが今までと別の乱数で測られることになり、
+  // 直したつもりのない武器の数字が動いて読めなくなる
+  const keep = _seed;
+  const one = async (id) => {
+    const w = GUNS.find((g) => g.id === id);
+    _seed = 20260808;
+    return capture((a) => a.gunshot(w.sound, null, null));
+  };
+  const rifle = await one('rifle');
+  const sniper = await one('sniper');
+  _seed = keep;
+  ok(sniper.lowPct > rifle.lowPct + 5,
+    `低音がライフルより多い（狙撃${sniper.lowPct.toFixed(1)}% / ライフル${rifle.lowPct.toFixed(1)}%）`);
+  ok(sniper.centroid < rifle.centroid,
+    `重心が低い（狙撃${sniper.centroid.toFixed(0)}Hz / ライフル${rifle.centroid.toFixed(0)}Hz）`);
+  ok(sniper.rms > rifle.rms,
+    `実効値が大きい（狙撃${sniper.rms.toFixed(3)} / ライフル${rifle.rms.toFixed(3)}）`);
+  // 立ち上がりが鈍ると「重いだけの音」になる。派手さは鋭さと重さの両方から出る
+  ok(sniper.attackMs <= rifle.attackMs + 0.3,
+    `立ち上がりは鈍っていない（狙撃${sniper.attackMs.toFixed(1)}ms / ライフル${rifle.attackMs.toFixed(1)}ms）`);
+}
+
 console.log('\n[5] 振り切れていないか');
 // 山が1.0に届くと波の頭が平らに潰れて、迫力ではなく割れた音になる。
 //
