@@ -500,6 +500,7 @@
   }
   .field input:focus { outline: none; border-color: var(--accent); background: rgba(99,210,255,.07); }
   .hint { font-size: 10px; line-height: 1.7; color: var(--dim); margin-top: 5px; }
+  .hint a { color: var(--accent); }
 
   /* つまみ。作った側が音を聴けないので、聴ける側が直接回せる場所を用意する。
      ここが無いと「作る→聴いてもらう→駄目→また作る」を延々やることになる */
@@ -512,8 +513,19 @@
   .linkbtn:hover { color: var(--accent); border-color: var(--accent); }
 
   /* 文言が出た時にボタンが下へ逃げないよう、2行ぶんの場所を最初から空けておく */
-  #nmStatus { font-size: 11px; letter-spacing: .1em; line-height: 1.7; color: var(--accent); min-height: 38px; margin: 6px 0 4px; text-align: left; }
-  #nmStatus.bad { color: var(--warn); }
+  #nmStatus, #acStatus { font-size: 11px; letter-spacing: .1em; line-height: 1.7; color: var(--accent); min-height: 38px; margin: 6px 0 4px; text-align: left; }
+  #nmStatus.bad, #acStatus.bad { color: var(--warn); }
+
+  /* 会員証の行。名前欄の上に出す。
+     **台帳の無いサーバー（/api/meが404）では、この行ごと出さない。**
+     押しても何も起きないボタンが残っている方が、無いより分かりにくい */
+  .acctrow { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; text-align: left; }
+  .acctrow .who { flex: 1; font-size: 10px; letter-spacing: .1em; line-height: 1.6; color: var(--dim); }
+  .acctrow .who b { color: var(--accent); font-weight: normal; }
+  .acctrow .linkbtn { margin-top: 0; flex: none; }
+  /* ログイン中は名前欄を触らせない。ここで打った名前は使われないので、
+     打てるままだと「変えたのに変わらない」になる */
+  .field input:disabled { opacity: .5; cursor: default; }
 
   .netbtns { display: flex; gap: 10px; }
   .netbtn {
@@ -1114,6 +1126,13 @@
     <div class="title">BLACKOUT</div>
     <div class="subtitle">市街地掃討戦</div>
 
+    <!-- 会員証。台帳を持たないサーバーでは account.js がこの行ごと消す -->
+    <div id="acctRow" class="acctrow hidden">
+      <div class="who" id="acctWho"></div>
+      <button id="acctOpen" class="linkbtn" type="button">ログイン</button>
+      <button id="acctOut" class="linkbtn hidden" type="button">ログアウト</button>
+    </div>
+
     <div class="field">
       <label class="label" for="nmName">名前</label>
       <input id="nmName" type="text" maxlength="12" autocomplete="off" spellcheck="false">
@@ -1138,6 +1157,41 @@
 
 <!-- 戦績の画面はここにあったが消した（2026-08-07、「誰も見ない」）。
      記録そのもの(src/core/stats.js)は死亡画面の自己ベストと実績の解除通知が使うので残っている -->
+
+<!-- 会員証。ログインと新規登録を1枚で兼ねる。
+     2枚に分けると、打ち間違えて行き来するたびに入力が消えるので1枚にしてある。
+     中身の出し入れは src/ui/account.js -->
+<div id="account" class="hidden">
+  <div class="netpanel">
+    <div class="title" id="acTitle">ログイン</div>
+    <div class="subtitle" id="acSub">買った物が端末を跨いで残ります</div>
+
+    <div class="field">
+      <label class="label" for="acEmail">メールアドレス</label>
+      <input id="acEmail" type="email" autocomplete="email" spellcheck="false" maxlength="254">
+    </div>
+    <!-- 名前は新規登録の時だけ出す。ログインでは要らない -->
+    <div class="field hidden" id="acNameField">
+      <label class="label" for="acName">名前（ゲームに出る）</label>
+      <input id="acName" type="text" maxlength="12" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="field">
+      <label class="label" for="acPass">パスワード</label>
+      <input id="acPass" type="password" autocomplete="current-password" maxlength="200">
+    </div>
+
+    <div id="acStatus"></div>
+
+    <div class="netbtns">
+      <button id="acClose" class="netbtn" type="button">閉じる</button>
+      <button id="acSwap" class="netbtn" type="button">新規登録</button>
+      <button id="acGo" class="netbtn main" type="button">ログイン</button>
+    </div>
+    <div class="hint">
+      預かるのはメールアドレスと名前だけです。<a href="/privacy.html" target="_blank" rel="noopener">個人情報の扱い</a>
+    </div>
+  </div>
+</div>
 
 <!-- 設定。中身は src/core/settings.js の表からJSが並べるので、ここは器だけ。
      ホームからも一時停止からも同じ物を開く（2つ作ると片方だけ直して見た目がずれる） -->

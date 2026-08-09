@@ -20,6 +20,7 @@ import { WeaponSystem, WEAPONS } from './player/weapons.js';
 import { Director, Enemy } from './ai/enemy.js';
 import { HUD } from './ui/hud.js';
 import { NetMenu, NET_MSG } from './ui/netmenu.js';
+import { AccountMenu } from './ui/account.js';
 import { SettingsMenu } from './ui/settings.js';
 import { loadSettings, saveSetting, loadSavedRung, saveRung } from './core/settings.js';
 import { AutoQuality } from './core/autoquality.js';
@@ -1087,6 +1088,15 @@ class Game {
     }
     menu.onSettings = () => this.settings.show();
 
+    /* 会員証。**台帳を持たないサーバーでは、この行ごと画面に出ない。**
+       refresh()がサーバーへ1回聞いて決める（/api/meが404なら畳む）。
+       待たずに進めるのは、聞いている間もホームは普通に押せるべきだから。
+       ログインしている人の名前は、ここで名前欄へ差し込んで打てなくする
+       （サーバー側も台帳の名前で上書きするので、打てるままだと食い違う） */
+    this.account = new AccountMenu();
+    this.account.onChange = (user) => menu.setAccountName(user ? user.name : null);
+    this.account.refresh();
+
     // 戦績の画面はここにあったが消した（2026-08-07、「誰も見ない」）。
     // 記録そのもの(stats.js)は死亡画面の自己ベストと実績の解除通知が使うので残っている
     menu.onQuit = () => this._quitGame();
@@ -1207,6 +1217,7 @@ class Game {
     if (this.mode === 'versus') this._quitMatch();
     this.menu.hide();
     this.settings?.hide();
+    this.account?.hide();
     this.hud.show(false);
     this.hud.hideOverlay();
     this.chat.hide();
@@ -1844,8 +1855,10 @@ class Game {
       // マウスが画面へ吸われて席が押せなくなる。
       // 設定も同じで、一時停止から開いている最中にロックを取られると
       // つまみを掴んだ瞬間に試合へ戻ってしまう
+      // 会員証も同じ。メアドとパスワードを打っている最中にロックを取られると、
+      // 打った文字がゲームの操作として吸われる
       if (this.menu?.isOpen || this.lobby?.isOpen
-        || this.settings?.isOpen) return;
+        || this.settings?.isOpen || this.account?.isOpen) return;
       this.audio.init();
       this.audio.resume();
       if (this.state === 'dead') this._restart();
