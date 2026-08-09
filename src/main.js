@@ -896,7 +896,11 @@ class Game {
       // 画面の隅に札が1枚増えただけで終わる
       const got = this._applySoloCarry(n);
       if (got) {
-        this.hud.banner(`第${n}波`, `${got.name}を支給（Qキー）`);
+        this.hud.banner(`第${n}波`, `Qで${got.name}が使えるようになった`);
+        /* 横断幕は数秒で消えるので、右の列にも1行残す。
+           **支給は1回しか起きない出来事**なので、見逃すと
+           「いつの間にか札が増えていた」になる（気づかれないと持ち替えもされない） */
+        this.hud.kill(`Qで${got.name}が使えるようになった`, false);
       } else {
         this.hud.banner(`第${n}波`, healed ? '体力と弾薬を補給した' : `敵 ${count}名 接近中`);
       }
@@ -1590,7 +1594,10 @@ class Game {
     this.weapons.refillReserve();
     if (this.weapons.nades < NADE.PER_ROUND) this.weapons.addNades(NADE.PER_ROUND);
     if (this.player.health < this.player.maxHealth) this.player.refill();
-    this.hud.tutorial('射撃訓練場', `倒した ${this._rangeKills}体 ・ 弾は減らない ・ ESCで一時停止`);
+    // 本編で解放される物もここでは最初から触れる。**触れることを書いておく**
+    // （書かないと、訓練場に居る間そこにあること自体に気づかれない）
+    this.hud.tutorial('射撃訓練場',
+      `倒した ${this._rangeKills}体 ・ Qでスナイパー ・ 右クリックで手榴弾を手前へ ・ 弾は減らない`);
   }
 
   async _joinMatch({ url, name }) {
@@ -3145,6 +3152,8 @@ class Game {
 
     const w = this.weapons.current;
     this.hud.health(this.player.health, this.player.maxHealth);
+    // 走れる息。満タンなら棒ごと消えるので、ここは毎フレーム渡してよい
+    this.hud.stamina(this.player.stamina, this.player.staminaLock);
     /* 画面の札に印を付ける位置は「並びの何番目か」。武器の番号そのものだと、
        持って出ない武器のぶんずれて、別の札が光る。
        支給品(Qの武器)は数字キーの4本の後ろに置いてあるので、その位置を指す */

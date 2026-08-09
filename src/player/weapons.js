@@ -2739,8 +2739,12 @@ export const WEAPONS = [
        対戦には出ないが、出したくなった時のために書いておくと、
        人の体力は130なので胴2発・頭1発で同じ手触りになる */
     damage: 110, headMult: 2.0, rpm: 48, auto: false, pellets: 1,
-    // 5発。予備は5弾倉ぶん（他の銃と同じ数え方）
-    mag: 5, reserve: 25, reloadTime: 3.0,
+    /* **弾は全部で10発。** 遊んで「撃ち放題というよりは、5発とサブが5発の
+       合計10発かな」と言われた所。他の銃は予備を5弾倉ぶん持つ（ライフルなら125発）が、
+       この銃だけ予備を1弾倉ぶんにする。
+       1波を凌ぐのに10発しか無いので、**外すと素直に減る。**
+       波の切れ目（体力と弾の補給が入る所）でだけ満タンに戻る */
+    mag: 5, reserve: 5, reloadTime: 3.0,
     /* 腰だめは捨てる。0.055は20m先で1.1mに散る量で、当たったら事故という広さ。
        覗いた時だけ0.0004（20m先で8mm）まで締まる。
        **「覗かないと何もできない代わりに、覗けば当たる」**を数字で作る */
@@ -4197,7 +4201,9 @@ export class WeaponSystem {
    */
   refillReserve() {
     let got = false;
-    for (const i of this.carry) {
+    // 数字キーの4本＋Qの1本。Qの物を外すと、訓練場で狙撃銃だけ弾が戻らない
+    for (const i of [...this.carry, this.quickIndex]) {
+      if (i == null) continue;
       const w = this.weapons[i];
       if (!w || !w.def.reserve) continue;   // ナイフと手榴弾は予備弾を持たない
       if (w.reserve >= w.def.reserve) continue;
