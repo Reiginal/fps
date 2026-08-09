@@ -375,6 +375,20 @@ console.log('\n[15] 画面のidが揃っている');
   const missing = [...new Set(want)].filter((id) => !html.includes(`id="${id}"`));
   ok(missing.length === 0, `index.htmlに全部ある${missing.length ? ` ← ${missing.join('、')} が無い` : ''}`);
 
+  /* **器を置いただけでは出ない。**
+     hidden を外しても、画面いっぱいに広げる指定が無いと
+     平たい箱が隅に置かれるだけで、押しても何も起きないように見える。
+     実際にそうなって本番で気づいた（このrepoの「実装しただけで確かめない」の型）。
+
+     #account.hidden も要る。共通の .hidden{display:none} はクラス指定なので、
+     IDで display:flex と書いた瞬間にそちらが勝って隠れなくなる */
+  for (const id of ['netmenu', 'settings', 'account']) {
+    const rule = html.match(new RegExp(`#${id} \\{[^}]*\\}`));
+    ok(!!rule && /position:\s*fixed/.test(rule[0]), `#${id} が画面いっぱいに出る指定を持っている`);
+    ok(new RegExp(`#${id}\\.hidden \\{[^}]*display:\\s*none`).test(html),
+      `#${id}.hidden で隠せる（IDの指定がクラスに勝つので、ID側にも要る）`);
+  }
+
   // 名前欄はホーム(netmenu)の物を読みに行っている。あちらのidが変わると静かに壊れる
   ok(html.includes('id="nmName"'), '名前欄(nmName)がある（登録時に初期値として読む）');
   // 個人情報の扱いへの導線。メアドを預かる画面から辿れないと掲示の意味が無い

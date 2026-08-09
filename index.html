@@ -548,6 +548,25 @@
   /* 接続中に連打されると同じ部屋へ何本も繋ぎにいく */
   #netmenu.busy .netbtn { opacity: .35; cursor: default; pointer-events: none; }
 
+  /* ------------------------------------------------------- 会員証 */
+  /* 接続画面と同じ見た目にする。ホームから開くので、z-indexは#netmenu(20)より上。
+     **ここを書き忘れていて、押しても何も出なかった。**
+     器のdivを置いてhiddenを外すだけでは駄目で、
+     画面いっぱいに広げる指定が無いと、平たい箱が隅に置かれるだけになる。
+
+     #account.hidden も要る。共通の .hidden { display:none } はクラス指定なので、
+     IDで display:flex と書いた瞬間に**そちらが勝って、隠れなくなる**
+     （#netmenu と #settings が同じ行を持っているのはこのため） */
+  #account {
+    position: fixed; inset: 0; z-index: 45;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px 0; overflow-y: auto;
+    background: rgba(3, 5, 8, .9);
+  }
+  #account.hidden { display: none; }
+  /* 送信中はボタンを止める。連打されると同じ登録が2回飛ぶ */
+  #account .netbtn:disabled { opacity: .35; cursor: default; pointer-events: none; }
+
   /* --------------------------------------------------------- 設定 */
   /* 接続画面と同じ見た目にする。開ける場所が2つ（ホームと一時停止）あるので、
      どちらから開いても同じ物が出るよう、画面は1つだけ置いて出し入れする。
