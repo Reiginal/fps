@@ -242,6 +242,11 @@ export const C = {
   // 遊び方を選ぶ。誰が押しても変わる（身内で遊ぶのに部屋主を作らない）。
   // 試合が始まってからは効かない
   MODE: 'd',      // { t, md:'dm' | 'gun' }
+  /* 空席にCPUを座らせる／その席のCPUを立たせる。**同じ電文でどちらもやる。**
+     足すと外すを別の電文にすると、押した時の席の状態を画面側が覚えることになり、
+     配られた絵と食い違った瞬間に「押しても何も起きない」が生まれる。
+     人が座っている席へ送っても何も起きない（サーバーが見張っている） */
+  BOT: 'b',       // { t, st:席番号(0..3) }
 };
 
 // サーバー → クライアント
@@ -293,8 +298,8 @@ export const Sv = {
 export const SCORE_ROW = { ID: 0, KILLS: 1, DEATHS: 2, PING: 3, ROUNDS: 4, TEAM: 5 };
 export const SCORE_ROW_LEN = 6;
 
-export const LOBBY_ROW = { ID: 0, NAME: 1, SEAT: 2, READY: 3, CHR: 4 };
-export const LOBBY_ROW_LEN = 5;
+export const LOBBY_ROW = { ID: 0, NAME: 1, SEAT: 2, READY: 3, CHR: 4, BOT: 5 };
+export const LOBBY_ROW_LEN = 6;
 
 // EVENTの中身。1つのスナップショットの間に起きたことをまとめて送る
 export const EV = {

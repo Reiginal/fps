@@ -133,6 +133,7 @@ const KIND_LABEL = {
   boot: 'サーバー起動',
   join: '入場',
   leave: '退場',
+  bot: 'CPUを入れた',
   start: '試合開始',
   round: 'ラウンド決着',
   match: '試合終了',
