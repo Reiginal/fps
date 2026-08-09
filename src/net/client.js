@@ -612,19 +612,28 @@ export class NetClient {
     });
   }
 
-  // 投擲。撃つのと同じで向きだけを申告する。
-  // 飛翔も跳ね返りも爆発もサーバーが計算するので、着弾点はこちらから指定できない
-  sendThrow(origin, dir) {
+  /* 投擲。撃つのと同じで向きだけを申告する。
+     飛翔も跳ね返りも爆発もサーバーが計算するので、着弾点はこちらから指定できない。
+
+     shortは手前投げかどうか（右クリックで入り切りする物）。
+     **強さそのものは送らない。** 速さを数字で送らせると、
+     その数字を書き換えるだけで好きなだけ飛ばせることになる。
+     送るのは「弱く投げた」の印だけで、どれだけ弱いかはサーバーが決める */
+  sendThrow(origin, dir, short = false) {
     if (!this.connected) return;
     this._flushInput();
     let dx = dir.x, dy = dir.y, dz = dir.z;
     const len = Math.hypot(dx, dy, dz);
     if (len > 1e-6) { dx /= len; dy /= len; dz /= len; }
-    this._send({
+    const msg = {
       t: C.THROW,
       o: [qPos(origin.x), qPos(origin.y), qPos(origin.z)],
       d: [qPos(dx), qPos(dy), qPos(dz)],
-    });
+    };
+    // 普段の投げでは載せない。1バイトでも減らすというより、
+    // 「印が付いている時だけ弱い」を読む側で素直に書けるようにするため
+    if (short) msg.s = 1;
+    this._send(msg);
   }
 
   sendWeapon(index) {

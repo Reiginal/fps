@@ -28,15 +28,20 @@ const ok = (c, msg) => { console.log(`  ${c ? '○' : '× 失敗:'} ${msg}`); if
 const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
 const LOFT = Number(main.match(/const NADE_LOFT = ([\d.]+);/)?.[1]);
 
+// 手前投げの上向き成分も同じくmain.jsが持つ
+const LOFT_SHORT = Number(main.match(/const NADE_LOFT_SHORT = ([\d.]+);/)?.[1]);
+
 const DT = 1 / 120;
 const EYE = 1.6;      // 目の高さ（player.jsのSTAND_H相当。おおよそで足りる）
 
 /** 水平を向いて投げた時の一生を追う */
-const throwFlat = () => {
-  const len = Math.hypot(1, LOFT);
-  const dz = -1 / len, dy = LOFT / len;
+const throwFlat = (short = false) => {
+  const loft = short ? LOFT_SHORT : LOFT;
+  const speed = NADE.SPEED * (short ? NADE.SHORT_MUL : 1);
+  const len = Math.hypot(1, loft);
+  const dz = -1 / len, dy = loft / len;
   let y = EYE + dy * NADE.MUZZLE, z = dz * NADE.MUZZLE;
-  let vy = dy * NADE.SPEED, vz = dz * NADE.SPEED;
+  let vy = dy * speed, vz = dz * speed;
   let t = 0, land = -1, landAt = 0, top = y;
   while (t < NADE.FUSE_S) {
     t += DT;
@@ -80,6 +85,28 @@ console.log('\n[4] 爆発するまでに間があるか');
 const wait = NADE.FUSE_S - r.land;
 ok(wait > 0.8 && wait < 2.5, `着地してから爆発まで${wait.toFixed(2)}秒`);
 
+console.log('\n[4.5] 右クリックの手前投げ');
+/* 遊んで「右クリしたら手前めに投げれるようになったら嬉しい」と言われて足した物。
+   見るのは2つ。**近くへ落ちること**と、**それで自爆しないこと。** */
+{
+  ok(Number.isFinite(LOFT_SHORT), `main.jsから手前投げの上向きを読めた（${LOFT_SHORT}）`);
+  ok(NADE.SHORT_MUL < 1, `初速に掛ける倍率がある（×${NADE.SHORT_MUL}）`);
+  ok(LOFT_SHORT > LOFT, `普通より上へ放る（${LOFT_SHORT} > ${LOFT}）`);
+
+  const s = throwFlat(true);
+  ok(s.landAt < r.landAt * 0.7,
+    `普通より手前へ落ちる（手前${s.landAt.toFixed(1)}m / 普通${r.landAt.toFixed(1)}m）`);
+  ok(s.landAt > 3, `足元すぎない（${s.landAt.toFixed(1)}m先）`);
+  ok(s.rise > 0.9, `山なりに放っている（目より${s.rise.toFixed(2)}m上）`);
+
+  /* **自爆の量を見る。** 爆風は max(MIN_DMG, BLAST_DMG*(1-距離/半径)) なので、
+     下限(18)で止まる距離まで離れていれば「手前へ置いた」で済む。
+     そこを割ると、手前投げが「自分に投げる」に変わる（0.55倍だと45喰らう） */
+  const dmg = Math.max(NADE.MIN_DMG, NADE.BLAST_DMG * (1 - s.end / NADE.BLAST_R));
+  ok(dmg <= NADE.MIN_DMG,
+    `遮蔽が無くても被害は下限で止まる（${s.end.toFixed(1)}m先で${dmg.toFixed(0)}）`);
+}
+
 console.log('\n[5] 手元とサーバーが同じ式で飛ばしているか');
 /* **飛翔を2箇所に書いてある。** サーバー(対戦)と手元(1人用)で、
    同じNADEの値を読んで同じ順で計算する約束になっている。
@@ -92,6 +119,24 @@ console.log('\n[5] 手元とサーバーが同じ式で飛ばしているか');
     ok(/NADE\.BOUNCE/.test(src), `${name} … 跳ね返りもNADEから読んでいる`);
     ok(/NADE\.FRICTION \* h/.test(src), `${name} … 摩擦もNADEから読んでいる`);
   }
+}
+
+console.log('\n[6] 手前投げの繋ぎ込み');
+/* **強さを申告させない。** 速さの数字を電文に載せると、
+   そこを書き換えるだけで好きなだけ飛ばせる。送るのは「弱く投げた」の印だけで、
+   どれだけ弱いかはサーバーが持つ倍率で決まる */
+{
+  const client = readFileSync(new URL('../src/net/client.js', import.meta.url), 'utf8');
+  const index = readFileSync(new URL('../server/index.js', import.meta.url), 'utf8');
+  const room = readFileSync(new URL('../server/room.js', import.meta.url), 'utf8');
+  ok(/sendThrow\(origin, dir, short/.test(client), '手元は印だけを送っている');
+  ok(!/SHORT_MUL/.test(client), '手元は強さの数字を送っていない');
+  ok(/m\.s === 1/.test(index), 'サーバーが印を読んでいる');
+  ok(/NADE\.SHORT_MUL/.test(room), 'サーバー側が倍率を掛けている');
+  // 手元(1人用)と予測線も同じ関数から取ること。別々に書くと線と飛び方がずれる
+  ok(/throwSpeedOf\(short\)[\s\S]*throwSpeedOf\(short\)/.test(main),
+    '予測線と1人用の飛翔が同じ関数を読んでいる');
+  ok(/throwShort/.test(main), '手前投げの入り切りを見ている');
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);

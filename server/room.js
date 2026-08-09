@@ -843,7 +843,7 @@ export class Room {
 
   // 投擲の受け口。撃つのと同じで、申告を受けるのは向きだけ。
   // 位置は本人の目から前へ少し出した所に固定する（好きな場所から出させない）
-  throwNade(slot, origin, dir) {
+  throwNade(slot, origin, dir, short = false) {
     const sim = slot.sim;
     if (!sim.alive) return;
     if (this.phase !== PHASE.LIVE) return;
@@ -859,7 +859,9 @@ export class Room {
         eye.y + dir.y * NADE.MUZZLE,
         eye.z + dir.z * NADE.MUZZLE,
       ),
-      vel: new THREE.Vector3(dir.x, dir.y, dir.z).multiplyScalar(NADE.SPEED),
+      // 手前投げは初速だけ落とす。角度は向きの話なので申告されたdirのまま
+      vel: new THREE.Vector3(dir.x, dir.y, dir.z)
+        .multiplyScalar(NADE.SPEED * (short ? NADE.SHORT_MUL : 1)),
       fuse: NADE.FUSE_S,
       // 転がっている玉のカプセル。Octreeは点ではなくカプセルで押し返すので、
       // 長さゼロの（＝球の）カプセルを使い回す
