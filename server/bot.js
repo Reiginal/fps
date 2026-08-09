@@ -33,8 +33,26 @@ const AIM_TOL = 0.055;
 const WOBBLE = 0.035;
 // 揺れの速さ(rad/s)。位相を進める量
 const WOBBLE_HZ = 2.3;
-// 見つけてから撃ち始めるまでの間(秒)
-const REACT_S = 0.34;
+/* 見つけてから撃ち始めるまでの間(秒)。
+   **ここが撃ち合いの勝敗をほぼ決める。** CPUは相手を見失わないし狙いも外さないので、
+   先に撃ち始めた側がそのまま勝つ。0.34秒だと人より速く、
+   曲がり角で出会い頭に必ず負ける（「絶対CPUの方が強い」2026-08-09） */
+const REACT_S = 0.55;
+
+/* 撃つたびに広がる散り(rad)と、収まる速さ(rad/s)、その上限。
+   **人には反動があるのにCPUには無かった。** 押しっぱなしで全弾同じ点に飛ぶので、
+   人から見ると「こちらは散るのに相手は散らない」撃ち合いになる。
+   1発ごとに散りを足して、撃つのをやめると収まる形にする（銃の反動と同じ振る舞い） */
+const SPREAD_PER_SHOT = 0.022;
+const SPREAD_MAX = 0.085;
+const SPREAD_DECAY = 0.16;
+
+/* 連射を区切る発数と、区切りの間(秒)。
+   撃ち続けられると、隠れる間も立て直す間も無い。
+   人も反動が上がれば指を離すので、その呼吸をここで作る */
+const BURST_MIN = 4;
+const BURST_MAX = 8;
+const BURST_PAUSE_S = 0.5;
 // この距離(m)より遠い相手は撃たない。武器の射程より手前で切る。
 // **追うのはこの外からでもやる**（追わないと、離れた所で棒立ちの相手を
 // いつまでも見つけられない。詳しくはthink）
@@ -143,6 +161,9 @@ export class Bot {
     this._detourIn = 0;
     this._best = Infinity;  // その相手にどこまで近づけたか（一番近かった距離）
     this._noProg = 0;       // それより近づけないまま経った秒数
+    this._spread = 0;       // 撃つほど広がる散り（反動の代わり）
+    this._burst = 0;        // この連射であと何発撃つか
+    this._pause = 0;        // 連射の区切りの残り秒
     this._pressReload = false;
   }
 
@@ -157,7 +178,10 @@ export class Bot {
    */
   think(me, foes, octree, dt, live) {
     const p = me.player;
-    const out = { bits: 0, yaw: p.yaw, pitch: p.pitch, fire: false };
+    /* fireYaw/firePitchは「弾が飛ぶ向き」。yaw/pitchの「見ている向き」とは別物で、
+       散り(反動の代わり)のぶんだけずれる。人の銃も、狙った点そのものではなく
+       その周りの円のどこかへ飛ぶので、そこを揃えてある */
+    const out = { bits: 0, yaw: p.yaw, pitch: p.pitch, fire: false, fireYaw: 0, firePitch: 0 };
     // 倒れている間とロビーでは何もしない。
     // ここで動かすと、幕間に走り回るCPUが全員の画面に映る
     if (!live || !me.alive) {
@@ -170,6 +194,9 @@ export class Bot {
     if (this._mag < 0) this._mag = def.mag | 0;
 
     this._wobble += WOBBLE_HZ * dt;
+    // 撃つのをやめている間に散りが収まる（銃の反動が落ち着くのと同じ）
+    this._spread = Math.max(0, this._spread - SPREAD_DECAY * dt);
+    if (this._pause > 0) this._pause = Math.max(0, this._pause - dt);
     if (this._reload > 0) this._reload = Math.max(0, this._reload - dt);
     this._retarget -= dt;
     this._strafeIn -= dt;
@@ -306,7 +333,7 @@ export class Bot {
     /* 撃つ。全部そろった時だけ。
        ここを緩めると「壁越しに撃ってくる」「振り向きざまに当ててくる」になる */
     if (target && seen && this._react <= 0 && this._reload <= 0 && this._mag > 0
-      && dist <= Math.min(SIGHT_R, def.range || SIGHT_R)) {
+      && this._pause <= 0 && dist <= Math.min(SIGHT_R, def.range || SIGHT_R)) {
       // 狙いがどれだけ寄ったか。撃つ向きは out.yaw/out.pitch なので、
       // 判定もその値で見る（見ている向きと撃つ向きを別々に持たない）
       const a = aimAt(eye, _look);
@@ -317,6 +344,18 @@ export class Bot {
       if (Math.abs(dy) < AIM_TOL && Math.abs(dp) < AIM_TOL) {
         out.fire = true;
         this._mag -= 1;
+        /* 弾は狙った点そのものではなく、散りの円のどこかへ飛ぶ。
+           撃つほど円が広がるので、押しっぱなしの後半は当たらなくなる */
+        const sp = this._spread;
+        out.fireYaw = out.yaw + (this.rng() * 2 - 1) * sp;
+        out.firePitch = out.pitch + (this.rng() * 2 - 1) * sp * 0.7;
+        this._spread = Math.min(SPREAD_MAX, this._spread + SPREAD_PER_SHOT);
+        // 連射を区切る。撃ち切ったら少し間を置く（人が反動で指を離す呼吸）
+        if (this._burst <= 0) {
+          this._burst = BURST_MIN + Math.floor(this.rng() * (BURST_MAX - BURST_MIN + 1));
+        }
+        this._burst -= 1;
+        if (this._burst <= 0) this._pause = BURST_PAUSE_S * (0.7 + this.rng() * 0.8);
       }
     }
 

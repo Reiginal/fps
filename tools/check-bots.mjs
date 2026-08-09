@@ -202,17 +202,48 @@ console.log('\n[6] 強すぎない（振り向きざまの即死をしない）'
   const me = fakeSim(0, { x: 0, y: 0, z: 0 }, 0);
   const foe = fakeSim(1, { x: 0, y: 0, z: 12 }, 0);
   let firstFire = -1;
-  for (let i = 0; i < 120; i++) {
+  for (let i = 0; i < 200; i++) {
     const f = bot.think(me, [foe], null, 1 / 60, true);
     me.player.yaw = f.yaw;
     me.player.pitch = f.pitch;
     if (f.fire && firstFire < 0) firstFire = i;
   }
-  ok(firstFire > 12, `真後ろの相手を撃つまで${firstFire}刻み（0.2秒より長い）`);
-  ok(firstFire > 0 && firstFire < 120, '最後には撃つ（永久に撃たないわけではない）');
+  // 出会い頭に必ず負けないよう、人が反応するのと同じくらいの間を置く
+  ok(firstFire > 30, `真後ろの相手を撃つまで${firstFire}刻み（0.5秒より長い）`);
+  ok(firstFire > 0 && firstFire < 200, '最後には撃つ（永久に撃たないわけではない）');
 }
 
-console.log('\n[7] 弾倉を自分で数える（サーバーは弾数を持っていない）');
+console.log('\n[7] 反動の代わりの散りと、連射の区切り');
+{
+  /* **人には反動があるのにCPUには無かった。** 押しっぱなしで全弾が同じ点へ飛ぶので、
+     人から見ると「こちらは散るのに相手は散らない」撃ち合いになる
+     （「絶対CPUの方が強い、敵の攻撃はめっちゃ入る」2026-08-09）。
+     撃つほど散りが広がること・撃ち続けずに間を置くことを見る */
+  const bot = new Bot({ rng: () => 0.9 });   // 散りは常に同じ側へ最大に振れる
+  const me = fakeSim(0, { x: 0, y: 0, z: 0 }, Math.PI);
+  const foe = fakeSim(1, { x: 0, y: 0, z: 12 }, 0);
+  const devs = [];
+  let gaps = 0, run = 0;
+  for (let i = 0; i < 60 * 6; i++) {
+    const f = bot.think(me, [foe], null, 1 / 60, true);
+    me.player.yaw = f.yaw;
+    me.player.pitch = f.pitch;
+    if (f.fire) {
+      devs.push(Math.abs(f.fireYaw - f.yaw));
+      if (run > 20) gaps++;
+      run = 0;
+    } else run++;
+  }
+  ok(devs.length > 5, `何発か撃った（${devs.length}発）`);
+  ok(devs.some((d) => d > 0), '弾の向きが見ている向きとずれる（散りがある）');
+  // 撃ち始めより撃ち続けた後の方が散る
+  const first = devs[0];
+  const later = Math.max(...devs.slice(1, 6));
+  ok(later > first, `撃つほど散りが広がる（1発目${first.toFixed(3)} → ${later.toFixed(3)}rad）`);
+  ok(gaps > 0, `連射に区切りがある（${gaps}回の間）`);
+}
+
+console.log('\n[8] 弾倉を自分で数える（サーバーは弾数を持っていない）');
 {
   /* **サーバーが持っているのは連射の速さだけで、弾数は持っていない。**
      CPUがここで数えないと、CPUだけ無限に撃ち続ける人になる */
@@ -235,7 +266,7 @@ console.log('\n[7] 弾倉を自分で数える（サーバーは弾数を持っ�
   ok(gap > 90, `装填で撃てない間がある（一番長い間が${gap}刻み）。弾倉は${mag}発`);
 }
 
-console.log('\n[8] 器の繋ぎ込み（電文・画面）');
+console.log('\n[9] 器の繋ぎ込み（電文・画面）');
 {
   const proto = readFileSync(new URL('../src/net/protocol.js', import.meta.url), 'utf8');
   const idx = readFileSync(new URL('../server/index.js', import.meta.url), 'utf8');
