@@ -22,6 +22,7 @@ import { HUD } from './ui/hud.js';
 import { NetMenu, NET_MSG } from './ui/netmenu.js';
 import { AccountMenu } from './ui/account.js';
 import { LookMenu } from './ui/look.js';
+import { setAccount } from './player/skins.js';
 import { SettingsMenu } from './ui/settings.js';
 import { loadSettings, saveSetting, loadSavedRung, saveRung } from './core/settings.js';
 import { AutoQuality } from './core/autoquality.js';
@@ -1094,16 +1095,24 @@ class Game {
        待たずに進めるのは、聞いている間もホームは普通に押せるべきだから。
        ログインしている人の名前は、ここで名前欄へ差し込んで打てなくする
        （サーバー側も台帳の名前で上書きするので、打てるままだと食い違う） */
-    this.account = new AccountMenu();
-    this.account.onChange = (user) => menu.setAccountName(user ? user.name : null);
-    this.account.refresh();
-
     /* 見た目（武器のスキン）。**今持っている銃にもその場で反映する。**
        次に構えるまで変わらないと、押した手応えが無くて
        「効いていない」と読まれる（実際そう見える） */
     this.look = new LookMenu();
-    this.look.onChange = (id) => this.weapons?.applySkin?.(id);
+    this.look.onChange = () => this.weapons?.refreshSkins?.();
     menu.onLook = () => this.look.show();
+
+    /* 会員証。**台帳を持たないサーバーでは、この行ごと画面に出ない。**
+       持ち物と装備もここから届くので、届いたら銃へ掛け直す
+       （ログインした瞬間に、買ってある物が着く） */
+    this.account = new AccountMenu();
+    this.account.onChange = (user) => {
+      menu.setAccountName(user ? user.name : null);
+      setAccount(user || {});
+      this.look.setUser(user);
+      this.weapons?.refreshSkins?.();
+    };
+    this.account.refresh();
 
     // 戦績の画面はここにあったが消した（2026-08-07、「誰も見ない」）。
     // 記録そのもの(stats.js)は死亡画面の自己ベストと実績の解除通知が使うので残っている

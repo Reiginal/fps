@@ -10,7 +10,10 @@
 //   node tools/check-skins.mjs
 import { readFileSync, readdirSync } from 'node:fs';
 import '../server/dom-stub.js';
-import { SKINS, skinAt, applySkin, loadSkin, saveSkin } from '../src/player/skins.js';
+import {
+  SKINS, skinAt, applySkin, skinFor, hasSkin, wearSkin, setAccount,
+} from '../src/player/skins.js';
+import { SKIN_LIST, SKINNABLE, DEFAULT_SKIN, skuOf } from '../src/net/protocol.js';
 import { WEAPONS, MATS, recolor } from '../src/player/weapons.js';
 
 let bad = 0;
@@ -144,11 +147,41 @@ console.log('\n[6] 焼くのは1回だけ');
     '**2本の銃が同じスキンの材質を共有する**（銃ごとに焼き直していない）');
 }
 
-console.log("\n[7] 覚え方");
+console.log("\n[7] 武器ごとに別のスキンを着ける");
 {
-  ok(typeof loadSkin() === 'string', '覚えていない端末でも文字列が返る');
-  ok(SKINS.some((s) => s.id === loadSkin()), '返るのは必ず表にあるid');
-  ok(saveSkin('知らないid') === 'stock', '知らないidを覚えさせようとしても標準になる');
+  // 何も持っていない状態から始める（ログインしていない人と同じ）
+  setAccount({ owned: [], equipped: {} });
+  for (const w of SKINNABLE) ok(skinFor(w) === DEFAULT_SKIN, `${w} … 最初は標準`);
+  ok(!wearSkin('rifle', 'gold'), '**持っていない物は着けられない**');
+  ok(skinFor('rifle') === DEFAULT_SKIN, '着けようとしても標準のまま');
+  ok(wearSkin('rifle', DEFAULT_SKIN), '標準はいつでも着けられる（買う物ではない）');
+
+  // 買ってある状態にする
+  setAccount({ owned: [skuOf('rifle', 'gold'), skuOf('pistol', 'desert')], equipped: {} });
+  ok(hasSkin('rifle', 'gold'), 'ライフルのゴールドを持っている');
+  ok(!hasSkin('pistol', 'gold'), '**ピストルのゴールドは別の商品**（持っていない）');
+  ok(wearSkin('rifle', 'gold'), '持っている物は着けられる');
+  ok(skinFor('rifle') === 'gold' && skinFor('pistol') === DEFAULT_SKIN,
+    '**武器ごとに別々**（ライフルはゴールド、ピストルは標準）');
+  ok(wearSkin('pistol', 'desert') && skinFor('rifle') === 'gold',
+    'ピストルを変えてもライフルは変わらない');
+
+  // 台帳側で持ち物を消された時。着せたままにしない
+  setAccount({ owned: [], equipped: { rifle: 'gold' } });
+  ok(skinFor('rifle') === DEFAULT_SKIN,
+    '**持っていない物が届いても着せない**（持ち物を消した時の保険）');
+}
+
+console.log("\n[7b] 値段の表が1つしかない");
+{
+  /* 値段が2箇所にあると、片方だけ直した時に
+     「画面では300コインなのに引かれるのは1500コイン」が起きる */
+  const paint = readFileSync(new URL('../src/player/skins.js', import.meta.url), 'utf8');
+  ok(!/price\s*:/.test(paint), '**塗り方の表が値段を持っていない**（protocol.jsだけが持つ）');
+  ok(SKINS.every((s) => typeof s.price === 'number'), '画面に出す時はprotocol.jsから乗る');
+  const ids = SKIN_LIST.map((s) => s.id).sort().join();
+  ok(SKINS.map((s) => s.id).sort().join() === ids, '塗り方と品揃えのidが揃っている');
+  ok(SKINS.every((s) => s.id === DEFAULT_SKIN || s.price > 0), '標準以外は必ず値段が付いている');
 }
 
 console.log("\n[8] 軽さ — 開いている間だけ描く");

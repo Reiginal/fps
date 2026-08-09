@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { muzzleFlashTexture, radialTexture, smokeTexture } from '../world/textures.js';
 import { tryModelOverride } from './glbview.js';
-import { applySkin, loadSkin } from './skins.js';
+import { applySkin, skinFor } from './skins.js';
 // 持ち物の決まりだけ取り込む。protocol.jsはこちらを読まないので輪にならない
 import { loadoutOf, NADE } from '../net/protocol.js';
 
@@ -2945,10 +2945,8 @@ class Weapon {
     tryModelOverride(this, def.id).catch(() => {});
 
     /* 選んだスキン（同じ銃の色違い）を被せる。**組み上がった後で材質だけ差し替える。**
-       ここで被せるのは、持ち替えのたびに作り直される物なので
-       （武器は試合ごとに組み直す）、覚えている選択をその都度反映する。
-       焼いた材質はスキンごとに1回しか作らないので、持ち替えで引っかからない */
-    applySkin(this.inner, loadSkin());
+       **武器ごとに別のスキンを着けられる**ので、自分のidで引く */
+    applySkin(this.inner, skinFor(def.id));
 
     this.ammo = def.mag;
     this.reserve = def.reserve;
@@ -3312,14 +3310,14 @@ export class WeaponSystem {
   get def() { return this.current.def; }
 
   /**
-   * スキンを掛け直す。**組んである全部の武器に掛ける。**
+   * スキンを掛け直す。**組んである全部の武器に、それぞれのスキンで掛ける。**
    *
    * 今持っている物だけに掛けると、持ち替えた瞬間に前の色へ戻る
    * （武器は起動時に全部組んであって、持ち替えは見せる物を替えているだけ）。
    * 焼いた材質はスキンごとに1回しか作らないので、全部に掛けても安い
    */
-  applySkin(id) {
-    for (const w of this.weapons) applySkin(w.inner, id);
+  refreshSkins() {
+    for (const w of this.weapons) applySkin(w.inner, skinFor(w.def.id));
   }
 
   // 持ち替えが通ったかを返す。対戦では通った時だけサーバーへ知らせないと、

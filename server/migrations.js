@@ -103,8 +103,44 @@ export const STEPS = [
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`,
   },
-  // スキン(owned_skins)と、現金を入れる時の明細(ledger)はここへ足す。
-  // 上の5つには二度と触らない
+  {
+    n: 6,
+    name: '持っているスキン',
+    /* 買った物。sku は 'rifle:desert' の形で、**武器ごとに別の商品**。
+       主キーを (user_id, sku) にしてあるので、
+       **同じ物を2回買うことが台帳の作りとして起きない。**
+       アプリ側でも確かめるが、確かめてから書くまでの隙間に
+       もう1回押されると両方通る（連打で起きる）。最後の砦はこちら。
+
+       price を残すのは、後で値段を変えても
+       「いくらで買ったか」が消えないようにするため。
+       現金を入れる段になると、ここが領収の記録の下地になる */
+    sql: `CREATE TABLE owned_skins (
+      user_id BIGINT      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      sku     TEXT        NOT NULL,
+      price   INTEGER     NOT NULL,
+      got_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (user_id, sku)
+    )`,
+  },
+  {
+    n: 7,
+    name: '装備しているスキン',
+    /* 武器1本につき1つ。主キーが (user_id, weapon_id) なので、
+       同じ武器に2つ装備することが起きない。
+
+       **持っているかどうかはここでは見ない。** 見るのはアプリ側（server/store.js）。
+       台帳に「持っている物しか入れられない」を書くこともできる（外部キー）が、
+       そうすると持ち物を消した時に装備の行が道連れで消えて、
+       何を装備していたかの記録まで無くなる */
+    sql: `CREATE TABLE equipped_skins (
+      user_id   BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      weapon_id TEXT   NOT NULL,
+      skin_id   TEXT   NOT NULL,
+      PRIMARY KEY (user_id, weapon_id)
+    )`,
+  },
+  // 現金を入れる時の明細(ledger)はここへ足す。上の7つには二度と触らない
 ];
 
 /**
