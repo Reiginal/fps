@@ -376,6 +376,12 @@
   #spectate.hidden { display: none; }
   #specName { font-size: 15px; letter-spacing: .18em; color: var(--hud); }
   #specName::before { content: '観戦中　'; color: #68727e; font-size: 11px; }
+  /* 見ている人の体力。**自分の体力の棒は0のまま消えているので、
+     観戦中は画面のどこにも体力が無かった**（誰が優勢なのかも分からない）。
+     残り3割を切ったら赤くして、危ないことが目の端で分かるようにする */
+  #specHp { font-size: 22px; letter-spacing: .06em; margin-top: 4px; color: var(--hud); }
+  #specHp.low { color: var(--bad); }
+  #specHp::after { content: ' HP'; font-size: 10px; color: #68727e; letter-spacing: .16em; }
   #specHint { font-size: 11px; letter-spacing: .16em; margin-top: 6px; color: #68727e; }
   #specHint.hidden { display: none; }
 
@@ -954,6 +960,7 @@
   <!-- 対戦で倒れている間、誰の目線で見ているか -->
   <div id="spectate" class="hidden">
     <div id="specName"></div>
+    <div id="specHp"></div>
     <div id="specHint">クリックで次の人</div>
   </div>
 

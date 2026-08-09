@@ -2184,10 +2184,15 @@ class Game {
     const pose = spectatePose(target, this._specEyeH);
     this.camera.position.set(pose.pos.x, pose.pos.y, pose.pos.z);
     this.camera.rotation.set(pose.rot.x, pose.rot.y, 0, 'YXZ');
-    // 誰を見ているかを画面に出す。出さないと自分が生き返ったのかどうかも分からない
+    /* 誰を見ているかを画面に出す。出さないと自分が生き返ったのかどうかも分からない。
+       **体力も一緒に出す。** 自分の体力の棒は倒れている間0のまま消えているので、
+       出さないと画面のどこにも体力が無い。見ている相手があと1発なのか満タンなのかが
+       分からず、撃ち合いを見ていても何が起きているのか読めない */
     this.hud.spectating(
       this.net.players.get(target.id)?.name || '味方',
       alive.length > 1,
+      target.hp,
+      this.player.maxHealth,
     );
   }
 
