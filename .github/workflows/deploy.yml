@@ -27,8 +27,20 @@ name: Deploy
 on:
   push:
     branches: [main]
+    # 根元の文書だけを直した回は、本番を焼き直さない。
+    # CLAUDE.md・課題.md・やりたいこと.md・README.md が該当する。
+    # **配っている物が1バイトも変わらないのに1.5分かけていた。**
+    #
+    # `*.md` は根元だけに当たる（`*` は / をまたがない）。
+    # `**/*.md` にしないのは、**assets/ の下は丸ごと外へ配っている**ため
+    # （assets/models/CREDITS.md も配る物の一部。server/serve-rules.js を参照）。
+    # ここへ配る物の拡張子を足すと、直したのに本番へ出ない形になるので、
+    # tools/check-meta.mjs の[5-3]が中身を見張っている
+    paths-ignore:
+      - '*.md'
   # コミットを増やさずに入れ直したい時のための手動の口。
-  # 本番が変な状態になった時、まずこれを押せば直ることが多い
+  # 本番が変な状態になった時、まずこれを押せば直ることが多い。
+  # 上で飛ばした回を手で出したくなった時も、ここから出せる
   workflow_dispatch:
 
 # デプロイは同時に走らせない。2つ同時に走ると、後から始まった方が
@@ -96,15 +108,32 @@ jobs:
       # ブラウザ本体は毎回落とすと30秒かかる。中身は playwright の版でしか
       # 変わらないので、package-lock.json を鍵にして使い回す
       - name: ブラウザを使い回す
+        id: browser
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
-      # --with-deps は動かすのに要るライブラリも入れる。
-      # 本体が使い回せた時は、ここはその確認だけで終わる
-      - name: ブラウザを入れる
+      # ------------------------------------------------------------------
+      # **使い回せた回は --with-deps を付けない。**
+      #
+      # --with-deps は動かすのに要るライブラリを apt で入れる指定で、
+      # **本体を使い回せた回でも必ず走る**（aptはキャッシュの外なので）。
+      # 実測で、使い回しが3秒で戻ってきた回でもここだけ20秒かかっていた。
+      # ubuntu-latest の実行環境には元から入っているので、
+      # 本体が揃っている回は確認だけで済ませる。約15秒。
+      #
+      # 危ない所: GitHub側の実行環境の中身が変わってライブラリが欠けた日に落ちる。
+      # ただし落ちるのはこの仕事なので、**本番へは出ない**（下の ship が needs で止まる）。
+      # その時は下の「初回」の側だけが残るよう、鍵を変えて入れ直せばよい
+      # ------------------------------------------------------------------
+      - name: ブラウザを入れる（初回はライブラリごと）
+        if: steps.browser.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
+
+      - name: ブラウザを確かめる（使い回せた時）
+        if: steps.browser.outputs.cache-hit == 'true'
+        run: npx playwright install chromium
 
       # サーバーの起動と停止は playwright.config.mjs がやる
       - name: ブラウザで開いて確かめる
