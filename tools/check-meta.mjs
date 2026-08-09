@@ -113,6 +113,25 @@ console.log('\n[5-2] mainへ入った物を検査する所が、1つは残って
   }
 }
 
+console.log('\n[5-3] 本番へ出さない回の決まりが、配る物を巻き込んでいない');
+/* 2026-08-09に、根元の文書だけを直した回は本番を焼き直さないようにした
+   （配っている物が1バイトも変わらないのに1.5分かけていた）。
+   **ここへ配る物の拡張子を1つ足すと、直したのに本番へ出ない形になる。**
+   しかもCIは緑、deployは「成功」ですらなく走らないだけなので、
+   気づくのは「直したはずなのに本番が変わらない」と遊んでいて思った時になる。
+
+   assets/ の下は丸ごと外へ配っている（server/serve-rules.js）ので、
+   二重の星印で下の階層まで拾う形も、配る物を巻き込む */
+{
+  const block = noComment(deploy).match(/paths-ignore:\s*\n((?:\s*-\s*'[^']*'\s*\n)+)/)?.[1] ?? '';
+  const entries = [...block.matchAll(/-\s*'([^']*)'/g)].map((m) => m[1]);
+  ok(entries.length > 0, `本番へ出さない対象が ${entries.length} 件書いてある`);
+  for (const e of entries) {
+    ok(e.endsWith('.md'), `${e} … 文書だけになっている（配る物の拡張子を入れない）`);
+    ok(!e.includes('**'), `${e} … 下の階層まで拾っていない（assets/の下も配る物）`);
+  }
+}
+
 console.log('\n[6] このファイル自身も走る');
 ok(real.includes('check-meta.mjs'), 'check-meta.mjs 自身が tools/ にある');
 
