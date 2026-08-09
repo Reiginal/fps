@@ -649,15 +649,20 @@ export class Room {
     // 1刻みに1件だけ置く。溜めないので、この刻みの_feedがそのまま食べる
     slot.pending.set(slot.nextSeq, [f.bits, f.yaw, f.pitch]);
     slot._botFire = f.fire;
+    slot._botFireYaw = f.fireYaw;
+    slot._botFirePitch = f.firePitch;
   }
 
   /* CPUの発砲。**_feedの後に呼ぶ。** 先に呼ぶと、1刻み前の位置と向きで撃つことになり、
-     動きながら撃った時だけ狙いが後ろへずれる */
+     動きながら撃った時だけ狙いが後ろへずれる。
+     **向きは見ている向き(lastYaw)ではなく、CPUが返した弾の向きを使う。**
+     人の銃も狙った点そのものではなく散りの円のどこかへ飛ぶので、そこを揃えてある
+     （揃える前は反動も散りも無い相手になっていた。server/bot.jsの散りを参照） */
   _botShoot(slot) {
     if (!slot._botFire) return;
     slot._botFire = false;
     slot.sim.eye(_botOrigin);
-    forwardOf(slot.lastYaw, slot.lastPitch, _botDir);
+    forwardOf(slot._botFireYaw, slot._botFirePitch, _botDir);
     this.shot(slot, slot.lastSeq, _botOrigin, _botDir);
   }
 
