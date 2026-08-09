@@ -4,6 +4,7 @@ import { buildMaterials, createSky, skyFogColor, installAerialPerspective } from
 import { currentTimeOfDay } from './world/sun.js';
 import { buildLevel } from './world/level.js';
 import { buildTutorialLevel } from './world/tutorial-level.js';
+import { buildRangeLevel } from './world/range-level.js';
 import { TutorialMachine } from './core/tutorial.js';
 import { Effects } from './world/effects.js';
 import { Input } from './core/input.js';
@@ -527,10 +528,11 @@ class Game {
     /* 観戦カメラ（対戦で倒れている間）。今どの人の肩越しに居るか。
        deathcam側へ渡す壁当たりの受け口はここで1つ作って使い回す
        （毎フレーム関数を作ると、そのぶんゴミが出る） */
-    /* チュートリアル（詳しくは_enterTutorial）。tutorialが真の間は
-       波が湧かない・戦績に混ざらない・倒れない。
+    /* チュートリアル（詳しくは_enterTutorial）と射撃訓練場（_enterRange）。
+       どちらかが真の間は波が湧かない・戦績に混ざらない・倒れない。
        _shootablesは射撃と爆風の当たり先の差し替え口で、普段はnull＝本編の敵 */
     this.tutorial = false;
+    this.range = false;
     this._shootables = null;
     this._specId = null;
     this._specRay = (from, dir, maxDist) => {
@@ -1142,6 +1144,14 @@ class Game {
       menu.hide();
       this.input.requestLock();
     };
+    menu.onRange = () => {
+      this._wakeAudio();
+      this.diag.name = menu.playerName || '';
+      this.diag.event('射撃訓練場を始めた');
+      this._enterRange();
+      menu.hide();
+      this.input.requestLock();
+    };
     menu.onJoin = (opt) => {
       this._wakeAudio();
       // ここで全画面に入っておく。
@@ -1210,8 +1220,9 @@ class Game {
   }
 
   _enterSolo() {
-    // チュートリアルから来た時は先に世界を戻す（何度呼んでも無害な作り）
+    // チュートリアル・訓練場から来た時は先に世界を戻す（何度呼んでも無害な作り）
     this._leaveTutorial();
+    this._leaveRange();
     this.mode = 'solo';
     this.hud.setMode('solo');
     this.director.reset();
@@ -1245,6 +1256,7 @@ class Game {
   }
 
   _enterTutorial() {
+    this._leaveRange();
     this.tutorial = true;
     // modeは'solo'のまま。'tutorial'という第3のmodeを作ると、
     // mode判定が8箇所に散っているこのファイルの挙動が黙って変わる
@@ -1405,8 +1417,119 @@ class Game {
     this.hud.tutorial(l.main, l.sub);
   }
 
+  /* -------------------------------------------------- 射撃訓練場 */
+
+  /**
+   * 射撃訓練場。チュートリアルと同じ仕掛け（世界の差し替え・的はEnemyの静置）だが
+   * 課題は無く、的が左右へ動き、弾も手榴弾も減らず、自分は無敵。
+   * チュートリアルを遊んで「気兼ねなく試し撃ちする場所も欲しい」で生まれた(2026-08-09)。
+   * エイムを競う要素（点数・制限時間・ランキング）は入れない。
+   * やりたいこと.mdで一度「いらない」に入れた理由がそこで、撃つ場所だけを出す
+   */
+  _enterRange() {
+    this._leaveTutorial();
+    this.range = true;
+    // modeは'solo'のまま（第3のmodeを作らない理由は_enterTutorial参照）
+    this.mode = 'solo';
+    this.hud.setMode('solo');
+    this.hud.setTutorial(true);   // 波・得点・地図の枠はここでも意味が無いので隠す
+    if (!this._rangeLevel) {
+      this._rangeLevel = buildRangeLevel(this.mats);
+      this.scene.add(this._rangeLevel.root);
+    }
+    this._setWorld(this._rangeLevel);
+    this.director.reset();
+    this.effects.clear();
+    this._restart();   // teleport先はthis.level.playerSpawnなので差し替えの後に呼ぶ
+    // 敵の波は永久に起こさない（_restart()が2.0へ戻すので必ずこの順。_enterTutorial参照）
+    this.director.betweenWaves = Infinity;
+    // 最初から全部の武器を持たせる。狙撃銃は本編では第2波の解放だが、
+    // 触って覚える場所がここなので先に触れて損は無い
+    this._applySoloCarry(99);
+    this._rangeKills = 0;
+    this._rangeT = 0;
+    this._spawnRangeTargets();
+  }
+
+  /** 動く的を並べる。どこをどう動くかは小ステージのレーン表(targetLanes)が持つ */
+  _spawnRangeTargets() {
+    this._rangeTargets ??= [];
+    const lanes = this._rangeLevel.targetLanes;
+    while (this._rangeTargets.length < lanes.length) {
+      // Enemyはsceneを知らない（Directorが姿を足す係）。ここでは自分で足す
+      const e = new Enemy(this._rangeLevel);
+      this.scene.add(e.root);
+      this.scene.add(e.blob);
+      e.onDeath = (en) => {
+        // 本編の_onKillは使わない理由も_spawnTutorialTargetsと同じ
+        this._rangeKills++;
+        this.effects.bloodPool(en.collider.start);
+        this.audio.kill(false);
+        this.hud.kill('的を撃破', false);
+      };
+      this._rangeTargets.push(e);
+    }
+    for (let i = 0; i < lanes.length; i++) {
+      const e = this._rangeTargets[i];
+      e._lane = lanes[i];
+      e._spot = new THREE.Vector3(lanes[i].x, 0, lanes[i].z);
+      this._placeTarget(e, e._spot);
+    }
+    // 射撃判定と爆風の当たり先を的に向ける（_resolveShotと_explodeSolo参照）
+    this._shootables = this._rangeTargets;
+  }
+
+  /** 訓練場の後片付け。何度呼んでも無害（入っていなければ何もしない） */
+  _leaveRange() {
+    if (!this.range) return;
+    this.range = false;
+    this.hud.setTutorial(false);
+    this.hud.tutorial(null);
+    this._shootables = null;
+    for (const t of this._rangeTargets ?? []) {
+      t.alive = false;
+      t.root.visible = false;
+      t.blob.visible = false;
+    }
+    this._setWorld(this._mainLevel);
+  }
+
+  /** 毎フレーム（ソロのループから）。的を動かして、減る物を全部戻す */
+  _rangeFrame(dt) {
+    this._rangeT += dt;
+    for (const t of this._rangeTargets) {
+      if (!t.alive) {
+        // 倒れ演出だけ本物のupdate()で進め、倒れ切ったら少し置いて起き上がる
+        if (!t.deathSettled) { t.update(dt, this.player, { octree: this.level.octree }); continue; }
+        if ((t._respawnT += dt) <= 2.0) continue;
+        // 起き上がったらcontinueせず下の移動へ流す。ここで止めると
+        // レーン中央に1フレームだけ立ってから今の位置へ瞬間移動して見える
+        this._placeTarget(t, t._spot);
+      }
+      /* 左右へ滑らせる。sinなので端で自然に緩んで折り返す。
+         update()は呼ばない（歩き・索敵・射撃が全部要らない）ので、
+         判定(collider)と見た目(root)と足元の暗がりを自分で一緒に運ぶ。
+         _syncHitboxesは棒立ちの筒から判定を作るが、的は本当に棒立ちなので
+         見た目とずれない（歩く敵で筒を使うと20cmずれる話とは別物） */
+      const l = t._lane;
+      const x = l.x + Math.sin(this._rangeT * l.speed + l.phase) * l.amp;
+      t.collider.start.x = x;
+      t.collider.end.x = x;
+      t.root.position.x = x;
+      t._syncHitboxes();
+      t._updateContact();
+    }
+    // 減る物は毎フレーム満タンへ戻す。**弾倉の中身だけは戻さない**
+    // （撃ち切ったらRで入れ替える呼吸は、練習の中でも本物のままにしておく）
+    this.weapons.refillReserve();
+    if (this.weapons.nades < NADE.PER_ROUND) this.weapons.addNades(NADE.PER_ROUND);
+    if (this.player.health < this.player.maxHealth) this.player.refill();
+    this.hud.tutorial('射撃訓練場', `倒した ${this._rangeKills}体 ・ 弾は減らない ・ ESCで一時停止`);
+  }
+
   async _joinMatch({ url, name }) {
     this._leaveTutorial();
+    this._leaveRange();
     // 切れた時に自分で入り直せるよう、入った先を覚えておく。
     // 覚えないと、繋ぎ先を作るのが選択画面の中にあるので手が届かない
     this._lastJoin = { url };
@@ -1673,7 +1796,7 @@ class Game {
           // 対戦の最中にAIの敵が湧いてくる
           // チュートリアルには波を起こさない。この行は一時停止からの復帰でも
           // 通るので、ここのガードを忘れると「ESCを押して戻ったら敵が湧く」になる
-          if (this.mode === 'solo' && !this.tutorial && this.director.wave === 0) {
+          if (this.mode === 'solo' && !this.tutorial && !this.range && this.director.wave === 0) {
             this.director.betweenWaves = 1.5;
           }
         }
@@ -1717,6 +1840,19 @@ class Game {
       this._pauseOverlay(`
         <div class="title">一時停止</div>
         <div class="subtitle">チュートリアル</div>
+        <div class="cta">クリックで再開</div>
+        <div>
+          <button id="ovSettings" class="ovhome" type="button">設定</button>
+          <button id="ovHome" class="ovhome" type="button">ホームへ戻る</button>
+        </div>
+      `);
+      return;
+    }
+    if (this.range) {
+      this._pauseOverlay(`
+        <div class="title">一時停止</div>
+        <div class="subtitle">射撃訓練場</div>
+        <div class="stats">倒した <b>${this._rangeKills | 0}</b>体</div>
         <div class="cta">クリックで再開</div>
         <div>
           <button id="ovSettings" class="ovhome" type="button">設定</button>
@@ -1781,8 +1917,9 @@ class Game {
       this._quitMatch();
       return;
     }
-    // チュートリアルから戻る時は世界と的を片付ける（入っていなければ何もしない）
+    // チュートリアル・訓練場から戻る時は世界と的を片付ける（入っていなければ何もしない）
     this._leaveTutorial();
+    this._leaveRange();
     this._flushStats();
     this.hud.show(false);
     this.hud.hideOverlay();
@@ -1795,17 +1932,17 @@ class Game {
 
   /** 今回ぶんを1つ数える。**ここでは書き出さない**（区切りでまとめて流す） */
   _tally(key, n = 1) {
-    /* チュートリアルの分は通算に混ぜない。呼び出しは9箇所に散っているので、
+    /* チュートリアルと訓練場の分は通算に混ぜない。呼び出しは9箇所に散っているので、
        それぞれをガードすると新しい呼び出しを足した時に必ず漏れる。受け側で止める。
        sessionが全部0のままなら、_flushStats()の空ガードが自然に効いて
        localStorageにも触らず、実績のトーストも出ない */
-    if (this.tutorial) return;
+    if (this.tutorial || this.range) return;
     this.session[key] = (this.session[key] | 0) + n;
   }
 
   /** 一番良かった回だけ残す物（連続撃破・到達ウェーブ・スコア） */
   _tallyBest(key, v) {
-    if (this.tutorial) return;
+    if (this.tutorial || this.range) return;
     if (v > (this.session[key] | 0)) this.session[key] = v;
   }
 
@@ -1853,14 +1990,15 @@ class Game {
      以前はこの3箇所が同じ4行を各自持っていて、演出を足すなら3箇所を直す形だった */
   _onPlayerDown() {
     if (this.state === 'dead') return;
-    /* チュートリアルでは倒れない。落下も手榴弾の自爆も全部この1本道を通るので、
-       ここで受ければ死亡・戦績・リザルト・倒れ込みが1箇所で全部止まる。
+    /* チュートリアルと訓練場では倒れない。落下も手榴弾の自爆も全部この1本道を
+       通るので、ここで受ければ死亡・戦績・リザルト・倒れ込みが1箇所で全部止まる。
        未経験の人が操作を試している最中に結果画面へ飛ばされると、
-       何が起きたか分からないまま最初からになる */
-    if (this.tutorial) {
+       何が起きたか分からないまま最初からになる
+       （訓練場は毎フレーム体力を戻すのでここへは来ないはずだが、保険に受ける） */
+    if (this.tutorial || this.range) {
       this.player.refill();
       this.damageFlash = 0;
-      this.hud.banner('大丈夫', 'チュートリアル中は倒れない', 1.6);
+      this.hud.banner('大丈夫', this.tutorial ? 'チュートリアル中は倒れない' : '訓練場では倒れない', 1.6);
       return;
     }
     this.state = 'dead';
@@ -3192,10 +3330,11 @@ class Game {
       if (e.hit(dmg, 'chest')) this._onKill(e);
     }
 
-    // 自分も巻き込まれる
+    // 自分も巻き込まれる。ただし訓練場は無敵（足元に落としてもノーダメ。
+    // 赤い被弾の画面も出さない。試し投げのたびに画面が赤むと練習にならない）
     const me = this.player.collider.start;
     const dm = Math.hypot(me.x - pos.x, me.y + 0.5 - pos.y, me.z - pos.z);
-    if (dm <= NADE.BLAST_R && this.player.alive) {
+    if (dm <= NADE.BLAST_R && this.player.alive && !this.range) {
       this.player.damage(Math.max(NADE.MIN_DMG, NADE.BLAST_DMG * (1 - dm / NADE.BLAST_R)));
       this.damageFlash = Math.min(0.6, this.damageFlash + 0.4);
       if (!this.player.alive) this._onPlayerDown();
@@ -3659,6 +3798,7 @@ class Game {
         this.director.update(dt, this.player, {});
         // チュートリアルの進行と的の面倒。ソロの一部として動く（modeは'solo'のまま）
         if (this.tutorial) this._tutorialFrame(dt);
+        else if (this.range) this._rangeFrame(dt);
         this._stepSoloNades(dt);
         this.effects.update(dt, this.camera);
 

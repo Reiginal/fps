@@ -37,7 +37,7 @@ export class NetMenu {
       root: $('netmenu'),
       name: $('nmName'),
       status: $('nmStatus'), solo: $('nmSolo'), join: $('nmJoin'),
-      tutorial: $('nmTutorial'),
+      tutorial: $('nmTutorial'), range: $('nmRange'),
       settings: $('nmSettings'), quit: $('nmQuit'),
     };
 
@@ -46,6 +46,8 @@ export class NetMenu {
     this.onJoin = () => {};
     // FPSが初めての人向けの練習場を開く口
     this.onTutorial = () => {};
+    // 射撃訓練場（動く的を撃ち放題）を開く口
+    this.onRange = () => {};
     // 設定を開く口。画面そのものは src/ui/settings.js が持っている
     this.onSettings = () => {};
     // 戦績を開く口はここにあったが、画面ごと消した（「誰も見ない」）
@@ -70,6 +72,11 @@ export class NetMenu {
       if (this.busy) return;
       this._store();
       this.onTutorial();
+    };
+    this.el.range.onclick = () => {
+      if (this.busy) return;
+      this._store();
+      this.onRange();
     };
     this.el.join.onclick = () => this._join();
 
@@ -112,8 +119,9 @@ export class NetMenu {
     this.el.root.classList.toggle('busy', this.busy);
     this.el.solo.disabled = this.busy;
     this.el.join.disabled = this.busy;
-    // ここに書き忘れると、対戦の接続中にチュートリアルへ入れてしまう
+    // ここに書き忘れると、対戦の接続中にチュートリアルや訓練場へ入れてしまう
     this.el.tutorial.disabled = this.busy;
+    this.el.range.disabled = this.busy;
   }
 
   /* ------------------------------------------------------------ 中身 */
