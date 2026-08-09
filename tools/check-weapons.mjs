@@ -521,34 +521,74 @@ console.log('\n[5.5] 手榴弾は押した瞬間ではなく離した瞬間に�
   ok(ws._throwCharging === false, '持ち替えると構えの印が消える');
 }
 
-console.log('\n[5.8] Qで直前の武器と往復できる');
-/* 遊んで「5を押すのは指的に遠い」と言われて足した往復キー。
-   **押して何も起きない場面を作らないこと**が肝で、直前の物が持てない時でも
-   持ち物の中の別の1本へ逃がす（黙って効かない操作は壊れて見える） */
+console.log('\n[5.8] Qで支給品を出し入れできる');
+/* 遊んで「5押すのは流石に指的に遠い」「普通にQでスナイパーでいいんじゃね？」と
+   言われて足したキー。**数字キーの4本には入れない**ので、
+   持てる範囲(switchTo)がQの1本ぶんだけ広がっていること自体もここで見る */
 {
   const gun = ws.weapons.findIndex((w) => !w.def.melee);
-  const other = ws.weapons.findIndex((w, i) => !w.def.melee && i !== gun);
-  ws.carry = [gun, other];
+  const extra = ws.weapons.findIndex((w, i) => !w.def.melee && i !== gun);
+  ws.carry = [gun];
+  ws.quickIndex = null;
   ws.resetAll();
   ws.switching = 0; ws.index = gun; ws._pendingIndex = null;
 
-  ok(ws.switchTo(other) === true, 'まず別の銃へ持ち替える');
-  ws.switching = 0; ws.index = other; ws._pendingIndex = null;
-  ok(ws.lastIndex === gun, '出ていった方を覚えている');
-  ok(ws.swapLast() === gun, 'Qで元の銃へ戻る');
-  ws.switching = 0; ws.index = gun; ws._pendingIndex = null;
-  ok(ws.lastIndex === other, '戻った時も往復の相手が入れ替わる');
-  ok(ws.swapLast() === other, 'もう一度押すとまた行ける');
-  ws.switching = 0; ws.index = other; ws._pendingIndex = null;
+  ok(ws.quickSwap() === null, '支給されていなければ何も起きない');
+  ok(ws.switchTo(extra) === false, '数字キーにもQにも無い武器は握れない');
 
-  // 直前の物が持ち物から消えた時（拾われた・段が進んだ）は別の1本へ逃がす
-  ws.lastIndex = ws.weapons.length + 5;
-  const to = ws.swapLast();
-  ok(to != null && to !== other, `持てない物を指していても何かへ替わる (${to})`);
-  ws.switching = 0; ws.index = to; ws._pendingIndex = null;
+  ws.quickIndex = extra;
+  ok(ws.quickSwap() === extra, 'Qで支給品が出る');
+  ws.switching = 0; ws.index = extra; ws._pendingIndex = null;
+  ok(ws.quickBack === gun, '出る前に持っていた物を覚えている');
+  ok(ws.quickSwap() === gun, 'もう一度Qで元へ戻る');
+  ws.switching = 0; ws.index = gun; ws._pendingIndex = null;
+  ok(ws.quickSwap() === extra, '何度でも行き来できる');
+  ws.switching = 0; ws.index = extra; ws._pendingIndex = null;
+
+  // 戻る先が持ち物から消えていても、主武器へ逃がす（押して何も起きないを作らない）
+  ws.quickBack = ws.weapons.length + 5;
+  ok(ws.quickSwap() === gun, '戻る先を見失っても主武器へ戻る');
 
   ws.carry = ws.weapons.map((_, i) => i);
+  ws.quickIndex = null;
   ws.index = 0; ws.switching = 0; ws._pendingIndex = null;
+}
+
+console.log('\n[5.6] 右クリックは押した瞬間に手前へ放る');
+/* 遊んで「右クリ押した瞬間手前に投げてもらっていいよ」と言われた形。
+   左クリック（押して狙って離す）と違って**構えない**ので、
+   逃げながら足元へ落とす動きが1動作で取れる。
+   投げ方が違うことは、投げた側から渡る印(short)で受け取る */
+{
+  const nadeIdx = ws.weapons.findIndex((w) => w.def.thrown);
+  ws.carry = ws.weapons.map((_, i) => i);
+  ws.resetAll();
+  ws.index = nadeIdx; ws.switching = 0; ws._pendingIndex = null;
+  const thrown = [];
+  ws.onThrow = (short) => { thrown.push(!!short); return true; };
+
+  // 右クリックを押した1コマ。clickedは「押した瞬間」だけtrueを返す偽物で作る
+  const rclick = { ...idle, clicked: (b) => b === 2 };
+  ws.update(0.016, idle, player, {});
+  ws.update(0.016, rclick, player, {});
+  ok(thrown.length === 1, '押した瞬間に1つ飛ぶ');
+  ok(thrown[0] === true, '手前投げの印が付いている');
+
+  // 左クリックの投げには印が付かない（普通の距離で飛ぶ）
+  thrown.length = 0;
+  ws.fireTimer = 0;
+  ws.update(0.016, idle, player, {});
+  ws.update(0.016, held, player, {});
+  ws.update(0.016, idle, player, {});
+  ok(thrown.length === 1 && thrown[0] === false, '左クリックは今まで通り普通に投げる');
+
+  // 銃では右クリックが覗き込みのまま（投げ物だけの割り当て）
+  ws.index = 0; ws.switching = 0; ws._pendingIndex = null;
+  ws.adsHeld = false;
+  ws.update(0.016, rclick, player, {});
+  ok(ws.adsHeld === true, '銃では今まで通り覗き込みが入る');
+  ws.adsHeld = false;
+  ws.onThrow = null;
 }
 
 console.log('\n[5.7] 手榴弾を使い切ったら手から下ろす');
@@ -564,11 +604,14 @@ console.log('\n[5.7] 手榴弾を使い切ったら手から下ろす');
   ws.switching = 0;
   ws._pendingIndex = null;
   const max = ws.nades;
+  // 前の節で投げた分の間隔(60/rpm)が残っていると1投目が出ない
+  ws.fireTimer = 0;
   // main.js の _throwNadeSolo と同じ繋ぎ方。投げた時に1つ減らす
   ws.onThrow = () => ws.takeNade();
 
   // 押して離すと1つ飛ぶ。次の1つまで間が空くので、その間は空回しする
   const lob = () => {
+    ws.fireTimer = 0;
     ws.update(0.016, idle, player, {});
     ws.update(0.016, held, player, {});
     ws.update(0.016, idle, player, {});    // 離した瞬間に飛ぶ

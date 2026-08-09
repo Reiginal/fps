@@ -271,12 +271,13 @@ export class HUD {
    * 最後のを「札を消す」にしないのは、消すと後ろの番号が繰り上がって、
    * 押し慣れた数字と出てくる武器が変わってしまうため。
    *
-   * items … [{ name:'ライフル', out:false }, ...] 並びがそのまま1,2,3…になる
+   * items … [{ name:'ライフル', out:false }, ...] 並びがそのまま1,2,3…になる。
+   *   key を持つ物だけは数字ではなくその文字が出る（Qで出す支給品）
    */
   weaponSlots(items) {
     const box = this.el.slotBox;
     if (!box) return;
-    const key = items.map((it) => `${it.name}${it.out ? '/x' : ''}`).join('|');
+    const key = items.map((it) => `${it.key || ''}${it.name}${it.out ? '/x' : ''}`).join('|');
     if (key === this._slotKey) return;
     this._slotKey = key;
     // lastChildではなくchildrenで消す。本物のDOMではタグの間の改行が
@@ -291,7 +292,9 @@ export class HUD {
     }
     for (let i = 0; i < items.length; i++) {
       const el = box.children[i];
-      const text = `${i + 1} ${items[i].name}`;
+      // keyがある物は数字ではなくそのキーを出す（Qで出す狙撃銃など）。
+      // 番号の続きにすると「5」に見えるのに5では出ない、という嘘になる
+      const text = `${items[i].key || i + 1} ${items[i].name}`;
       if (el.textContent !== text) el.textContent = text;
       el.classList.toggle('out', !!items[i].out);
     }

@@ -87,6 +87,7 @@ ok(wait > 0.8 && wait < 2.5, `着地してから爆発まで${wait.toFixed(2)}�
 
 console.log('\n[4.5] 右クリックの手前投げ');
 /* 遊んで「右クリしたら手前めに投げれるようになったら嬉しい」と言われて足した物。
+   押した瞬間にその場で放る（構えない）。
    見るのは2つ。**近くへ落ちること**と、**それで自爆しないこと。** */
 {
   ok(Number.isFinite(LOFT_SHORT), `main.jsから手前投げの上向きを読めた（${LOFT_SHORT}）`);
@@ -136,7 +137,10 @@ console.log('\n[6] 手前投げの繋ぎ込み');
   // 手元(1人用)と予測線も同じ関数から取ること。別々に書くと線と飛び方がずれる
   ok(/throwSpeedOf\(short\)[\s\S]*throwSpeedOf\(short\)/.test(main),
     '予測線と1人用の飛翔が同じ関数を読んでいる');
-  ok(/throwShort/.test(main), '手前投げの入り切りを見ている');
+  // 線は2本出す。右クリックは押した瞬間に飛ぶので、押す前に落ちる場所が見えていないと
+  // 「押してみないと分からない物」になる
+  ok(/_fillArc\(this\._arc, false\)[\s\S]{0,200}?_fillArc\(this\._arcShort, true\)/.test(main),
+    '普通と手前の弧を2本とも描いている');
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
