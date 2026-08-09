@@ -12,7 +12,7 @@
 //   node tools/check-sniper.mjs
 import { readFileSync } from 'node:fs';
 import '../server/dom-stub.js';
-import { LOADOUT_IDS, soloUnlocksAt, SOLO_UNLOCKS } from '../src/net/protocol.js';
+import { LOADOUT_IDS, soloUnlocksAt, SOLO_UNLOCKS, GUN_ORDER } from '../src/net/protocol.js';
 
 const { WEAPONS } = await import('../src/player/weapons.js');
 
@@ -62,6 +62,30 @@ console.log('\n[2.5] Qで出し入れできる繋ぎ込み');
     '包帯より左（ライフルの真下）に出る');
   ok(/<b>Q<\/b>/.test(html), '起動画面の操作説明にQがある');
   ok(!/<b>5<\/b>/.test(html), '5番の行はもう出していない');
+}
+
+console.log('\n[2.6] 対戦へ持ち込まれない');
+/* 遊んで**「ガンゲームの時にスナイパー使えるようになってるで」**と言われた所。
+
+   Qの支給品は1人用だけの物で、波2まで凌ぐと載る。ところが湧き直しでは
+   波が変わらないので、resetAll()はあえてquickIndexを消さない作りになっている。
+   その結果、**1人用で波2まで行った後に対戦へ入るとQでスナイパーが出たまま**だった。
+   ガンゲームだと段が進んでもずっとスナイパーを持てるので、遊び方そのものが壊れる。
+
+   しかも持てているのは手元だけで、サーバーは持ち物に無い武器を拒む
+   （sim.jsのsetWeapon）。**画面はスナイパーなのに弾はライフルの強さで飛ぶ**、
+   という一番読めない食い違いになる */
+{
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  const join = main.split('async _joinMatch(')[1]?.split('\n  }')[0] || '';
+  ok(join.length > 0, '対戦に入る所が見つかった');
+  ok(/quickIndex = null/.test(join), '対戦に入る時にQの支給品を畳んでいる');
+  ok(/quickBack = null/.test(join), 'Qで戻る先も畳んでいる');
+  // ガンゲームで配る順番にスナイパーは入っていない（入れると意味が変わる）
+  ok(!GUN_ORDER.includes('sniper'), `ガンゲームの配布順に入っていない（${GUN_ORDER.join('、')}）`);
+  // サーバーの持ち物にも入っていない
+  const modes = readFileSync(new URL('../server/modes.js', import.meta.url), 'utf8');
+  ok(!/sniper/.test(modes), 'サーバーの遊び方の決まりにも出てこない');
 }
 
 console.log('\n[3] 注文どおりの手数か');
