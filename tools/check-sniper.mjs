@@ -104,7 +104,11 @@ console.log('\n[5] 覗かないと当たらない銃になっている');
   ok(!sniper.auto, '押しっぱなしでは連射できない');
   const gap = 60 / sniper.rpm;
   ok(gap >= 1.0, `次の1発まで${gap.toFixed(2)}秒（1発ずつ送る銃）`);
-  ok(sniper.reserve === sniper.mag * 5, `予備は5弾倉ぶん（${sniper.reserve}発）`);
+  // 「撃ち放題」にしない。他の銃は予備を5弾倉ぶん持つが、この銃だけ1弾倉ぶん
+  ok(sniper.reserve === sniper.mag,
+    `予備は1弾倉ぶん（${sniper.reserve}発。合計${sniper.mag + sniper.reserve}発）`);
+  ok(sniper.mag + sniper.reserve === 10, `全部で10発（${sniper.mag + sniper.reserve}）`);
+  ok(sniper.reserve < rifle.reserve / 5, `ライフル(${rifle.reserve}発)よりずっと少ない`);
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);

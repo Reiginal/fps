@@ -147,6 +147,13 @@
   #healWrap.busy #healState { color: #9fe8a8; }
   #healWrap.busy #healBar { opacity: 1; }
   #healthFill { height: 100%; width: 100%; background: var(--hud); transition: width .18s, background .18s; }
+  /* 走れる息。体力の下に細く。減っている間だけ見せる */
+  #staminaBar { width: 190px; height: 2px; margin-top: 3px; background: rgba(255,255,255,.10);
+    overflow: hidden; opacity: 0; transition: opacity .25s; }
+  #staminaBar.on { opacity: 1; }
+  #staminaFill { height: 100%; width: 100%; background: rgba(255,255,255,.55); }
+  /* 切れて走れない間は色で知らせる。細い棒なので、長さだけだと気づけない */
+  #staminaBar.spent #staminaFill { background: var(--warn); }
   .low #healthFill { background: var(--warn); }
   .low #health { color: var(--warn); }
 
@@ -961,6 +968,9 @@
       <div class="label">体力</div>
       <div id="healthWrap"><div id="health">100</div></div>
       <div id="healthBar"><div id="healthFill"></div></div>
+      <!-- 走れる息。満タンの時は消しておく（常に出ていると、
+           減っていないことを毎秒確かめさせることになる） -->
+      <div id="staminaBar"><div id="staminaFill"></div></div>
       <div id="healWrap">
         <div id="healCross"><i></i><i></i></div>
         <div id="healPips"><i></i><i></i></div>
@@ -997,7 +1007,7 @@
     <div class="subtitle">市街地掃討戦</div>
     <div class="keys">
       <b>WASD</b><span>移動</span>
-      <b>SHIFT</b><span>スプリント</span>
+      <b>SHIFT</b><span>スプリント（3秒で息が切れる。体力の下の棒が戻るとまた走れる）</span>
       <b>CTRL / C</b><span>しゃがみ</span>
       <b>SPACE</b><span>ジャンプ</span>
       <b>左クリック</b><span>射撃</span>

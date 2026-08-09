@@ -20,6 +20,26 @@ const PROBE_R = 0.1;
 const SPEED_WALK = 4.7;
 const SPEED_SPRINT = 7.4;
 const SPEED_CROUCH = 2.3;
+
+/* 走れる時間と、切れてから戻るまで。
+   遊んで「無限に走れたら、やらない理由がないし」と言われた所。その通りで、
+   **速く動けて損が1つも無いなら、常に走るのが最適解になって選択が消える。**
+   移動そのものが「押す／押さない」だけの操作になっていた。
+
+   ついでに「PCが熱くなる原因だったりしない？」も測った。**走りは熱の原因ではない。**
+   走っている間に増える仕事は、足音の音づくり（歩幅が1.22倍になるので毎秒の回数が増える）と、
+   画角が75→84度へ寄る間の投影行列の作り直しくらいで、どちらも1フレームの中では誤差。
+   熱くなるのは場面を毎フレーム描くほうで、走る／走らないでそこは変わらない。
+   なので**これは軽くするための変更ではなく、選択を作るための変更**。
+
+   3.0秒はユーザーの提案そのまま。戻りを2.4秒にしてあるのは、
+   使い切ってから全快までが「走った時間より少し短い」と、
+   逃げ切れなかった時に次の機会がすぐ来て、追われている感じが続くため */
+const SPRINT_MAX_S = 3.0;
+const SPRINT_REFILL_S = 2.4;
+// 走るのをやめてから溜まり始めるまでの間。これが無いと、
+// 小刻みに押し直すだけで実質無限に走れる（1フレームごとに満タンへ戻る）
+const SPRINT_REST_S = 0.5;
 // 押した瞬間に足が出る硬さ。低いと最高速まで半歩ぶん流れて、
 // 入力より体が遅れて動くぶんが全部「滑り」として伝わる
 const ACCEL_GROUND = 20;
@@ -125,6 +145,12 @@ export class Player {
     this.onFloor = false;
     this.crouching = false;
     this.sprinting = false;
+    /* 走れる息の残り（0〜1）。0で切れて、満タンに戻るまで走り直せない。
+       staminaLockがその「戻るまで走れない」の鍵で、_sprintRestは
+       走るのをやめてから溜まり始めるまでの間 */
+    this.stamina = 1;
+    this.staminaLock = false;
+    this._sprintRest = SPRINT_REST_S;
     this.adsFactor = 0;      // 外から武器が書き込む 0..1
     // 持っている武器から入る移動速度の倍率。武器側が毎フレーム書き込む
     this.moveMul = 1;
@@ -270,6 +296,9 @@ export class Player {
   refill() {
     this.health = this.maxHealth;
     this.alive = true;
+    // 息も戻す。湧いた所で切れたままだと、最初の数秒だけ走れない体で始まる
+    this.stamina = 1;
+    this.staminaLock = false;
     this.bandages = HEAL.PER_ROUND;
     this.healing = 0;
     this.healHold = 0;
@@ -460,8 +489,25 @@ export class Player {
     /* ------------------------------------------------------ 移動入力 */
     const m = input.moveVector(this._move);
     const moving = this.alive && (m.x !== 0 || m.z !== 0);
-    this.sprinting = this.alive && moving && m.z < -0.1 && input.down('ShiftLeft')
+    /* 走りは息が続く間だけ。**切れたら全快するまで走り直せない。**
+       半分だけ戻った所で走り出せる形にすると、押し直すのが最適解になって
+       「息が切れた」という状態が事実上消える（走る／歩くの判断も戻らない） */
+    const wantSprint = this.alive && moving && m.z < -0.1 && input.down('ShiftLeft')
       && !this.crouching && this.adsFactor < 0.5;
+    if (this.staminaLock && this.stamina >= 1) this.staminaLock = false;
+    this.sprinting = wantSprint && !this.staminaLock;
+
+    if (this.sprinting) {
+      this._sprintRest = 0;
+      this.stamina = Math.max(0, this.stamina - dt / SPRINT_MAX_S);
+      // 使い切った瞬間に鍵をかける。ここから先は満タンになるまで走れない
+      if (this.stamina <= 0) { this.staminaLock = true; this.sprinting = false; }
+    } else {
+      this._sprintRest = Math.min(SPRINT_REST_S, this._sprintRest + dt);
+      if (this._sprintRest >= SPRINT_REST_S) {
+        this.stamina = Math.min(1, this.stamina + dt / SPRINT_REFILL_S);
+      }
+    }
 
     // 走りの「効き」は入切より遅らせる。抜けきるまで滑るのが走りの重さ
     this._sprintHold = this.sprinting

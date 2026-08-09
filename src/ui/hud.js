@@ -16,6 +16,7 @@ export class HUD {
       marker: $('marker'),
       dirs: $('dirs'),
       health: $('health'), healthFill: $('healthFill'), healthBlock: $('healthBlock'),
+      staminaBar: $('staminaBar'), staminaFill: $('staminaFill'),
       ammo: $('ammo'), reserve: $('reserve'), ammoWrap: $('ammoWrap'),
       weapon: $('weapon'), reloading: $('reloading'),
       // 武器の札は数が変わる（ソロは波が進むと1本増え、ガンゲームは1本しか持たない）。
@@ -53,6 +54,7 @@ export class HUD {
     // チュートリアルの課題札も同じ（毎フレーム呼ばれる前提の作り）
     this._tutKey = '';
     this._lastHealth = -1;
+    this._lastStamina = '';
     this._lastAmmo = -1;
     // 武器の札。今出ている並びと、印が付いている位置
     this._slotKey = '';
@@ -219,6 +221,30 @@ export class HUD {
       this.el.healthFill.style.width = `${r * 100}%`;
       this.el.healthBlock.classList.toggle('low', r < 0.34);
     }
+  }
+
+  /**
+   * 走れる息。**満タンの時は棒ごと消す。**
+   * 常に出ていると「減っていないこと」を毎秒確かめさせることになるし、
+   * 走りに息が要ると気づくのは減った時なので、その時だけ出れば足りる。
+   *
+   *   v      … 残り（0〜1）
+   *   spent  … 切れて走り直せない状態か（色を変えて知らせる）
+   *
+   * 毎フレーム呼ばれるので、変わった時だけDOMを触る
+   */
+  stamina(v, spent) {
+    const bar = this.el.staminaBar;
+    if (!bar) return;
+    // 幅は0.5%刻みまで。1画素も動かない差で書き込みを起こさない
+    const pct = Math.round(Math.max(0, Math.min(1, v)) * 200) / 2;
+    const on = pct < 100;
+    const key = `${pct}/${on ? 1 : 0}/${spent ? 1 : 0}`;
+    if (key === this._lastStamina) return;
+    this._lastStamina = key;
+    this.el.staminaFill.style.width = `${pct}%`;
+    bar.classList.toggle('on', on);
+    bar.classList.toggle('spent', !!spent);
   }
 
   ammo(cur, reserve, name, slotIndex, reloadT, melee = false, thrownLeft = null) {
