@@ -3090,6 +3090,8 @@ export class WeaponSystem {
        quickBackは、Qで戻る時の行き先（Qを押す直前に持っていた物） */
     this.quickIndex = null;
     this.quickBack = null;
+    // 観戦中に出している相手の武器（showSpectated）。nullなら自分の物
+    this._specWeapon = null;
     this.current.model.visible = true;
 
     this.adsFactor = 0;
@@ -3370,6 +3372,35 @@ export class WeaponSystem {
    * 「Qを押せばあれが出る」で読める（直前の武器へ戻る形にすると、
    * 間に別の武器を挟んだ時にQが狙撃銃を指さなくなる）
    */
+  /**
+   * 観戦中に、**見ている相手の武器**を手元へ出す。nullで自分の物へ戻す。
+   *
+   * なぜ要るか: 手元の武器は自分専用の別の場面(viewScene)に浮かんでいて、
+   * カメラがどこへ行こうが画面の手前に付いてくる。だから味方の目線を借りている間も
+   * **自分の武器が写り続けて、見ている相手が自分と同じ武器を持って見えた**。
+   * 場面ごと消して黙らせたら、今度は**手元に何も無い**（遊んで
+   * 「デスカメラの時、味方とかの武器が見えてない」と言われた）。
+   * 正しいのは「その人の武器を出す」で、ここがそれ。
+   *
+   * **動きは付かない。** 揺れも反動も覗きも、自分のplayerから作っている物なので、
+   * 出るのは静止した銃になる。相手の腕の振りまで再現するには、
+   * 送られてくる状態から手元の武器を丸ごと動かし直すことになるので、
+   * そこは「何を持っているかが分かる」で足りると判断した。
+   *
+   * 毎フレーム呼ばれる前提。変わった時しか触らない
+   */
+  showSpectated(i) {
+    const at = i == null ? null : (i | 0);
+    if (at === this._specWeapon) return;
+    this._specWeapon = at;
+    for (const w of this.weapons) w.model.visible = false;
+    const w = this.weapons[at == null ? this.index : at];
+    if (!w) return;
+    // 前に持っていた人の装填途中の姿勢が残らないよう、素の形へ戻してから出す
+    w.restPose();
+    w.model.visible = true;
+  }
+
   quickSwap() {
     if (this.quickIndex == null) return null;
     if (this.index === this.quickIndex) {

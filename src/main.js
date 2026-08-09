@@ -2171,14 +2171,15 @@ class Game {
     // 対戦側を state で見ると、倒れている間ずっと state が 'dead' のままになり、
     // 生き返った後もカメラが地面に転がったままになる
     const down = this.mode === 'versus' ? !this.player.alive : this.state === 'dead';
-    /* **倒れている間は手元の武器を描かない。**
+    /* **自分の死体を映している間だけ、手元の武器を描かない。**
        手元の武器は自分専用の別の場面(viewScene)に浮かんでいて、
        カメラがどこへ行こうが必ず画面の手前に付いてくる。
-       だから観戦で味方の目線を借りている間も**自分の武器が写り続けていて、
-       見ている相手が自分と同じ武器を持っているように見える**（ガンゲームだと
-       相手が今どの段にいるのかが分からなくなる）。
-       場面ごと消せば、腕も銃も包帯もまとめて消える */
-    if (this.viewScene) this.viewScene.visible = !down;
+       地面に転がっているのに銃だけ宙に浮いているのはおかしいので、ここで畳む。
+
+       **観戦へ移ったら畳まない。** 畳んだままだと手元に何も無くなって、
+       今度は「味方の武器が見えない」になる（遊んで両方言われた）。
+       観戦中はその人の武器を出す担当が_spectate側にいる（weapons.showSpectated） */
+    if (this.viewScene) this.viewScene.visible = !down || this._specId != null;
     // 生き返ったら見回しも畳む。ここで落とさないと、湧いた後もカメラが
     // 倒れていた時の向きで上書きされ続けて、動いているのに景色が回らない
     if (!down) { this.deathT = null; this.deathLook = null; return; }
@@ -2237,6 +2238,11 @@ class Game {
     /* 目線を借りる人の体は描かない。カメラがその人の頭の中に入るので、
        腕と銃が視界を横切る（自分の体を描かないのと同じ理由。remote.jsのsetHidden） */
     this.remotes?.setHidden(target.id);
+    /* 代わりに、その人の武器を手元へ出す。
+       体を消しただけだと手元が空になって「味方の武器が見えない」になり、
+       出さないままにすると自分の武器が写って「相手が自分と同じ武器に見える」になる。
+       ガンゲームでは見ている相手が今どの段にいるかがここでしか分からない */
+    this.weapons.showSpectated(target.weapon);
 
     /* 目の高さ。しゃがみはスナップショットでは0か1の切り替えしか無いので、
        そのまま入れると相手がしゃがんだ瞬間に68cm落ちる。相手を替えた時だけ即決め */
@@ -2268,6 +2274,8 @@ class Game {
     this._specId = null;
     this._specEyeH = null;
     this.remotes?.setHidden(null);
+    // 借りていた武器も返す。返さないと、生き返った後も相手の銃を握ったままになる
+    this.weapons.showSpectated(null);
     this.hud.spectating(null);
   }
 

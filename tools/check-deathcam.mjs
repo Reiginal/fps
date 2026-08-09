@@ -327,9 +327,21 @@ console.log('\n[観戦カメラ] 繋ぎ込み（main.js / remote.js）');
      **見ている相手が自分と同じ武器を持っているように見える**
      （遊んで「デスカメラの時に自分と同じ武器になってる気がする」と言われた）。
      ガンゲームだと相手が今どの段にいるのかが読めなくなる */
-  ok(/viewScene\.visible = !down/.test(src), '倒れている間は手元の武器を描かない');
-  ok(/_deathFall\(dt\) \{[\s\S]{0,900}?viewScene\.visible/.test(src),
+  ok(/viewScene\.visible = !down \|\| this\._specId != null/.test(src),
+    '自分の死体を映している間だけ畳む（観戦中は畳まない）');
+  ok(/_deathFall\(dt\) \{[\s\S]{0,1100}?viewScene\.visible/.test(src),
     '倒れ込みの所で畳んでいる（1人用と対戦の両方が通る道）');
+  /* **畳んだままだと今度は手元が空になる。**
+     体を消して武器も出さないと「味方の武器が見えない」になり、
+     出さないままにすると自分の武器が写って「相手が自分と同じ武器」に見える。
+     観戦中はその人の武器を出すのが正解（遊んで両方言われた） */
+  ok(/showSpectated\(target\.weapon\)/.test(src), '観戦中は見ている人の武器を手元へ出す');
+  ok(/_forgetSpectate\(\) \{[\s\S]{0,400}?showSpectated\(null\)/.test(src),
+    '観戦をやめたら自分の武器へ戻す');
+  const wsrc = readFileSync(new URL('../src/player/weapons.js', import.meta.url), 'utf8');
+  ok(/showSpectated\(i\) \{/.test(wsrc), '武器側に出し口がある');
+  // 毎フレーム呼ばれる所なので、変わった時しか触らない
+  ok(/if \(at === this\._specWeapon\) return;/.test(wsrc), '同じ武器なら触らない');
   // 肩越しの名残（壁当たりのレイ）が残っていないか
   ok(!/_specRay/.test(src), '肩越しの時の壁当たりのレイは消えている');
 
