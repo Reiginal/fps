@@ -82,6 +82,7 @@ export class RemotePlayers {
     this._glbAll = [];
     this._last = 0;
     this._seen = new Set();     // sync()の中だけで使う。毎フレーム作り直さず使い回す
+    this._hiddenId = null;      // 観戦で目線を借りている相手（setHidden参照）
     // 外部モデルの枠があれば、対戦に入った時点で読み込みを始めておく。
     // 相手が現れた瞬間に読み始めると、届くまでコード製の代役で立つことになる
     for (const c of CHARACTERS) if (c.model) preloadCharModel(c.model);
@@ -110,9 +111,43 @@ export class RemotePlayers {
       if (!slot) { slot = this._spawn(st, this._chars?.get(st.id) | 0); this.slots.set(st.id, slot); }
       this._applyWeapon(slot, st.weapon | 0);
       this._apply(slot, st, dt, viewPos);
+      /* 目線を借りている相手はここで消す。_apply側は復帰の時に自分で
+         visibleを立て直すので、setHiddenで1回消すだけだと生き返った瞬間に生えてくる。
+         比較1回ぶんなので毎フレームやってよい */
+      if (st.id === this._hiddenId) this._setBodyVisible(slot, false);
     }
     // 消えた相手は残さない。抜け殻が立ち続けるより消える方が嘘が小さい
     for (const id of this.slots.keys()) if (!seen.has(id)) this.remove(id);
+  }
+
+  /**
+   * 観戦で目線を借りている相手（この人の体は描かない）。nullで元へ戻す。
+   *
+   * なぜ要るか: 一人称の観戦はカメラをその人の目の位置へ置くので、
+   * **カメラが頭の中に入る。** 自分の体を描かないのと同じ理由で、この人も描かない
+   * （腕や銃が視界を横切るし、近すぎて何が映っているのか分からない）。
+   *
+   * 毎フレーム呼ばれる前提で、相手が変わった時しか触らない
+   */
+  setHidden(id = null) {
+    const next = id ?? null;
+    if (next === this._hiddenId) return;
+    // 前に借りていた人を出し直す
+    const prev = this.slots.get(this._hiddenId);
+    if (prev) this._setBodyVisible(prev, true);
+    this._hiddenId = next;
+    const cur = this.slots.get(next);
+    if (cur) this._setBodyVisible(cur, false);
+  }
+
+  _setBodyVisible(slot, on) {
+    /* 沈み切った死体は出し直さない。観戦をやめた瞬間に、消えたはずの死体が
+       地面から生えて見える（消したのは_apply側なので、ここが知らずに戻すと嘘になる） */
+    if (on && slot.dead && slot.deadT > CORPSE_HOLD_S + CORPSE_SINK_S) return;
+    const root = slot.glb ? slot.obj.root : slot.enemy.root;
+    root.visible = on;
+    // 足元の暗がりも一緒に。体が無いのに影だけ足元に付いてくる
+    if (!slot.glb) slot.enemy.blob.visible = on;
   }
 
   /**
@@ -199,6 +234,8 @@ export class RemotePlayers {
     this._glbAll.length = 0;
     this._glbPool.length = 0;
     this.slots.clear();
+    // 観戦の相手も忘れる。残すと次の試合で同じ番号の人が最初から消える
+    this._hiddenId = null;
   }
 
   /* ------------------------------------------------------------ 中身 */
