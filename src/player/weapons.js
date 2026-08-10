@@ -386,6 +386,35 @@ export const MATS = {
     blending: THREE.AdditiveBlending, depthWrite: false,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   }),
+
+  /* ---- ここから下は形違いのスキンだけが使う材質。
+     普段の銃には1つも貼られていないので、素の見た目は1ミリも変わらない */
+
+  // 竜の鱗。暗い赤銅。擦れると金が出る
+  scale: mat(0x3a1c18, 1.0, 0.42, SURF_METAL, 5, 1.1, { envMapIntensity: 0.6 },
+    { amount: 0.9, color: 0xc79a4a, rough: 0.24, dust: 0.10 }),
+  // 竜の角と牙。骨。金属ではないので反射を落とす
+  bone: mat(0xc9bfa6, 0.0, 0.66, SURF_POLYMER, 6, 1.0, null,
+    { amount: 0.7, color: 0xe8e0cc, metal: 0.0, rough: 0.52, dust: 0.14 }),
+  /* 竜の目と、口の奥の熾火。**光る物は素の材質では出せない。**
+     toneMapped:false で色をそのままHDRへ振ると、postfxのbloom(閾値0.95)を越えて
+     周りへ滲む。加算合成にすると背景が暗い所で強く出る */
+  ember: new THREE.MeshBasicMaterial({
+    color: new THREE.Color(4.2, 1.1, 0.25), toneMapped: false,
+    transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false,
+  }),
+
+  // ここから可愛い系。**彩度は上げるが明度は上げすぎない。**
+  // 白に近づけると、日向で背景の砂嚢と同じ輝度に溶けて銃の形が読めなくなる
+  candyPink: mat(0xd98aa6, 0.0, 0.55, SURF_POLYMER, 5, 0.8, null,
+    { amount: 0.35, color: 0xf0b8ca, metal: 0.0, rough: 0.40 }),
+  candyMint: mat(0x7fc9b8, 0.0, 0.52, SURF_POLYMER, 5, 0.8, null,
+    { amount: 0.35, color: 0xaee2d6, metal: 0.0, rough: 0.38 }),
+  candyCream: mat(0xe0d3b4, 0.0, 0.60, SURF_POLYMER, 6, 0.9, null,
+    { amount: 0.30, color: 0xf2ead6, metal: 0.0, rough: 0.44 }),
+  // チャームの星。金属で光らせる。emissiveにすると昼間でも自己主張が強すぎた
+  charm: mat(0xd9a52a, 1.0, 0.22, SURF_METAL, 3, 0.4, null,
+    { amount: 0.4, color: 0xf5dc8a, rough: 0.14 }),
 };
 
 // レンズのフレネル反射。実物の対物レンズは正面から覗くと素通しなのに、
@@ -1713,7 +1742,15 @@ function addScope(g, y, z) {
 const R_BORE = 0.021;
 const R_RAIL = 0.052;
 
-function buildRifle() {
+/**
+ * @param deco 形違いのスキンが飾りを足す口。**bakeStaticの前に呼ぶ。**
+ *             後から足すと結合の外に出て、飾りの数だけ描画呼び出しが増える。
+ *             動く部品（bolt/mag/trigger）には触らせない
+ *             （触ると装填の動きが壊れるが、壊れたことに気づけない）
+ */
+// viewは受けるが読まない（握り方を武器ごとに変えられる形に揃えてあるだけ）。
+// eslint-disable-next-line no-unused-vars -- 他のbuildと引数の形を揃えている
+function buildRifle(view = {}, deco = null) {
   const g = new THREE.Group();
 
   /* ---- 下部機関部。マグウェルをラッパ状に開いて差し込み口を「口」に見せる */
@@ -1960,6 +1997,9 @@ function buildRifle() {
     charge: [[0.006, 0.052, 0.028], [0.95, 0.05, 0.35]],
   };
 
+  // 飾りは結合の前に足す。後からだと飾りの数だけ描画呼び出しが増える
+  if (deco) deco(g);
+
   bakeStatic(rear);
   bakeStatic(bolt);
   bakeStatic(mg);
@@ -1968,6 +2008,103 @@ function buildRifle() {
   bakeStatic(g);
   return g;
 }
+
+/* -------------------------------------------------- ライフルの形違い */
+
+/* **銃そのものは組み直していない。** buildRifleに飾りを足す口を1つ開けて、
+   そこへ部品を挿している。だから遊底も弾倉も引き金も元のまま動く
+   （組み直すと、同じ名前の部品を全部用意し直す必要がある）。
+   色は skins.js の over が別に塗り替える。
+
+   **これはナイフの刀・ダガーとは作りが違う。** あちらは刃の輪郭そのものを
+   描き直しているが、こちらは元の形へ足している。
+   ライフルを一から組み直すと、動く部品の名前を揃える手間が丸ごと乗るため */
+
+function dragonDeco(g) {
+  /* ---- 背の棘。機関部の上から銃床にかけて、後ろへ寝かせて並べる。
+     **前へ向けると角が生えているように見える。** 竜の背びれは後ろへ流れる */
+  for (let i = 0; i < 6; i++) {
+    const z = -0.150 + i * 0.062;
+    const h = 0.052 - i * 0.005;          // 後ろへ行くほど低くする
+    g.add(part(cylG(0, 0.011, h, 6), MATS.bone, 0, R_RAIL + h * 0.42, z, -0.62));
+  }
+
+  /* ---- 銃口の顎。上下から牙を寄せる。**閃光は牙の間から出る**
+     （muzzleの印は動かしていないので、火は今まで通り芯から出る） */
+  for (const s of [1, -1]) {
+    g.add(part(cylG(0, 0.013, 0.062, 6), MATS.bone, 0, R_BORE + s * 0.030, -0.655, s * 0.30));
+    g.add(part(cylG(0, 0.008, 0.040, 6), MATS.bone, s * 0.020, R_BORE + s * 0.018, -0.640, s * 0.22));
+  }
+  // 顎の付け根の鱗。銃身が骨から生えているように見せる
+  g.add(part(cboxG(0.040, 0.044, 0.070), MATS.scale, 0, R_BORE, -0.612));
+
+  /* ---- 鱗板。先台の側面に、前下がりに重ねる。
+     等間隔で平らに並べると鎧の帯にしかならないので、少しずつ角度を変える */
+  for (let i = 0; i < 4; i++) {
+    const z = -0.520 + i * 0.072;
+    for (const s of [1, -1]) {
+      g.add(part(cboxG(0.006, 0.030, 0.062), MATS.scale,
+        s * 0.026, R_BORE - 0.004, z, 0, 0, s * (0.22 + i * 0.05)));
+    }
+  }
+
+  /* ---- 目。**2つだけ。** 光る物を増やすと、暗い場所で銃が提灯になる */
+  for (const s of [1, -1]) {
+    g.add(part(sphG(0.0075), MATS.ember, s * 0.026, R_BORE + 0.026, -0.235));
+  }
+  // 口の奥の熾火。牙の間から覗く。銃口の芯より少し奥に置いて、直接は見せない
+  g.add(part(sphG(0.010), MATS.ember, 0, R_BORE, -0.628));
+}
+
+function cuteDeco(g) {
+  /* ---- 猫耳。**これ1つで系統が決まる。** 機関部の上、左右に開いて立てる */
+  for (const s of [1, -1]) {
+    g.add(part(cylG(0, 0.019, 0.046, 4), MATS.candyPink,
+      s * 0.017, R_RAIL + 0.020, -0.060, 0, s * 0.30, s * 0.34));
+    // 耳の内側。一回り小さい物を前へずらして重ねる
+    g.add(part(cylG(0, 0.011, 0.030, 4), MATS.candyCream,
+      s * 0.017, R_RAIL + 0.016, -0.066, 0, s * 0.30, s * 0.34));
+  }
+
+  /* ---- 角を丸める。**尖った所に球を置くだけで印象が変わる。**
+     形そのものを丸めるには全部の箱を作り直すことになるので、要所だけ */
+  g.add(part(sphG(0.026), MATS.candyMint, 0, -0.004, 0.100));   // 銃床の後ろ
+  g.add(part(sphG(0.018), MATS.candyMint, 0, R_BORE, -0.660));  // 銃口
+  g.add(part(sphG(0.016), MATS.candyPink, 0, -0.030, -0.230));  // 用心金のあたり
+
+  /* ---- 先台の縞。パステルを2色で交互に巻くと、単色の塊から抜ける */
+  for (let i = 0; i < 5; i++) {
+    const z = -0.540 + i * 0.070;
+    g.add(part(cylG(0.031, 0.031, 0.030, 12), i % 2 ? MATS.candyMint : MATS.candyCream,
+      0, R_BORE, z, Math.PI / 2));
+  }
+
+  /* ---- チャーム。**握把から下げる。** 揺れはしないが、
+     銃に「持ち主が居る」感じを出しているのはこの1個 */
+  const star = new THREE.Shape();
+  for (let i = 0; i < 10; i++) {
+    const a = (Math.PI / 5) * i - Math.PI / 2;
+    const r = i % 2 ? 0.0085 : 0.019;
+    if (i === 0) star.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+    else star.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+  }
+  star.closePath();
+  const starGeo = new THREE.ExtrudeGeometry(star, {
+    depth: 0.005, bevelEnabled: true, bevelThickness: 0.0012, bevelSize: 0.0016, bevelSegments: 1,
+  });
+  starGeo.translate(0, 0, -0.0025);
+  g.add(part(starGeo, MATS.charm, 0.030, -0.150, 0.052));
+  /* 吊り紐。細い輪を2つ繋いで下げる。
+     **星と材質を分けてある。** 同じにすると、押し出した星（索引なし）と
+     輪（索引あり）が同じ束へ入って mergeGeometries が失敗する。
+     bakeStaticは1つでも失敗すると**その群れ全部の結合を諦める**ので、
+     ここを揃えていなかった時は面が47個から288個へ跳ねた（見た目は変わらないまま） */
+  g.add(part(torG(0.006, 0.0016, 4, 10), MATS.brass, 0.030, -0.118, 0.052, Math.PI / 2));
+  g.add(part(torG(0.006, 0.0016, 4, 10), MATS.brass, 0.030, -0.129, 0.052, Math.PI / 2));
+}
+
+const buildRifleDragon = (view = {}) => buildRifle(view, dragonDeco);
+const buildRifleCute = (view = {}) => buildRifle(view, cuteDeco);
 
 /* ------------------------------------------------------------ ショットガン */
 
@@ -2692,6 +2829,8 @@ function buildDagger(view = {}) {
 export const SHAPE_BUILDS = {
   katana: buildKatana,
   dagger: buildDagger,
+  dragon: buildRifleDragon,
+  cute: buildRifleCute,
 };
 
 // 手榴弾。持ち替えると手に持つだけで、左クリックで投げる。

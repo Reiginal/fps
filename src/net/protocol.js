@@ -695,6 +695,9 @@ export const SKINNABLE = ['rifle', 'shotgun', 'pistol', 'sniper', 'knife', 'nade
 export const SHAPE_LIST = [
   { weapon: 'knife', id: 'katana', name: '刀', price: 1200 },
   { weapon: 'knife', id: 'dagger', name: 'ダガー', price: 900 },
+  // ライフルは一番見る武器なので高い。飾りの量も多い
+  { weapon: 'rifle', id: 'dragon', name: 'ドラゴン', price: 2000 },
+  { weapon: 'rifle', id: 'cute', name: 'キャンディ', price: 1600 },
 ];
 
 /** その武器で買える物（色＋形）。画面はこれを並べる */
