@@ -9,7 +9,7 @@
 //
 // **持っていない物は装備できない。** ここもサーバーが確かめる。
 // 画面側でも押せないようにしてあるが、あれは親切であって守りではない。
-import { parseSku, skuOf, SKINNABLE, SKIN_IDS, DEFAULT_SKIN } from '../src/net/protocol.js';
+import { parseSku, skuOf, SKINNABLE, DEFAULT_SKIN, canEquip } from '../src/net/protocol.js';
 
 /* 買えなかった理由。**画面にそのまま出す文言。**
    「エラー」とだけ返すと、遊ぶ側に打つ手が無くなる */
@@ -110,7 +110,9 @@ export async function buy(query, userId, rawSku) {
  * @returns { ok:false, error } か { ok:true, weapon, skin }
  */
 export async function equip(query, userId, weapon, skin) {
-  if (!SKINNABLE.includes(weapon) || !SKIN_IDS.includes(skin)) {
+  /* **その武器で扱える物か。** 形違いはその武器専用なので、
+     ここを「スキンの一覧に有るか」だけで見ると「ライフルの刀」が着けられる */
+  if (!SKINNABLE.includes(weapon) || !canEquip(weapon, skin)) {
     return { ok: false, error: BUY_ERR.BAD };
   }
   if (skin !== DEFAULT_SKIN) {

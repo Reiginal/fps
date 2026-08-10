@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { muzzleFlashTexture, radialTexture, smokeTexture } from '../world/textures.js';
 import { tryModelOverride } from './glbview.js';
-import { applySkin, skinFor } from './skins.js';
+import { applySkin, skinFor, shapeOf } from './skins.js';
 // 持ち物の決まりだけ取り込む。protocol.jsはこちらを読まないので輪にならない
 import { loadoutOf, NADE } from '../net/protocol.js';
 
@@ -2449,8 +2449,7 @@ function buildPistol(view = {}) {
 
 function buildKnife(view = {}) {
   const g = new THREE.Group();
-  // 握り方は def.view.grip が持つ。持っていなければ今まで通りの値
-  const grip = view.grip || {};
+  // 握り方（def.view.grip）は meleeRig が読む。ここは刃と柄だけを組む
 
   // 刃。輪郭を1枚のShapeで描いて押し出す。
   //
@@ -2485,11 +2484,29 @@ function buildKnife(view = {}) {
   g.add(part(cboxG(0.052, 0.016, 0.012), MATS.phosphate, 0, 0.002, -0.030));
   g.add(part(cylG(0.016, 0.018, 0.100, 10), MATS.polymer, 0, 0.001, 0.028, Math.PI / 2));
 
+  meleeRig(g, view);
+  bakeStatic(g);
+  return g;
+}
+
+/**
+ * 短剣系の共通の枠。**刃と柄より後ろは全部同じ**なので、形違いはここを使い回す。
+ *
+ * 元は buildKnife の中に直に書いてあった。刀とダガーを足す時に
+ * 同じ50行を2回写すことになったので抜き出した。**値は1つも変えていない**
+ * （変えると今のナイフの構えが動く。tools/check-weapons.mjs が見張っている）。
+ *
+ * @param muzzleZ 閃光と煙の出所。短剣では光らせないので位置だけ。
+ *                刃の長さに合わせて動かす（切っ先より先に置く）
+ * @param sightZ  覗いた時の寄せ先。刃の芯に置くと構えが崩れない
+ */
+function meleeRig(g, view = {}, { muzzleZ = -0.260, sightZ = -0.140, gripR = 0.021 } = {}) {
+  const grip = view.grip || {};
+
   // 銃ではないが、武器側が必ず読む3つの印は置く。
-  // muzzleは閃光と煙の出所（短剣では光らせないので位置だけ）、
-  // sightはADSの寄せ先の逆算に使う（覗いても構えが崩れないよう刃の芯に置く）
+  // 無いと閃光の出所も覗きの逆算も行き先を失う
   const muzzle = new THREE.Object3D();
-  muzzle.position.set(0, 0, -0.260);
+  muzzle.position.set(0, 0, muzzleZ);
   g.add(muzzle);
   g.userData.muzzle = muzzle;
   const eject = new THREE.Object3D();
@@ -2497,13 +2514,13 @@ function buildKnife(view = {}) {
   g.add(eject);
   g.userData.eject = eject;
   const sight = new THREE.Object3D();
-  sight.position.set(0, 0.003, -0.140);
+  sight.position.set(0, 0.003, sightZ);
   g.add(sight);
   g.userData.sight = sight;
 
   /* ---- 手。右手だけで順手に持つ。左手は使わないので画面外へ逃がす */
   const handR = buildHand(1, {
-    gripR: 0.021, wrap: 0.72, trigger: false,
+    gripR, wrap: 0.72, trigger: false,
     armDir: grip.armDir || [0.38, -0.62, 0.92],
     armLen: grip.armLen != null ? grip.armLen : 0.62,
   });
@@ -2530,10 +2547,152 @@ function buildKnife(view = {}) {
     low: [[0.34, -0.40, 0.16], [-Math.PI / 2 + 0.10, 0, 0.12]],
     charge: [[0.34, -0.40, 0.16], [-Math.PI / 2 + 0.10, 0, 0.12]],
   };
+  return g;
+}
 
+/* 刃を1枚の図形から起こす共通の道具。
+   Shapeは XY 平面に描かれるので、寝かせて前（-Z）へ向ける。
+   **符号に注意。** -90度だと (x, y, 0) → (x, 0, -y) になり、
+   y を 0〜-BL に取った刃が z の正側＝カメラの後ろへ伸びる */
+function bladeGeoFrom(shape, depth, bevel, z = -0.030, y = 0.003) {
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth, bevelEnabled: true,
+    bevelThickness: bevel * 0.73, bevelSize: bevel, bevelSegments: 1,
+  });
+  geo.rotateX(Math.PI / 2);
+  geo.translate(0, y, z);
+  return geo;
+}
+
+/* ------------------------------------------------------------ 刀 */
+
+// 形違いのスキン。**同じ「射程1.8mの銃」のまま、見た目だけが変わる。**
+// 当たり判定はレイを飛ばして射程で決めているので、刃の長さは判定に効かない。
+// だから対戦の公平性にも影響しない（長い刀が有利になったりしない）。
+function buildKatana(view = {}) {
+  const g = new THREE.Group();
+
+  const BL = 0.300;    // 刃渡り。ナイフ(0.225)より3割長い
+  const BW = 0.019;    // 半幅。日本刀は幅が狭い
+  const SORI = 0.026;  // 反り。**これが刀らしさのほぼ全部**
+
+  /* 反りは「先へ行くほど峰側（-x）へ寄る」で出す。
+     直線の刃を長くしただけでは、ただの長いナイフにしかならない */
+  const blade = new THREE.Shape();
+  blade.moveTo(-BW, 0);                                   // 根元・峰側
+  blade.quadraticCurveTo(-BW - SORI * 0.45, -BL * 0.55, -BW - SORI * 0.92, -BL * 0.93);
+  blade.lineTo(-BW * 0.15 - SORI, -BL);                   // 切っ先
+  // 刃側を根元へ戻る。峰と同じだけ反らせないと、先が太って鉈に見える
+  blade.quadraticCurveTo(BW * 0.55 - SORI * 0.5, -BL * 0.5, BW, 0);
+  blade.closePath();
+  g.add(part(bladeGeoFrom(blade, 0.0065, 0.0030), MATS.steel, 0, 0, 0));
+
+  /* 鎬（しのぎ）。峰寄りに細い面を1枚重ねると、平らな板から抜け出す。
+     実物の刀は断面が菱形で、光が2段で返る。そこだけ真似る */
+  const ridge = new THREE.Shape();
+  ridge.moveTo(-BW * 0.55, -BL * 0.04);
+  ridge.quadraticCurveTo(-BW * 0.55 - SORI * 0.45, -BL * 0.55, -BW * 0.5 - SORI * 0.9, -BL * 0.90);
+  ridge.lineTo(-BW * 0.15 - SORI * 0.95, -BL * 0.95);
+  ridge.quadraticCurveTo(-BW * 0.1 - SORI * 0.45, -BL * 0.5, -BW * 0.12, -BL * 0.04);
+  ridge.closePath();
+  g.add(part(bladeGeoFrom(ridge, 0.0072, 0.0012, -0.030, 0.0028), MATS.anodized, 0, 0, 0));
+
+  /* 鍔（つば）。**円盤1枚。** 刀と他の刃物を分ける一番大きい印がこれで、
+     ここが四角いと途端に西洋剣に見える */
+  g.add(part(cylG(0.030, 0.030, 0.006, 18), MATS.phosphate, 0, 0.002, -0.026, Math.PI / 2));
+  // 切羽（せっぱ）。鍔の両脇の薄い座金。1枚板に見えないように段を作る
+  g.add(part(cylG(0.017, 0.017, 0.004, 14), MATS.brass, 0, 0.002, -0.021, Math.PI / 2));
+  g.add(part(cylG(0.017, 0.017, 0.004, 14), MATS.brass, 0, 0.002, -0.031, Math.PI / 2));
+
+  /* 柄（つか）。長い。**両手で握れる長さがあることが刀の形の条件。**
+     持つのは右手だけだが、長さが無いと短刀に見える */
+  g.add(part(cboxG(0.023, 0.031, 0.135), MATS.rubber, 0, 0.002, 0.052));
+  /* 柄巻き。菱形に交差する紐を、細い箱を斜めに置いて出す。
+     6組で足りる。増やすと縞に潰れて、かえって平らに見える */
+  for (let i = 0; i < 6; i++) {
+    const z = 0.000 + i * 0.021;
+    g.add(part(boxG(0.026, 0.006, 0.010), MATS.enamel, 0, 0.017, z, 0, 0, 0.62));
+    g.add(part(boxG(0.026, 0.006, 0.010), MATS.enamel, 0, 0.017, z, 0, 0, -0.62));
+    g.add(part(boxG(0.006, 0.026, 0.010), MATS.enamel, 0.011, 0.002, z, 0.62, 0, 0));
+    g.add(part(boxG(0.006, 0.026, 0.010), MATS.enamel, -0.011, 0.002, z, -0.62, 0, 0));
+  }
+  // 頭（かしら）。柄尻の金具
+  g.add(part(cboxG(0.025, 0.033, 0.014), MATS.brass, 0, 0.002, 0.124));
+
+  // 刃が長いぶん、閃光の出所と覗きの寄せ先も先へ送る
+  meleeRig(g, view, { muzzleZ: -0.340, sightZ: -0.175, gripR: 0.019 });
   bakeStatic(g);
   return g;
 }
+
+/* -------------------------------------------------------- ダガー */
+
+function buildDagger(view = {}) {
+  const g = new THREE.Group();
+
+  const BL = 0.175;   // 刃渡り。ナイフより短い
+  const BW = 0.030;   // 半幅。**短くて幅広い**のがダガーの形
+
+  /* 左右対称の両刃。ナイフ（片刃・先が寄っている）との差はここで出る。
+     真ん中で膨らませて、菱形の断面に見せる */
+  const blade = new THREE.Shape();
+  blade.moveTo(-BW, 0);
+  blade.lineTo(-BW * 0.92, -BL * 0.52);
+  blade.lineTo(0, -BL);                 // 切っ先は中央
+  blade.lineTo(BW * 0.92, -BL * 0.52);
+  blade.lineTo(BW, 0);
+  blade.closePath();
+  g.add(part(bladeGeoFrom(blade, 0.0075, 0.0034), MATS.steel, 0, 0, 0));
+
+  /* 中央の稜線。両刃は中心が一番厚い。細い帯を重ねるだけで菱形に見える */
+  const spine = new THREE.Shape();
+  spine.moveTo(-BW * 0.16, -BL * 0.03);
+  spine.lineTo(0, -BL * 0.92);
+  spine.lineTo(BW * 0.16, -BL * 0.03);
+  spine.closePath();
+  g.add(part(bladeGeoFrom(spine, 0.0086, 0.0012, -0.030, 0.0028), MATS.anodized, 0, 0, 0));
+
+  /* クロスガード。**横へ大きく張り出す。** 刀の円盤と対になる形で、
+     ここだけで「西洋の短剣」に見える。
+
+     **材質を刃と分けてある。** 同じMATS.steelにすると、
+     押し出した刃（索引なし）と面取り箱（索引あり）が同じ束へ入って
+     mergeGeometriesが失敗する。結合が諦められて描画呼び出しが増えるだけで
+     見た目は変わらないので、黙って重くなる形の不具合になる */
+  g.add(part(cboxG(0.082, 0.013, 0.015), MATS.phosphate, 0, 0.002, -0.024));
+  // 張り出しの先の玉。角のままだと板に見える
+  g.add(part(sphG(0.0085), MATS.brass, 0.041, 0.002, -0.024));
+  g.add(part(sphG(0.0085), MATS.brass, -0.041, 0.002, -0.024));
+
+  // 柄。短く絞る。革巻きの段を3本
+  g.add(part(cylG(0.014, 0.016, 0.078, 12), MATS.rubber, 0, 0.002, 0.020, Math.PI / 2));
+  for (let i = 0; i < 3; i++) {
+    g.add(part(cylG(0.017, 0.017, 0.006, 12), MATS.polymer, 0, 0.002, 0.000 + i * 0.024, Math.PI / 2));
+  }
+  // 柄頭。丸い錘。ここが重いと短剣らしい均衡になる
+  g.add(part(sphG(0.019), MATS.brass, 0, 0.002, 0.062));
+
+  meleeRig(g, view, { muzzleZ: -0.215, sightZ: -0.110, gripR: 0.016 });
+  bakeStatic(g);
+  return g;
+}
+
+/**
+ * 形違いのスキン。**id → 組み立て関数。**
+ *
+ * 色のスキン（materialを差し替えるだけ）と違って、こちらは組み立てそのものが別。
+ * だから**その武器専用**になる（刀はナイフにしか意味が無い）。
+ * どの武器で売るかは src/net/protocol.js の SHAPE_LIST が持つ。
+ *
+ * ここに足す時の決まり:
+ *   ・muzzle / eject / sight の3つの印を必ず置く（meleeRigかbuild側で）
+ *   ・元の武器が持っている動く部品（bolt/mag/trigger）を同じ名前で用意する。
+ *     **無いと装填で何も動かなくなる。** 短剣系は動く部品が無いので楽
+ */
+export const SHAPE_BUILDS = {
+  katana: buildKatana,
+  dagger: buildDagger,
+};
 
 // 手榴弾。持ち替えると手に持つだけで、左クリックで投げる。
 // 撃つ道具ではないので melee と同じく弾数も装填も持たない
@@ -2927,7 +3086,11 @@ class Weapon {
     // 組み立てにviewを渡す。**握り方（腕の入る向き・長さ・手の位置）を
     // 武器ごとに変えられるようにするため。** 渡さなかった頃は4つとも
     // ライフルの値で腕が入っていて、ナイフも手榴弾もライフルの構えに見えていた
-    this.inner = def.build(v);
+    /* **どの組み立てで作ったか。** 形違いのスキン（刀・ダガー）は
+       組み立てそのものが別なので、着け替えの時にここを見て
+       「作り直しが要るか」を決める（WeaponSystem.refreshSkins）*/
+    this.builtWith = shapeOf(skinFor(def.id)) || def.build;
+    this.inner = this.builtWith(v);
     // ビューモデルは実寸のまま出すと画面を埋め尽くす。内側で縮めてから構える
     this.inner.scale.setScalar(v.scale);
     this.parts = this.inner.userData;
@@ -2944,8 +3107,8 @@ class Weapon {
        （待つと、素材を持たないこのゲームで起動が素材待ちになる） */
     tryModelOverride(this, def.id).catch(() => {});
 
-    /* 選んだスキン（同じ銃の色違い）を被せる。**組み上がった後で材質だけ差し替える。**
-       **武器ごとに別のスキンを着けられる**ので、自分のidで引く */
+    /* 選んだスキンの色を被せる。**組み上がった後で材質だけ差し替える。**
+       形の違いは上の builtWith が既に効いているので、ここは色だけ */
     applySkin(this.inner, skinFor(def.id));
 
     this.ammo = def.mag;
@@ -3312,14 +3475,30 @@ export class WeaponSystem {
   get def() { return this.current.def; }
 
   /**
-   * スキンを掛け直す。**組んである全部の武器に、それぞれのスキンで掛ける。**
+   * 見た目を掛け直す。**組んである全部の武器に、それぞれのスキンで掛ける。**
    *
    * 今持っている物だけに掛けると、持ち替えた瞬間に前の色へ戻る
    * （武器は起動時に全部組んであって、持ち替えは見せる物を替えているだけ）。
-   * 焼いた材質はスキンごとに1回しか作らないので、全部に掛けても安い
+   *
+   * **色なら材質を差し替えるだけ。形が違う時だけ作り直す。**
+   * 作り直しが要るのは、覗いた時の寄せ先も閃光の付け先も
+   * 組み立てから逆算しているため（内側だけ入れ替えると、そこが古いまま残る）。
+   * 形を替えるのはホームで押した時だけなので、値段は高くない
    */
   refreshSkins() {
-    for (const w of this.weapons) applySkin(w.inner, skinFor(w.def.id));
+    for (let i = 0; i < this.weapons.length; i++) {
+      const w = this.weapons[i];
+      const want = shapeOf(skinFor(w.def.id)) || w.def.build;
+      if (want !== w.builtWith) {
+        // 古い方を場面から外してから差し替える。外さないと2挺重なって出る
+        this.viewScene.remove(w.model);
+        const fresh = new Weapon(w.def, this.viewScene);
+        fresh.model.visible = w.model.visible;
+        this.weapons[i] = fresh;
+        continue;
+      }
+      applySkin(w.inner, skinFor(w.def.id));
+    }
   }
 
   // 持ち替えが通ったかを返す。対戦では通った時だけサーバーへ知らせないと、

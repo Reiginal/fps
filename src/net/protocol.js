@@ -682,6 +682,35 @@ export const skinInfo = (id) => SKIN_LIST.find((s) => s.id === id) || SKIN_LIST[
    名前がずれていないかは tools/check-store.mjs が突き合わせる */
 export const SKINNABLE = ['rifle', 'shotgun', 'pistol', 'sniper', 'knife', 'nade'];
 
+/* **形違いのスキン。こちらは武器ごとに品揃えが違う。**
+ *
+ * 色のスキン（SKIN_LIST）は材質を差し替えるだけなので、どの武器にも塗れる。
+ * 形は組み立てそのものが別なので、**その武器専用**になる
+ * （刀はナイフにしか意味が無い）。だから weapon を持つ。
+ *
+ * 塗り替えではなく作り直しなので値段も高め。
+ * 実際の組み立ては src/player/weapons.js の SHAPE_BUILDS が持つ
+ * （そちらはthree.jsを読み込むので、サーバーが読むこの表とは分けてある）。
+ */
+export const SHAPE_LIST = [
+  { weapon: 'knife', id: 'katana', name: '刀', price: 1200 },
+  { weapon: 'knife', id: 'dagger', name: 'ダガー', price: 900 },
+];
+
+/** その武器で買える物（色＋形）。画面はこれを並べる */
+export function itemsFor(weapon) {
+  if (!SKINNABLE.includes(weapon)) return [];
+  return [
+    ...SKIN_LIST.filter((s) => s.id !== DEFAULT_SKIN)
+      .map((s) => ({ ...s, weapon, kind: 'paint' })),
+    ...SHAPE_LIST.filter((s) => s.weapon === weapon)
+      .map((s) => ({ ...s, kind: 'shape' })),
+  ];
+}
+
+/** そのidが形違いか（色ではなく組み立てが別か） */
+export const isShape = (id) => SHAPE_LIST.some((s) => s.id === id);
+
 /* 商品1つを指す文字列。**武器ごとに別の商品**なので、両方が要る。
    「デザートのライフル」と「デザートのピストル」は別々に買う */
 export const skuOf = (weapon, skin) => `${weapon}:${skin}`;
@@ -694,11 +723,19 @@ export function parseSku(sku) {
   if (parts.length !== 2) return null;
   const [weapon, skin] = parts;
   if (!SKINNABLE.includes(weapon)) return null;
-  if (!SKIN_IDS.includes(skin)) return null;
   // 標準は商品ではないので、買う対象としては存在しない
   if (skin === DEFAULT_SKIN) return null;
-  return { weapon, skin, price: skinInfo(skin).price };
+  /* **その武器で売っている物だけを通す。**
+     色は全武器で売っているが、形はその武器専用。
+     ここを SKIN_IDS だけで見ていると「ライフルの刀」が買えてしまう */
+  const item = itemsFor(weapon).find((s) => s.id === skin);
+  if (!item) return null;
+  return { weapon, skin, price: item.price, kind: item.kind };
 }
+
+/** 装備できるidか（標準・その武器の色・その武器の形） */
+export const canEquip = (weapon, skin) =>
+  skin === DEFAULT_SKIN || itemsFor(weapon).some((s) => s.id === skin);
 
 /* -------------------------------------------------------------- 発言 */
 
