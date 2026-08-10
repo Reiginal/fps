@@ -84,6 +84,31 @@ const PAINT = {
 const SHAPE_LOOK = {
   katana: { note: '反りのある片刃と円い鍔。刃渡りが3割長い', swatch: '#b9c2cc' },
   dagger: { note: '短く幅広い両刃と、横へ張り出したクロスガード', swatch: '#c9a24e' },
+  /* 形違いも塗り替えを持てる。**飾りを足すだけだと本体が元の紺黒のままで、
+     足した部品だけ浮いて見える。** 組み立て(SHAPE_BUILDS)が飾りを、
+     ここが本体の色を受け持つ */
+  dragon: {
+    note: '背の棘・銃口の顎・鱗・光る目。暗い赤銅に金の擦れ',
+    swatch: '#3a1c18',
+    over: {
+      enamel: { color: 0x2a1512, wear: { color: 0xc79a4a, amount: 1.1 } },
+      anodized: { color: 0x3a1c18, wear: { color: 0xd8ad5c, amount: 1.0 } },
+      phosphate: { color: 0x241210, wear: { color: 0xb98d42, amount: 1.2 } },
+      polymer: { color: 0x2b1a17, wear: { color: 0x7a5f36, metal: 0.2 } },
+      steel: { color: 0x6b4a2a, wear: { color: 0xe8c88a } },
+    },
+  },
+  cute: {
+    note: '猫耳・丸めた角・パステルの縞・星のチャーム',
+    swatch: '#d98aa6',
+    over: {
+      enamel: { color: 0xd98aa6, metalness: 0.0, roughness: 0.55, wear: { amount: 0.3, color: 0xf0b8ca, metal: 0.0 } },
+      anodized: { color: 0x7fc9b8, metalness: 0.0, roughness: 0.52, wear: { amount: 0.3, color: 0xaee2d6, metal: 0.0 } },
+      phosphate: { color: 0xe0d3b4, metalness: 0.0, roughness: 0.60, wear: { amount: 0.25, color: 0xf2ead6, metal: 0.0 } },
+      polymer: { color: 0xc9789a, wear: { amount: 0.3, color: 0xe6a8c0, metal: 0.0 } },
+      steel: { color: 0xbfc9d4, wear: { color: 0xe4ecf5 } },
+    },
+  },
 };
 
 /** 画面に並べる用。値段は protocol.js、見せ方はこのファイル */

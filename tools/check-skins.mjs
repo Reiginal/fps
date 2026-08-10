@@ -10,6 +10,7 @@
 //   node tools/check-skins.mjs
 import { readFileSync, readdirSync } from 'node:fs';
 import '../server/dom-stub.js';
+import * as THREE from 'three';
 import {
   SKINS, skinAt, applySkin, skinFor, hasSkin, wearSkin, setAccount,
 } from '../src/player/skins.js';
@@ -253,9 +254,15 @@ console.log('\n[11] 形違いのスキン');
 
   /* 組み上がった物が、武器側の決まりを満たしているか。
      **印が1つでも欠けると、閃光の出所も覗きの逆算も行き先を失う** */
-  const def = WEAPONS.find((w) => w.id === 'knife');
-  const base = def.build(def.view);
+  /* **元の武器と比べる。** 形違いはその武器専用なので、
+     ナイフの形をライフルと比べても意味が無い（実際そう書いて4件落ちた）*/
+  const defOf = (id) => WEAPONS.find((w) => w.id === (SHAPE_LIST.find((s) => s.id === id)?.weapon));
   for (const [id, build] of Object.entries(SHAPE_BUILDS)) {
+    const def = defOf(id);
+    ok(!!def, `${id} … 売る武器(${SHAPE_LIST.find((s) => s.id === id)?.weapon})が実在する`);
+    const base = def.build(def.view);
+    let baseMeshes = 0;
+    base.traverse((o) => { if (o.isMesh) baseMeshes++; });
     const g = build(def.view);
     for (const k of ['muzzle', 'eject', 'sight', 'handR', 'handL', 'holdL']) {
       ok(!!g.userData[k], `${id} … ${k} がある`);
@@ -266,12 +273,42 @@ console.log('\n[11] 形違いのスキン');
     for (const k of ['bolt', 'mag', 'trigger']) {
       ok(!base.userData[k] === !g.userData[k], `${id} … ${k} の有無が元と同じ`);
     }
-    // 結合が効いているか。失敗すると黙って描画呼び出しが増える
+    /* 結合が効いているか。**失敗しても見た目は変わらず、描画呼び出しだけ増える。**
+       しかも bakeStatic は1つの材質で失敗すると**その群れ全部の結合を諦める**ので、
+       1箇所の取り違えで一気に跳ねる（実際、星と輪を同じ材質にしていた時に
+       47個から288個になった）。元の武器＋10個までを目安にする */
     let meshes = 0;
     g.traverse((o) => { if (o.isMesh) meshes++; });
-    ok(meshes < 30, `${id} … 面が ${meshes} 個（材質ごとに結合できている）`);
-    // 刃が前（-Z）へ伸びているか。符号を間違えるとカメラの後ろへ伸びる
-    ok(g.userData.muzzle.position.z < 0, `${id} … 刃が前を向いている`);
+    ok(meshes <= baseMeshes + 10,
+      `${id} … 面が ${meshes} 個（元は ${baseMeshes} 個。結合できている）`);
+    // 前（-Z）へ伸びているか。符号を間違えるとカメラの後ろへ伸びる
+    ok(g.userData.muzzle.position.z < 0, `${id} … 前を向いている`);
+
+    /* **元より大きくなりすぎていないか。**
+       構えは目の前に出るので、少し盛るだけで画面を覆う。
+       外部モデルを被せた時に「画面の右半分を覆う黒い板」になった前例がある
+       （assets/models/CREDITS.md）。1.5倍を境にする */
+    const size = (grp) => {
+      const b = new THREE.Box3();
+      grp.traverse((o) => {
+        if (!o.isMesh || !o.visible) return;
+        for (let p = o; p; p = p.parent) if (p.userData?.isHand) return;
+        b.expandByObject(o);
+      });
+      const v = new THREE.Vector3();
+      b.getSize(v);
+      return v;
+    };
+    /* **一番長い辺どうしで比べる。**
+       軸ごとの比で見ると、刀の厚み(0.036→0.060)のような
+       画面の埋まり方に関係ない所で落ちる。実際そう書いて2件落ちた。
+       画面をどれだけ覆うかを決めるのは一番長い辺 */
+    const a = size(base);
+    const c = size(g);
+    const big = (v) => Math.max(v.x, v.y, v.z);
+    const ratio = big(c) / big(a);
+    ok(ratio < 1.5,
+      `${id} … 一番長い辺が元の${ratio.toFixed(2)}倍（幅${c.x.toFixed(3)} 高${c.y.toFixed(3)} 長${c.z.toFixed(3)}）`);
   }
 
   // 刀は長く、ダガーは短い。**形が実際に違うことを寸法で押さえる**
@@ -286,9 +323,10 @@ console.log('\n[11] 形違いのスキン');
     });
     return max - min;
   };
-  const kn = len(base);
-  const ka = len(SHAPE_BUILDS.katana(def.view));
-  const da = len(SHAPE_BUILDS.dagger(def.view));
+  const knife = WEAPONS.find((w) => w.id === 'knife');
+  const kn = len(knife.build(knife.view));
+  const ka = len(SHAPE_BUILDS.katana(knife.view));
+  const da = len(SHAPE_BUILDS.dagger(knife.view));
   ok(ka > kn * 1.2, `刀はナイフより長い（${kn.toFixed(3)} → ${ka.toFixed(3)}）`);
   ok(da < kn, `ダガーはナイフより短い（${kn.toFixed(3)} → ${da.toFixed(3)}）`);
 }
