@@ -112,7 +112,8 @@ console.log('\n[5] 色が実際に変わっている（測る）');
 
   const base = avg(MATS.enamel);
   ok(!!base, `標準の塗装の平均色 (${base.map((v) => v.toFixed(0)).join(', ')})`);
-  for (const s of SKINS.slice(1)) {
+  // 形違いは塗り替えではないので、ここでは見ない（[11]で別に見る）
+  for (const s of SKINS.filter((x) => x.kind === 'paint' && x.over)) {
     const over = s.over.enamel;
     // 色を指定していないスキン（歴戦）はここでは見ない。下で別に測る
     if (!over || over.color == null) continue;
@@ -180,8 +181,13 @@ console.log("\n[7b] 値段の表が1つしかない");
   ok(!/price\s*:/.test(paint), '**塗り方の表が値段を持っていない**（protocol.jsだけが持つ）');
   ok(SKINS.every((s) => typeof s.price === 'number'), '画面に出す時はprotocol.jsから乗る');
   const ids = SKIN_LIST.map((s) => s.id).sort().join();
-  ok(SKINS.map((s) => s.id).sort().join() === ids, '塗り方と品揃えのidが揃っている');
+  const paints = SKINS.filter((s) => s.kind === 'paint').map((s) => s.id).sort().join();
+  ok(paints === ids, '塗り方と品揃えのidが揃っている');
   ok(SKINS.every((s) => s.id === DEFAULT_SKIN || s.price > 0), '標準以外は必ず値段が付いている');
+  // 色と形でidがぶつかると、どちらの意味か決まらなくなる
+  const all = SKINS.map((s) => s.id);
+  ok(new Set(all).size === all.length, '**色と形でidが重複していない**');
+  ok(SKINS.every((s) => s.swatch && s.note), '形違いにも色の見本と説明がある');
 }
 
 console.log("\n[8] 軽さ — 開いている間だけ描く");
@@ -221,6 +227,70 @@ console.log("\n[10] 素材ファイルを増やしていない");
     '**スキンの表が画像ファイルを1枚も指していない**');
   const assets = readdirSync(new URL('../assets', import.meta.url));
   ok(!assets.some((f) => /skin/i.test(f)), 'assetsにスキン用の素材が増えていない');
+}
+
+console.log('\n[11] 形違いのスキン');
+{
+  const { SHAPE_LIST, itemsFor, canEquip } = await import('../src/net/protocol.js');
+  const { SHAPE_BUILDS } = await import('../src/player/weapons.js');
+  const { shapeOf } = await import('../src/player/skins.js');
+
+  ok(SHAPE_LIST.length > 0, `${SHAPE_LIST.length}種`);
+  for (const s of SHAPE_LIST) {
+    ok(!!SHAPE_BUILDS[s.id], `${s.name}(${s.id}) … 組み立て関数がある`);
+    ok(shapeOf(s.id) === SHAPE_BUILDS[s.id], `${s.name} … skins.jsから引ける`);
+  }
+  ok(shapeOf('gold') === null, '色のスキンは組み立てを持たない（材質だけ差し替える）');
+
+  /* **その武器でしか買えない・着けられない。**
+     ここが緩いと「ライフルの刀」が成立してしまう */
+  ok(canEquip('knife', 'katana'), 'ナイフに刀は着けられる');
+  ok(!canEquip('rifle', 'katana'), '**ライフルに刀は着けられない**');
+  ok(!itemsFor('rifle').some((i) => i.id === 'katana'), 'ライフルの品揃えに刀が並ばない');
+  ok(itemsFor('knife').some((i) => i.id === 'katana'), 'ナイフの品揃えには並ぶ');
+  // 色は全武器で売る
+  ok(SKINNABLE.every((w) => itemsFor(w).some((i) => i.id === 'gold')), '色はどの武器でも売っている');
+
+  /* 組み上がった物が、武器側の決まりを満たしているか。
+     **印が1つでも欠けると、閃光の出所も覗きの逆算も行き先を失う** */
+  const def = WEAPONS.find((w) => w.id === 'knife');
+  const base = def.build(def.view);
+  for (const [id, build] of Object.entries(SHAPE_BUILDS)) {
+    const g = build(def.view);
+    for (const k of ['muzzle', 'eject', 'sight', 'handR', 'handL', 'holdL']) {
+      ok(!!g.userData[k], `${id} … ${k} がある`);
+    }
+    /* **元の武器が持っている動く部品を欠かさない。**
+       bolt/mag/trigger が無いと装填で何も動かなくなる。
+       短剣系は元から持っていないので、ここは「元と同じだけある」を見る */
+    for (const k of ['bolt', 'mag', 'trigger']) {
+      ok(!base.userData[k] === !g.userData[k], `${id} … ${k} の有無が元と同じ`);
+    }
+    // 結合が効いているか。失敗すると黙って描画呼び出しが増える
+    let meshes = 0;
+    g.traverse((o) => { if (o.isMesh) meshes++; });
+    ok(meshes < 30, `${id} … 面が ${meshes} 個（材質ごとに結合できている）`);
+    // 刃が前（-Z）へ伸びているか。符号を間違えるとカメラの後ろへ伸びる
+    ok(g.userData.muzzle.position.z < 0, `${id} … 刃が前を向いている`);
+  }
+
+  // 刀は長く、ダガーは短い。**形が実際に違うことを寸法で押さえる**
+  const len = (g) => {
+    let min = Infinity; let max = -Infinity;
+    g.traverse((o) => {
+      if (!o.isMesh || !o.geometry?.attributes?.position) return;
+      for (let p = o; p; p = p.parent) if (p.userData?.isHand) return;
+      o.geometry.computeBoundingBox();
+      min = Math.min(min, o.geometry.boundingBox.min.z + o.position.z);
+      max = Math.max(max, o.geometry.boundingBox.max.z + o.position.z);
+    });
+    return max - min;
+  };
+  const kn = len(base);
+  const ka = len(SHAPE_BUILDS.katana(def.view));
+  const da = len(SHAPE_BUILDS.dagger(def.view));
+  ok(ka > kn * 1.2, `刀はナイフより長い（${kn.toFixed(3)} → ${ka.toFixed(3)}）`);
+  ok(da < kn, `ダガーはナイフより短い（${kn.toFixed(3)} → ${da.toFixed(3)}）`);
 }
 
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);

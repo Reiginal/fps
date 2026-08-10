@@ -14,8 +14,10 @@
 // **値段と品揃えはここに書かない。** あれは src/net/protocol.js が持っていて、
 // サーバーも同じ物を読む（値段が2箇所にあると、片方だけ直した時に
 // 「画面では300なのに引かれるのは1500」になる）。ここが持つのは塗り方だけ。
-import { SKIN_LIST, SKINNABLE, DEFAULT_SKIN, skuOf } from '../net/protocol.js';
-import { skinnedFrom, matNameOf } from './weapons.js';
+import {
+  SKIN_LIST, SHAPE_LIST, SKINNABLE, DEFAULT_SKIN, skuOf, canEquip,
+} from '../net/protocol.js';
+import { skinnedFrom, matNameOf, SHAPE_BUILDS } from './weapons.js';
 
 /* 選んだスキンの覚え先。**ログインしていない人のための控え。**
    ログインしている人はサーバーが持っている物が正になる（下のsetOwnedを参照）*/
@@ -77,9 +79,28 @@ const PAINT = {
   },
 };
 
-/** 画面に並べる用。値段は protocol.js、塗り方はこのファイル */
-export const SKINS = SKIN_LIST.map((s) => ({ ...s, ...PAINT[s.id] }));
+/* 形違いの見せ方。塗りは持たない（組み立てが自分で材質を決めている）。
+   組み立てそのものは weapons.js の SHAPE_BUILDS */
+const SHAPE_LOOK = {
+  katana: { note: '反りのある片刃と円い鍔。刃渡りが3割長い', swatch: '#b9c2cc' },
+  dagger: { note: '短く幅広い両刃と、横へ張り出したクロスガード', swatch: '#c9a24e' },
+};
+
+/** 画面に並べる用。値段は protocol.js、見せ方はこのファイル */
+export const SKINS = [
+  ...SKIN_LIST.map((s) => ({ ...s, ...PAINT[s.id], kind: 'paint' })),
+  ...SHAPE_LIST.map((s) => ({ ...s, ...SHAPE_LOOK[s.id], kind: 'shape' })),
+];
 export const skinAt = (id) => SKINS.find((s) => s.id === id) || SKINS[0];
+
+/**
+ * その見た目の組み立て関数。**色のスキンならnull**（組み立ては元のまま）。
+ *
+ * ここがnullかどうかで、被せ方が変わる:
+ *   null … 組み上がった後で材質だけ差し替える（安い）
+ *   関数 … **組み立て直す**（形が違うので材質の差し替えでは届かない）
+ */
+export const shapeOf = (id) => SHAPE_BUILDS[id] || null;
 
 /* --------------------------------------------------- 今の持ち物と装備 */
 
@@ -96,7 +117,9 @@ export const setOnWear = (fn) => { onWear = fn || (() => {}); };
 /** その武器に今着いているスキンのid。何も着けていなければ標準 */
 export const skinFor = (weaponId) => {
   const id = worn[weaponId];
-  return (id && PAINT[id]) ? id : DEFAULT_SKIN;
+  // **その武器で扱える物か**まで見る。形違いは武器専用なので、
+  // 別の武器のidが紛れ込んでいたら標準へ寄せる
+  return (id && canEquip(weaponId, id)) ? id : DEFAULT_SKIN;
 };
 
 /** 持っているか。標準はいつでも持っている扱い */
@@ -118,7 +141,7 @@ export function setAccount({ owned: list, equipped } = {}) {
   for (const w of SKINNABLE) {
     const id = equipped?.[w];
     // **持っていない物が届いても着せない。** 台帳側で持ち物を消した時の保険
-    worn[w] = (id && PAINT[id] && hasSkin(w, id)) ? id : DEFAULT_SKIN;
+    worn[w] = (id && canEquip(w, id) && hasSkin(w, id)) ? id : DEFAULT_SKIN;
   }
   saveWorn();
   onWear();
@@ -149,7 +172,7 @@ function loadWorn() {
   for (const w of SKINNABLE) out[w] = DEFAULT_SKIN;
   try {
     const raw = JSON.parse(localStorage.getItem(STORE) || '{}');
-    for (const w of SKINNABLE) if (PAINT[raw[w]]) out[w] = raw[w];
+    for (const w of SKINNABLE) if (canEquip(w, raw[w])) out[w] = raw[w];
   } catch { /* 覚えていないだけ */ }
   return out;
 }

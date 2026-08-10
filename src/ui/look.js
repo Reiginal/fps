@@ -15,9 +15,9 @@
 import * as THREE from 'three';
 import { WEAPONS } from '../player/weapons.js';
 import {
-  SKINS, applySkin, skinFor, hasSkin, wearSkin, setOwned, ownedSkus,
+  SKINS, skinAt, applySkin, skinFor, hasSkin, wearSkin, setOwned, ownedSkus, shapeOf,
 } from '../player/skins.js';
-import { SKINNABLE, DEFAULT_SKIN, skuOf } from '../net/protocol.js';
+import { SKINNABLE, DEFAULT_SKIN, skuOf, itemsFor } from '../net/protocol.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -117,24 +117,31 @@ export class LookMenu {
   }
 
   /* 見せる銃を差し替える。**本番と同じ組み立てを使う。**
-     見せるためだけの別モデルを作ると、選んだ物と実際に出る物がずれる */
+     見せるためだけの別モデルを作ると、選んだ物と実際に出る物がずれる。
+
+     **形違いは組み立てが別なので、形ごとに1つ持つ。**
+     鍵を「武器＋形」にしてあるのはそのため。色だけなら同じ物を塗り替える */
   _showGun() {
     for (const g of this.guns.values()) g.visible = false;
-    let g = this.guns.get(this.weapon);
+    const def = WEAPONS.find((w) => w.id === this.weapon);
+    if (!def) return;
+    const shown = this._shown();
+    const build = shapeOf(shown) || def.build;
+    const key = `${this.weapon}:${build === def.build ? '-' : shown}`;
+
+    let g = this.guns.get(key);
     if (!g) {
-      const def = WEAPONS.find((w) => w.id === this.weapon);
-      if (!def) return;
-      g = def.build(def.view);
+      g = build(def.view);
       // 手は消す。ここで見たいのは銃であって、握り方ではない
       g.traverse((o) => { if (o.userData?.isHand) o.visible = false; });
       // 銃は原点が機関部あたりにあるので、少し引いて枠へ収める
       g.position.set(0, 0, 0.06);
       this.holder.add(g);
-      this.guns.set(this.weapon, g);
+      this.guns.set(key, g);
     }
     g.visible = true;
     this.gun = g;
-    applySkin(g, this._shown());
+    applySkin(g, shown);
   }
 
   /* 今プレビューに出すスキン。ストアの面では、選んでいる商品を試着させる */
@@ -165,7 +172,7 @@ export class LookMenu {
   _setTab(store) {
     this.store = !!store;
     this.preview = null;
-    if (this.ready) applySkin(this.gun, this._shown());
+    if (this.ready) this._showGun();
     this._say('');
     this._paint();
   }
@@ -183,7 +190,12 @@ export class LookMenu {
 
     list.innerHTML = '';
     const shown = this._shown();
-    for (const s of SKINS) {
+    /* **その武器で扱える物だけを並べる。**
+       色は全武器で売っているが、形（刀・ダガー）はその武器専用なので、
+       全部のスキンをなめると「ライフルの刀」が並んでしまう */
+    const sell = itemsFor(this.weapon).map((it) => ({ ...skinAt(it.id), ...it }));
+    const all = [skinAt(DEFAULT_SKIN), ...sell];
+    for (const s of all) {
       const have = hasSkin(this.weapon, s.id);
       // ストアの面には、持っていない物と標準以外を並べる
       if (this.store && (have || s.id === DEFAULT_SKIN)) continue;
@@ -194,9 +206,11 @@ export class LookMenu {
       b.type = 'button';
       b.className = 'lkitem';
       if (s.id === shown) b.classList.add('on');
+      // 形違いは色違いと値打ちが違うので、一目で分かる印を付ける
       b.innerHTML = `<span class="sw" style="background:${s.swatch}"></span>`
         + `<span class="nm">${s.name}</span>`
-        + (this.store ? `<span class="pr">${s.price.toLocaleString()}</span>` : '');
+        + (s.kind === 'shape' ? '<span class="kd">形</span>' : '')
+        + (this.store ? `<span class="pr">${(s.price || 0).toLocaleString()}</span>` : '');
       b.onclick = () => (this.store ? this._buy(s) : this._wear(s.id));
       list.appendChild(b);
     }
@@ -225,7 +239,7 @@ export class LookMenu {
     if (this.busy) return;
     if (!wearSkin(this.weapon, id)) { this._say('持っていません', true); return; }
     this.preview = null;
-    applySkin(this.gun, this._shown());
+    this._showGun();
     this._paint();
     this.onChange();
     // ログインしていれば台帳にも覚えさせる。していなければこの端末だけ
@@ -241,7 +255,7 @@ export class LookMenu {
        値段だけ見て押した人が、確かめる間もなく買わされるのは避ける */
     if (this.preview !== s.id) {
       this.preview = s.id;
-      applySkin(this.gun, s.id);
+      this._showGun();
       this._paint();
       this._say(`${s.name} … もう一度押すと${s.price.toLocaleString()}コインで買います`);
       return;
@@ -267,7 +281,7 @@ export class LookMenu {
     this.preview = null;
     // 買ったらそのまま着ける。買った直後にもう一度押させる理由が無い
     wearSkin(this.weapon, s.id);
-    applySkin(this.gun, this._shown());
+    this._showGun();
     this.onChange();
     this._say(`${s.name} を買いました`);
     // 買い終わったら装備の面へ戻す（ストアからはその商品が消えるので）
@@ -292,7 +306,7 @@ export class LookMenu {
     // 閉じたら描くのをやめる。**畳み忘れるとホームの裏で回り続ける**
     this.running = false;
     this.preview = null;
-    if (this.ready) applySkin(this.gun, this._shown());
+    if (this.ready) this._showGun();
   }
 
   /** 開いている間だけ呼ばれる */
