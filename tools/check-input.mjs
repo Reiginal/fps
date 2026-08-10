@@ -189,15 +189,20 @@ console.log('\n[6] 掴むのを断られても、拾い手のいない失敗に�
   log.lockRejects = false;
 }
 
-console.log('\n[7] Commandを離しても走りとしゃがみが落ちない');
+console.log('\n[7] Commandを離しても、押しっぱなしのキーが落ちない');
 /* **Macでだけ起きる形。** macOSはCommandを押している間、他のキーのkeyupを送らない。
-   だからCommandを離した時にこちらで落とすのだが、前は押している物を
-   丸ごと落としていて、**走りながらCommandでしゃがむと離した瞬間に棒立ちになった**
-   （実測で速度が0まで落ちる。しゃがみからCommandを外して回避しようとしたが、
-   今度はMacの人がしゃがめなくなった＝滑れなくなった）。
+   だからCommandを離した時にこちらで落とすのだが、**落とす相手を2回間違えている。**
 
-   正しい形は「keyupが来ない文字キーだけ落として、修飾キーは残す」。
-   落とした文字キーのうち本当に押し続けている物は、キーリピートが戻す */
+     1回目 … 押している物を丸ごと落とした。Shiftまで消えるので、
+              走りながら⌘でしゃがむと離した瞬間に棒立ちになった（実測で速度0）
+     2回目 … 修飾キー以外を全部落とした。今度はWが消えるので、
+              Shift+Wを押しっぱなしでも前へ進まなくなった。**同じ「止まる」が再発。**
+              「キーリピートが入れ直す」と考えていたが、macOSは別のキーを挟むと
+              元のキーのリピートを再開しないので、Wは戻ってこない
+
+   正しい線引きは「いつ押されたか」。⌘より前から握っているキーは落とさない。
+   ⌘の後に押したキーだけを落とし、そちらは最後に押したキー＝リピートが来る側なので、
+   本当に握り続けていれば戻ってくる */
 {
   // 「文字を打っている最中か」を見るのに使われる。dom-stubには無いので生やす
   globalThis.HTMLElement = globalThis.HTMLElement ?? class {};
@@ -207,22 +212,44 @@ console.log('\n[7] Commandを離しても走りとしゃがみが落ちない');
   const up = (code) => winKeys.get('keyup')?.({ code, preventDefault: () => {} });
   ok(!!winKeys.get('keydown') && !!winKeys.get('keyup'), 'キーの受け口を掴めた');
 
+  /* ここが本番。**Shift+Wを押しっぱなしのまま⌘でスライディング**、が壊れないこと。
+     ⌘より前から握っているキーは、遊ぶ側がそのまま握り続けているキー */
   input.keys.clear();
-  // Shift+Wで走りながら、Commandでしゃがむ
   down('KeyW'); down('ShiftLeft'); down('MetaLeft');
   ok(input.down('KeyW') && input.down('ShiftLeft') && input.down('MetaLeft'),
     '3つとも押している');
-  // Commandだけ離す
   up('MetaLeft');
   ok(!input.down('MetaLeft'), 'しゃがみは離れた');
-  ok(input.down('ShiftLeft'), '**走り(Shift)は残る**（ここが落ちると棒立ちになる）');
-  /* 文字キーは落ちる。macOSがkeyupを送らないので、
-     ここで落とさないと手を離したWが押しっぱなしで残る */
-  ok(!input.down('KeyW'), '文字キー(W)はいったん落ちる');
-  // 本当に押し続けていれば、キーリピートが入れ直す
-  down('KeyW', true);
-  ok(input.down('KeyW'), 'キーリピートでWが戻る');
-  // ただし「押した瞬間」の印はリピートで立てない（跳躍が連射になる）
+  ok(input.down('ShiftLeft'), '**走り(Shift)は残る**（落ちると棒立ちになる）');
+  ok(input.down('KeyW'), '**前進(W)も残る**（落ちると前へ進まなくなる）');
+
+  /* 落とすのは「⌘を押している間に押し下げたキー」だけ。
+     そちらは離した時のkeyupがmacOSから来ないので、こちらで片付けるしかない */
+  input.keys.clear();
+  down('MetaLeft');
+  down('KeyD');            // ⌘を押してから右へ動き始めた
+  ok(input.down('KeyD'), '⌘の後に押したキーは効いている');
+  up('MetaLeft');
+  ok(!input.down('KeyD'), '⌘の後に押したキーは、⌘を離した時に片付ける');
+
+  /* ⌘の後に押したキーを本当に握り続けているなら、キーリピートが戻す。
+     **こちら側はリピートが当てになる。** macOSが繰り返すのは
+     「最後に押した文字キー」なので、⌘の後に押したキーがちょうどそれにあたる
+     （⌘より前に押したキーは、間に別のキーを挟んだ時点で繰り返しが止まる。
+     そこをリピート頼みにしていたのが2回目の失敗） */
+  down('KeyD', true);
+  ok(input.down('KeyD'), '握り続けていればリピートで戻る');
+
+  // 普通にkeyupが来た物は覚えから外す（次に⌘を離す時に巻き添えにしない）
+  input.keys.clear();
+  down('MetaLeft'); down('KeyD'); up('KeyD'); up('MetaLeft');
+  ok(!input.down('KeyD'), '離した物はそのまま落ちている');
+  down('KeyD');            // ⌘が無い所で押し直したので、もう覚えに入らない
+  up('MetaLeft');
+  ok(input.down('KeyD'), '⌘の外で押し直した物は巻き添えにしない');
+
+  // 「押した瞬間」の印はリピートで立てない（跳躍が連射になる）
+  input.keys.clear();
   input.endFrame();
   down('Space', true);
   ok(!input.pressed('Space'), 'リピートでは押した瞬間の印を立てない');

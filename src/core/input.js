@@ -23,14 +23,7 @@ const LOCK_KEYS = [
   'Digit6', 'Digit7', 'Digit8', 'Digit9',
 ];
 
-/* 修飾キー。**Commandを離した時に落とさない側。**
-   macOSがkeyupを送らないのは修飾キー以外なので、取りこぼすのもそちらだけ。
-   ここに走り(Shift)としゃがみ(Ctrl)が入っているのが大事で、
-   落としてしまうと走りながらCommandでしゃがんだ瞬間に棒立ちになる */
-const MODIFIERS = [
-  'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight',
-  'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight',
-];
+const META = ['MetaLeft', 'MetaRight'];
 
 export class Input {
   constructor(domElement) {
@@ -48,6 +41,9 @@ export class Input {
     this.wantFullscreen = true;
     this._pressedThisFrame = new Set();
     this._clickedThisFrame = new Set();
+    /* **Commandを押している間に押し下げたキー。** Commandを離す時に落とす相手。
+       理由は下のkeyupに書いてある（macOSがkeyupを送らない相手がここだけ） */
+    this._underMeta = new Set();
     this._onLockChange = null;
 
     addEventListener('keydown', (e) => {
@@ -71,13 +67,16 @@ export class Input {
       const typing = e.target instanceof HTMLElement
         && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable);
       if (this.locked && !typing) e.preventDefault();
-      /* **押している集合は、キーリピートでも入れ直す。**
-         下のkeyupでCommandを離した時に文字キーを落としているので、
-         本当に押し続けているキーはここで戻ってくる（押しっぱなしのキーは
-         OSが数十msごとにkeydownを送り続けるため）。
+      /* 押している集合は、キーリピートでも入れ直す。
          入れ直すのは集合だけで、「押した瞬間」の印は下へ置いたまま。
          あれをリピートで立てると、跳躍も装填も押しっぱなしで連射になる */
       this.keys.add(e.code);
+      /* **Commandを押している間に押し下げたキーを覚えておく。**
+         このキーたちだけが、離した時のkeyupを取りこぼす相手になる（下のkeyup参照）。
+         Commandを押す前から握っていたキーはここに入らないので、落とされない */
+      if (!META.includes(e.code) && (this.keys.has('MetaLeft') || this.keys.has('MetaRight'))) {
+        this._underMeta.add(e.code);
+      }
       if (e.repeat) return;
       this._pressedThisFrame.add(e.code);
       // 掴んでいない間も、これだけは止める。
@@ -89,26 +88,39 @@ export class Input {
       /* MacはCommandを押している間、他のキーのkeyupを一切よこさない。
          「Wで走る → Commandでしゃがむ → Wを離す → Commandを離す」と辿ると、
          Wのkeyupがどこにも来ないまま押しっぱなし扱いで残り、手を離しているのに
-         前へ走り続ける（戦域の外へ出て力尽きる）。だからCommandが離れた時に落とす。
+         前へ走り続ける（戦域の外へ出て力尽きる）。だからCommandが離れた時に片付ける。
 
-         **落とすのは文字キーだけ。修飾キーは残す。** 前は keys.clear() で
-         全部落としていて、Shiftまで落ちるので**走りながらCommandでしゃがむと、
-         離した瞬間に棒立ちになった**（実測で速度が0）。
-         keyupが来ないのは修飾キー以外なので、落とす相手もそちらだけでよい。
+         **落とすのは「Commandを押している間に押し下げたキー」だけ。**
+         ここを2回間違えている:
+           1回目 … keys.clear() で全部落とした。Shiftまで消えるので、
+                    走りながらCommandでしゃがむと離した瞬間に棒立ちになった
+           2回目 … 修飾キー以外を全部落とした。今度は**Wが消える**ので、
+                    Shift+Wを押しっぱなしでも前へ進まなくなった（同じ「止まる」）。
+                    「キーリピートが入れ直すから大丈夫」と考えていたが、
+                    macOSは別のキーを挟むと元のキーのリピートを再開しないので、
+                    **Wは戻ってこない**
 
-         落とした文字キーのうち、本当に押し続けている物は上のkeydownが
-         キーリピートで入れ直す。離していた物はリピートが来ないので落ちたまま。
-         **どちらの取りこぼしも自動で正しくなる**のがこの形の要点 */
-      if (e.code === 'MetaLeft' || e.code === 'MetaRight') {
-        for (const k of this.keys) if (!MODIFIERS.includes(k)) this.keys.delete(k);
+         正しい線引きは「いつ押されたか」。Commandを押す前から握っているキーは、
+         遊ぶ側がそのまま握り続けているキー（走りも前進もこれ）。
+         Commandを押してから押し下げたキーだけが、keyupを取りこぼす相手になる */
+      if (META.includes(e.code)) {
+        // 両方の⌘が離れてから片付ける。片方だけ離しても押している間は続きなので
+        if (!this.keys.has('MetaLeft') && !this.keys.has('MetaRight')) {
+          for (const k of this._underMeta) this.keys.delete(k);
+          this._underMeta.clear();
+        }
+      } else {
+        // 普通にkeyupが来た物は、もう取りこぼしの心配が無い
+        this._underMeta.delete(e.code);
       }
     });
-    addEventListener('blur', () => { this.keys.clear(); this.buttons.fill(false); });
+    addEventListener('blur', () => { this.keys.clear(); this._underMeta.clear(); this.buttons.fill(false); });
 
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.dom;
       if (!this.locked) {
         this.keys.clear();
+        this._underMeta.clear();
         this.buttons.fill(false);
         // 遊ぶのをやめたらキーボードを返す。返さないと、ロビーや選択画面でも
         // Ctrl+Wが効かないままになって、閉じたい時に閉じられない
