@@ -11,8 +11,11 @@
 //
 //   node tools/check-wallet.mjs
 import { readFileSync } from 'node:fs';
-import { COIN, coinsFor, addCoins, getCoins } from '../server/wallet.js';
+import {
+  COIN, coinsFor, addCoins, getCoins, SOLO, soloCoinsFor, addSoloCoins,
+} from '../server/wallet.js';
 import { STEPS } from '../server/migrations.js';
+import { SKIN_LIST, SHAPE_LIST } from '../src/net/protocol.js';
 
 let bad = 0;
 const ok = (c, msg) => { console.log(`  ${c ? '○' : '× 失敗:'} ${msg}`); if (!c) bad++; };
@@ -130,6 +133,141 @@ console.log('\n[8] 稼いだ枚数の届け方');
   ok(/setCoins\(coins\)/.test(acc), 'ホームの残高を差し替える口がある');
   ok(!/this\.user\.coins \+=/.test(acc),
     '**画面側で足し算をしていない**（台帳が持っている値だけが本当）');
+}
+
+/* --------------------------------------------------- 値段との釣り合い */
+
+console.log('\n[9] 値段との釣り合い');
+{
+  const paid = SKIN_LIST.filter((s) => s.price > 0).map((s) => s.price);
+  const cheapest = Math.min(...paid);
+  const dearest = Math.max(...paid, ...SHAPE_LIST.map((s) => s.price));
+
+  /* **入会祝いで一番安い物が1つ買えること。**
+     0枚から始めると、店を開いても全部が灰色で、
+     何が売っているのかを見る前に閉じることになる */
+  ok(COIN.SIGNUP >= cheapest,
+    `入会祝い(${COIN.SIGNUP}枚)で一番安いスキン(${cheapest}枚)が買える`);
+  ok(COIN.SIGNUP < cheapest * 2,
+    `**ただし2つは買えない**（${COIN.SIGNUP} < ${cheapest * 2}）。1回体験させるための額`);
+
+  // 4人デスマッチ1試合ぶんの目安。wallet.jsの説明に書いてある数字と同じ形で数える
+  const win = coinsFor({ kills: 12, rounds: 3 }, 3);
+  const lose = coinsFor({ kills: 5, rounds: 0 }, 3);
+  ok(win >= cheapest, `勝てば1試合で一番安いスキンが買える（${win}枚）`);
+  ok(Math.ceil(dearest / win) <= 8,
+    `一番高いスキン(${dearest}枚)が勝ち${Math.ceil(dearest / win)}試合で届く`);
+  ok(lose > 0 && lose < win, `負けても貰える（${lose}枚）が、勝ちより少ない`);
+
+  /* **1人プレイより対戦の方が旨いこと。**
+     ここが逆になると、対戦に人が来なくなる（対戦を増やしたくて上げた数字なので） */
+  ok(SOLO.PER_DAY < win * 2,
+    `**1人用の1日ぶん(${SOLO.PER_DAY}枚)が対戦2試合(${win * 2}枚)に届かない**`);
+}
+
+console.log('\n[10] 1人プレイの枚数（申告を信じない）');
+{
+  ok(soloCoinsFor({ wave: 10, kills: 80 }) === 10 * SOLO.WAVE + 80 * SOLO.KILL,
+    `ウェーブと撃破のぶんが乗る（${soloCoinsFor({ wave: 10, kills: 80 })}枚）`);
+  for (const [me, why] of [
+    [{ wave: -5, kills: -5 }, 'マイナス'],
+    [{ wave: NaN, kills: NaN }, '数でない'],
+    [{}, '空'],
+    [{ wave: 1e9, kills: 1e9 }, '桁が飛んでいる'],
+    [{ wave: '99999', kills: '99999' }, '文字列'],
+  ]) {
+    const n = soloCoinsFor(me);
+    ok(Number.isInteger(n) && n >= 0 && n <= SOLO.PER_RUN, `${why} → ${n}枚（0以上・上限以下）`);
+  }
+  ok(soloCoinsFor({ wave: 1e9, kills: 1e9 }) === SOLO.PER_RUN,
+    `**1回の上限で止まる（${SOLO.PER_RUN}枚）**`);
+}
+
+console.log('\n[11] 1日の天井を台帳の中で決めている');
+{
+  /* 偽の台帳。**行に鍵を掛けて読み直す形になっているか**まで見る。
+     ここが素のSELECTだと、同じ人の2回が同時に来た時に両方が同じ
+     「今日ぶん」を読んで、天井を2回ぶん突き抜ける */
+  const fake = (used, coins = 1000, soloAt = null) => {
+    const sqls = [];
+    const q = async (sql, params) => {
+      sqls.push({ sql: sql.replace(/\s+/g, ' ').trim(), params });
+      if (/^SELECT/i.test(sql.trim())) {
+        return { rows: [{ coins: String(coins), used: String(used), solo_at: soloAt }] };
+      }
+      if (/RETURNING coins/i.test(sql)) {
+        return { rows: [{ coins: String(coins + Number(params[1])) }] };
+      }
+      return { rows: [] };
+    };
+    return { q, sqls };
+  };
+
+  {
+    const { q, sqls } = fake(0);
+    const r = await addSoloCoins(q, '7', 280);
+    ok(r.ok && r.got === 280, `今日まだ受け取っていなければ満額（${r.got}枚）`);
+    const all = sqls.map((s) => s.sql).join(' | ');
+    ok(/BEGIN/.test(all) && /COMMIT/.test(all), '取引で囲んでいる');
+    ok(/FOR UPDATE/i.test(all),
+      '**行に鍵を掛けてから読んでいる**（同時に2回来ても天井を突き抜けない）');
+    ok(/ON CONFLICT DO NOTHING/i.test(all), '財布がまだ無い人はその場で作る');
+  }
+  {
+    // 今日ぶんが残り少ない時は、残りだけ渡す
+    const { q } = fake(SOLO.PER_DAY - 50);
+    const r = await addSoloCoins(q, '7', 280);
+    ok(r.ok && r.got === 50, `**天井までの残りしか渡さない**（280希望 → ${r.got}枚）`);
+  }
+  {
+    const { q, sqls } = fake(SOLO.PER_DAY);
+    const r = await addSoloCoins(q, '7', 280);
+    ok(!r.ok && /今日/.test(r.error), `使い切っていたら断る（${r.error}）`);
+    // 断った時も時刻は進める。進めないと、上限に当たっている間だけ連投し放題になる
+    ok(sqls.some((s) => /solo_at = now\(\)/.test(s.sql)), '断った時も受け取りの時刻は進める');
+  }
+  {
+    // 短い間隔での連投を弾く
+    const soon = new Date(Date.now() - (SOLO.MIN_GAP_S - 10) * 1000).toISOString();
+    const { q } = fake(0, 1000, soon);
+    const r = await addSoloCoins(q, '7', 280);
+    ok(!r.ok && /間を空けて/.test(r.error), `連投は弾く（${r.error}）`);
+  }
+  {
+    // 日付が変われば0から数え直す。SQLの側で「今日のぶんか」を見ている
+    const { q, sqls } = fake(0);
+    await addSoloCoins(q, '7', 100, new Date('2026-08-12T00:00:00Z'));
+    const sel = sqls.find((s) => /^SELECT/i.test(s.sql));
+    ok(/CASE WHEN solo_day = \$2 THEN solo_today ELSE 0 END/.test(sel.sql),
+      '**日付が違えば0から数え直す**（台帳の中で判定している）');
+    ok(sel.params[1] === '2026-08-12', `今日の日付を渡している（${sel.params[1]}）`);
+  }
+
+  const step = STEPS.find((s) => /solo_today/.test(s.sql));
+  ok(!!step, `1人用の記録を足す手順がある（${step?.n}番）`);
+  ok(/ALTER TABLE wallets/.test(step.sql), '**財布と同じ行に足している**（2つの表を跨がない）');
+  ok(/CHECK \(solo_today >= 0\)/.test(step.sql), 'マイナスを台帳が断る');
+}
+
+console.log('\n[12] 1人用の受け口');
+{
+  const idx = readFileSync(new URL('../server/index.js', import.meta.url), 'utf8');
+  ok(/url === '\/api\/solo'/.test(idx), '受け口がある');
+  ok(/if \(!me\) \{ sendJson\(res, 401/.test(idx), 'ログインしていない人には配らない');
+  ok(/db\.withClient\(\(q\) => addSoloCoins\(q, me\.id, want\)\)/.test(idx),
+    '取引を使うので1本の接続の上で呼んでいる');
+  ok(/const want = soloCoinsFor\(body\)/.test(idx),
+    '**枚数はサーバーが決める**（送られてきた枚数を使っていない）');
+  ok(!/body\.(coins|got|amount)/.test(idx), '枚数らしき物を受け取っていない');
+  ok(/addCoins\(db\.query, r\.user\.id, COIN\.SIGNUP\)/.test(idx), '登録した人に入会祝いを配る');
+
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  ok(/JSON\.stringify\(\{ wave: this\.director\.wave, kills: this\.kills \}\)/.test(main),
+    '送るのは到達ウェーブと撃破数だけ');
+  ok(/if \(!this\.account\?\.user\) return null/.test(main),
+    'ログインしていなければ送らない');
+  ok(/if \(res\.status === 404\) return null/.test(main),
+    '台帳を持たないサーバーでは黙って何も出さない');
 }
 
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);
