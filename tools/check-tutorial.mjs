@@ -18,9 +18,10 @@ const ok = (c, msg) => { console.log(`  ${c ? '○' : '× 失敗:'} ${msg}`); if
 // 素のスナップショット。1フレームぶん。上書きしたい所だけ渡す。
 // zの既定は湧き地点（そこに立っているだけでは移動系の課題が進まないこと）
 const snap = (over = {}) => ({
-  dt: 1 / 60, yaw: 0, pitch: 0, z: 18, speed: 0, onFloor: true,
-  sprinting: false, crouching: false, keyA: false, keyS: false, keyD: false,
-  shots: 0, kills: 0,
+  dt: 1 / 60, yaw: 0, pitch: 0, z: 26, speed: 0, onFloor: true,
+  sprinting: false, crouching: false, sliding: false,
+  keyW: false, keyA: false, keyS: false, keyD: false,
+  aimId: null, shots: 0, kills: 0,
   adsFactor: 0, reloading: 0, weaponIndex: 0, nadeKilled: false, healed: false,
   ...over,
 });
@@ -36,72 +37,100 @@ console.log('\n[1] ステップ機械: 全遷移');
 {
   const m = new TutorialMachine({ rifleIndex: 0, pistolIndex: 2, knifeIndex: 4 });
 
-  // look: 動かさなければ進まない。累積2.5radで進む
+  /* look: **的に合わせないと進まない。** 前は「合計2.5rad動かす」だけで、
+     適当に振り回せば終わっていた（何ができれば正解なのかが伝わらない）。
+     4枚を順に、それぞれ0.25秒ずつ乗せる */
   ok(m.step.id === 'look', '最初はlook');
   run(m, 120, {});
   ok(m.step.id === 'look', 'マウスを動かさなければ進まない');
-  // 1フレーム0.05radずつ回す。50フレームで2.5rad
-  for (let i = 0; i < 49; i++) m.update(snap({ yaw: i * 0.05 }));
-  ok(m.step.id === 'look', '2.45radではまだ進まない');
-  m.update(snap({ yaw: 49 * 0.05 }));
-  m.update(snap({ yaw: 50 * 0.05 }));
-  ok(m.step.id === 'move', '2.5radで進む');
+  run(m, 600, { aimId: 'passL' });
+  ok(m.step.id === 'look', 'この課題に無い的では進まない');
+  // かすっただけ（0.25秒に足りない）では数えない
+  run(m, 10, { aimId: 'up' });
+  run(m, 10, {});
+  run(m, 10, { aimId: 'down' });
+  run(m, 10, {});
+  ok(m.step.id === 'look', 'かすっただけでは数えない');
+  for (const id of ['up', 'down', 'left']) run(m, 20, { aimId: id });
+  ok(m.step.id === 'look', '3枚ではまだ');
+  run(m, 20, { aimId: 'right' });
+  ok(m.step.id === 'move', '4枚合わせて進む');
 
-  /* 移動系は「そこまで行けたか」の位置で見る。
-     時間で数えていた頃は、その場でキーを押して待つだけでクリアになって
-     「時間で解決してる感じ」と言われた。押しているだけでは進まないことを
-     それぞれの課題で確かめる */
+  /* W/S/A/Dは「そのキーで動けた距離」。キーを押しているだけ・
+     別のキーで動いているだけでは数えない。**4方向とも6m。**
+     前はS/A/Dが2mしか無く、1秒足らずで終わって足の感覚が残らなかった */
+  run(m, 300, { keyW: true, speed: 0 });
+  ok(m.step.id === 'move', 'Wを押して壁に詰まっていても進まない');
+  run(m, 70, { keyW: true, speed: 4.7 });   // 5.48m
+  ok(m.step.id === 'move', '5.5mではまだ');
+  run(m, 10, { keyW: true, speed: 4.7 });
+  ok(m.step.id === 'moveBack', 'Wで6m動いて進む（次はS）');
 
-  // move(W): 湧き地点に立っているだけでは進まない。奥まで歩いて進む
-  run(m, 120, {});
-  ok(m.step.id === 'move', '湧き地点に立っているだけでは進まない');
-  run(m, 5, { z: 10.5 });
-  ok(m.step.id === 'move', 'あと0.5m手前ではまだ');
-  run(m, 2, { z: 10 });
-  ok(m.step.id === 'moveBack', '8m歩いて進む（次はSの練習）');
-
-  /* S/A/Dは「そのキーで動けた距離」。キーを押しているだけ・
-     別のキーで動いているだけでは数えない */
   run(m, 300, { keyS: true, speed: 0 });
   ok(m.step.id === 'moveBack', 'Sを押して壁に詰まっていても進まない');
-  run(m, 30, { keyS: true, speed: 4.7 });   // 2.35m
-  ok(m.step.id === 'moveLeft', 'Sで2m動いて進む');
-  run(m, 60, { keyS: true, speed: 4.7 });
+  run(m, 80, { keyS: true, speed: 4.7 });   // 6.27m
+  ok(m.step.id === 'moveLeft', 'Sで6m動いて進む');
+  run(m, 80, { keyS: true, speed: 4.7 });
   ok(m.step.id === 'moveLeft', 'Sで動いてもAの課題は進まない');
-  run(m, 30, { keyA: true, speed: 4.7 });
-  ok(m.step.id === 'moveRight', 'Aで2m動いて進む');
-  run(m, 30, { keyD: true, speed: 4.7 });
-  ok(m.step.id === 'sprint', 'Dで2m動いて進む');
+  run(m, 80, { keyA: true, speed: 4.7 });
+  ok(m.step.id === 'moveRight', 'Aで6m動いて進む');
+  run(m, 80, { keyD: true, speed: 4.7 });
+  ok(m.step.id === 'lookMove', 'Dで6m動いて進む（次は歩きながら見る）');
+
+  /* lookMove: **足が止まっている間は数えない。**
+     ここが効いていないと、止まって左右を見るだけで終わって、
+     「歩きながら視点を変える」を一度もやらないまま進む */
+  run(m, 600, { aimId: 'passL', speed: 0 });
+  ok(m.step.id === 'lookMove', '止まったまま合わせても進まない');
+  run(m, 20, { aimId: 'passL', speed: 4.7 });
+  ok(m.step.id === 'lookMove', '1枚ではまだ');
+  run(m, 20, { aimId: 'passR', speed: 4.7 });
+  ok(m.step.id === 'sprint', '歩きながら2枚合わせて進む');
 
   // sprint: 距離で見る。キーを押しているだけ（進んでいない）では数えない
-  run(m, 300, { z: 10, sprinting: true, speed: 0 });
+  run(m, 300, { sprinting: true, speed: 0 });
   ok(m.step.id === 'sprint', '壁に向かって走っても進まない（距離が出ていない）');
-  run(m, 80, { z: 8, sprinting: true, speed: 7.4 });   // 9.87m
-  ok(m.step.id === 'sprint', '9.9mではまだ');
-  run(m, 3, { z: 8, sprinting: true, speed: 7.4 });
-  ok(m.step.id === 'jump', '10m走って進む');
+  run(m, 94, { sprinting: true, speed: 7.4 });   // 11.6m
+  ok(m.step.id === 'sprint', '11.6mではまだ');
+  run(m, 5, { sprinting: true, speed: 7.4 });
+  ok(m.step.id === 'slide', '12m走って進む（次は滑り込み）');
+
+  /* slide: **走りの直後に置いてある。** 前はしゃがみ（梁）の後ろにあって、
+     助走が2mしか無かった（「場所が間違ってるでしょ」）。
+     位置では見ない。引き返して助走を付け直すのも正解 */
+  run(m, 300, { sprinting: true, speed: 7.4 });
+  ok(m.step.id === 'slide', '走っているだけでは進まない');
+  run(m, 2, { sliding: true });
+  ok(m.step.id === 'jump', '滑れたら進む');
 
   // jump: 2つ目の段の奥に立てたか（跳ばないと辿り着けない地形なので位置が証明）
-  run(m, 120, { z: 1, onFloor: false });
+  run(m, 120, { z: -17, onFloor: false });
   ok(m.step.id === 'jump', '段の手前で跳んでいるだけでは進まない');
-  run(m, 2, { z: -2 });
+  run(m, 2, { z: -21 });
   ok(m.step.id === 'crouch', '段を越え切って進む');
 
   // crouch: 梁の奥。しゃがんでいるだけ（くぐっていない）では進まない
-  run(m, 300, { z: -3, crouching: true });
+  run(m, 300, { z: -23, crouching: true });
   ok(m.step.id === 'crouch', 'しゃがんで待っているだけでは進まない');
-  run(m, 2, { z: -6 });
-  ok(m.step.id === 'slide', '梁をくぐり切って進む');
+  run(m, 2, { z: -26 });
+  ok(m.step.id === 'switch', '梁をくぐり切って進む（次は持ち替え）');
 
-  /* slide: 走っているだけでは進まない。滑れた時だけ。
-     **位置では見ない。** 引き返して助走を付け直すのも正解なので、
-     どこで滑ってもよいことにしてある（tutorial.jsのstepのコメント） */
-  run(m, 300, { z: -6, sprinting: true, speed: 7.4 });
-  ok(m.step.id === 'slide', '走っているだけでは進まない');
-  // 滑れたら進む。**この時点で既に100発撃っていた人**を再現する
-  // （入場フレームの基準取りにこの100が乗ることを次の項で確かめる）
-  run(m, 2, { z: -6, sliding: true, shots: 100 });
-  ok(m.step.id === 'shoot', '滑れたら進む');
+  /* switch / knife は**梁の先の開けた所**でやる。
+     前はナイフの8m歩きが射撃線（土嚢と的の前）にあった */
+  run(m, 10, { z: -26, weaponIndex: 0 });
+  ok(m.step.id === 'switch', '最初からライフルのままでは進まない');
+  run(m, 5, { z: -26, weaponIndex: 2 });
+  ok(m.step.id === 'switch', 'ピストルに替えただけではまだ');
+  run(m, 2, { z: -26, weaponIndex: 0 });
+  ok(m.step.id === 'knife', 'ライフルへ戻して進む（次はナイフ）');
+
+  run(m, 300, { z: -26, weaponIndex: 4, speed: 0 });
+  ok(m.step.id === 'knife', 'ナイフを持って立っているだけでは進まない');
+  run(m, 300, { z: -26, weaponIndex: 0, speed: 6.3 });
+  ok(m.step.id === 'knife', 'ライフルのまま動いても進まない');
+  // **この時点で既に100発撃っていた人**を再現（次のshootの基準取りに乗る）
+  run(m, 80, { z: -26, weaponIndex: 4, speed: 6.3, shots: 100 });   // 8.4m
+  ok(m.step.id === 'shoot', 'ナイフで8m動いて進む（次は撃つ）');
 
   // shoot: 入場時の累積は基準から除外。+5発で進む
   run(m, 10, { shots: 100 });
@@ -120,27 +149,13 @@ console.log('\n[1] ステップ機械: 全遷移');
   // reload: 完了エッジ。リロード中では進まない
   run(m, 60, { reloading: 1.2 });
   ok(m.step.id === 'reload', 'リロード中はまだ');
-  run(m, 2, { reloading: 0 });
-  ok(m.step.id === 'switch', '巻き終わりで進む');
+  /* 巻き終わりで的へ。**この時点で既に7体倒していた人**を再現する。
+     runは2フレーム流すので、2フレーム目が的の課題の入場フレームになり、
+     そこで基準(7)が取られる。取れていないと、次の項が素通りする */
+  run(m, 2, { reloading: 0, kills: 7 });
+  ok(m.step.id === 'target', '巻き終わりで進む（次は的）');
 
-  // switch: pistol(2)→rifle(0)の順でだけ進む。
-  // この時点で既に7体倒していた人を再現（次のtargetの基準取りに乗る）
-  run(m, 10, { weaponIndex: 0, kills: 7 });
-  ok(m.step.id === 'switch', '最初からライフルのままでは進まない');
-  run(m, 5, { weaponIndex: 2, kills: 7 });
-  ok(m.step.id === 'switch', 'ピストルに替えただけではまだ');
-  run(m, 2, { weaponIndex: 0, kills: 7 });
-  ok(m.step.id === 'knife', 'ライフルへ戻して進む（次はナイフ）');
-
-  // knife: 持って立っているだけ・別の武器で動くだけでは進まない
-  run(m, 300, { weaponIndex: 4, speed: 0, kills: 7 });
-  ok(m.step.id === 'knife', 'ナイフを持って立っているだけでは進まない');
-  run(m, 300, { weaponIndex: 0, speed: 6.3, kills: 7 });
-  ok(m.step.id === 'knife', 'ライフルのまま動いても進まない');
-  run(m, 80, { weaponIndex: 4, speed: 6.3, kills: 7 });   // 8.4m
-  ok(m.step.id === 'target', 'ナイフで8m動いて進む');
-
-  // target: 入場時基準の増分3体
+  // target: 入場時基準の増分3体。この時点で既に7体倒していた人を再現
   run(m, 5, { kills: 7 });
   ok(m.step.id === 'target', '入場前の7体では進まない');
   run(m, 2, { kills: 9 });
@@ -236,18 +251,24 @@ console.log('\n[3] 小ステージ: 実際に組んで寸法を測る');
   const mats = new Proxy({}, { get: () => SHARED });
   const level = buildTutorialLevel(mats);
 
-  // 軽さ。ここが膨らむと「未経験者の非力な端末で動く」が崩れる
+  const L = level.layout;
+  ok(!!L, '通路の割り振り(layout)を出している');
+
+  /* 軽さ。ここが膨らむと「未経験者の非力な端末で動く」が崩れる。
+     案内の的(6枚)と床の線(1枚)が別メッシュなので、地形の分と合わせて上限を上げてある
+     （案内は光を無視する材質で塗るので、地形と同じメッシュには混ぜられない） */
   let meshes = 0, tris = 0, noColor = 0;
   level.root.traverse((o) => {
     if (!o.isMesh) return;
     meshes++;
     const g = o.geometry;
     tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
-    if (!g.attributes.color) noColor++;
   });
-  ok(meshes <= 8, `メッシュは8枚まで（今${meshes}枚）`);
+  // 色属性が要るのは地形だけ（vertexColorsで動いている材質を使うのはそちら）
+  level.solids.traverse((o) => { if (o.isMesh && !o.geometry.attributes.color) noColor++; });
+  ok(meshes <= 14, `メッシュは14枚まで（今${meshes}枚）`);
   ok(tris < 2000, `三角形は2000未満（今${Math.round(tris)}）`);
-  ok(noColor === 0, `色属性の無いジオメトリが無い（真っ黒事故防止。今${noColor}枚）`);
+  ok(noColor === 0, `地形に色属性の無いジオメトリが無い（真っ黒事故防止。今${noColor}枚）`);
 
   // 湧き地点の真下に床がある
   const down = new THREE.Vector3(0, -1, 0);
@@ -263,44 +284,93 @@ console.log('\n[3] 小ステージ: 実際に組んで寸法を測る');
     new THREE.Vector3(x, h - R, z),
     R,
   );
-  // 梁(z=-4): 立ち姿(1.74)は当たる。しゃがみ(1.06)は通る
-  ok(!!level.octree.capsuleIntersect(capsule(0, -4, 1.74)),
+  // 梁: 立ち姿(1.74)は当たる。しゃがみ(1.06)は通る
+  ok(!!level.octree.capsuleIntersect(capsule(0, L.BEAM, 1.74)),
     'くぐり梁: 立ったままでは詰まる');
-  ok(!level.octree.capsuleIntersect(capsule(0, -4, 1.06)),
+  ok(!level.octree.capsuleIntersect(capsule(0, L.BEAM, 1.06)),
     'くぐり梁: しゃがめば通れる');
-  // 段差(z=4): 歩いて登れず(0.58超)、跳べば越えられる(0.99未満)
+  // 段差: 歩いて登れず(0.58超)、跳べば越えられる(0.99未満)
   const boxTop = (() => {
     const hit = level.octree.rayIntersect(
-      new THREE.Ray(new THREE.Vector3(0, 3, 4), down),
+      new THREE.Ray(new THREE.Vector3(0, 3, L.JUMP_A), down),
     );
     return hit ? 3 - hit.distance : 0;
   })();
   ok(boxTop > 0.58, `段の高さ${boxTop.toFixed(2)}m > 自動乗り越え0.58m（歩いては登れない）`);
   ok(boxTop < 0.99, `段の高さ${boxTop.toFixed(2)}m < 跳躍の頂点0.99m（跳べば越えられる）`);
 
-  // 射撃線(0, 目の高さ, -8)から的3点へ視線が通る（土嚢や梁で塞がっていない）
-  const eye = new THREE.Vector3(0, 1.58, -8.6);
-  for (const s of level.enemySpawns) {
-    const to = s.clone().setY(1.3);
+  // 射撃線から的3点へ視線が通る（土嚢や梁で塞がっていない）
+  const eye = new THREE.Vector3(0, 1.58, L.SANDBAG - 0.6);
+  for (const sp of level.enemySpawns) {
+    const to = sp.clone().setY(1.3);
     const dir = to.clone().sub(eye);
     const dist = dir.length();
     const hit = level.octree.rayIntersect(new THREE.Ray(eye.clone(), dir.normalize()));
     ok(!hit || hit.distance > dist,
-      `射撃線から的(${s.x}, ${s.z})へ視線が通る`);
+      `射撃線から的(${sp.x}, ${sp.z})へ視線が通る`);
   }
+
+  /* **練習広場が本当に広いか。** ここが狭いと、6m動く課題が壁で詰む。
+     遊んで「SもAもDもちゃんと何メートルか用意してあげて」と言われた所なので、
+     4方向とも6m歩ける余地があることを実測する */
+  const sp0 = level.playerSpawn;
+  for (const [label, dx, dz] of [['前', 0, -1], ['後ろ', 0, 1], ['左', -1, 0], ['右', 1, 0]]) {
+    const at = capsule(sp0.x + dx * 6, sp0.z + dz * 6, 1.74);
+    ok(!level.octree.capsuleIntersect(at), `広場: 湧き地点から${label}へ6m立てる`);
+  }
+
+  /* 狙う的。**湧いた所から4枚とも見えていること。**
+     壁の中や背中側に置くと、マウスに慣れていない人が永久に見つけられない */
+  const eye0 = new THREE.Vector3(sp0.x, sp0.y + 0.38, sp0.z);
+  const byId = Object.fromEntries(level.aimTargets.map((t) => [t.id, t]));
+  ok(level.aimTargets.length === 6, `案内の的が6枚ある（今${level.aimTargets.length}枚）`);
+  for (const id of ['up', 'down', 'left', 'right']) {
+    const t = byId[id];
+    ok(!!t, `的「${id}」がある`);
+    if (!t) continue;
+    const dir = t.pos.clone().sub(eye0);
+    const dist = dir.length();
+    const hit = level.octree.rayIntersect(new THREE.Ray(eye0.clone(), dir.normalize()));
+    ok(!hit || hit.distance > dist, `湧き地点から的「${id}」が見える`);
+  }
+  // 上下左右にちゃんと散っているか。同じ方向に固まっていたら練習にならない
+  ok(byId.up.pos.y > eye0.y + 1, `上の的は上にある（y=${byId.up.pos.y}）`);
+  ok(byId.down.pos.y < eye0.y - 0.8, `下の的は下にある（y=${byId.down.pos.y}）`);
+  ok(byId.left.pos.x < -4, `左の的は左にある（x=${byId.left.pos.x}）`);
+  ok(byId.right.pos.x > 4, `右の的は右にある（x=${byId.right.pos.x}）`);
+  // 歩きながら狙う2枚は、通り過ぎる横に置く（正面だと歩くだけで乗る）
+  ok(Math.abs(byId.passL.pos.x) > 6 && Math.abs(byId.passR.pos.x) > 6,
+    '歩きながらの的は通路の横にある');
+
+  /* **走りと滑り込みの助走路。** ここが一番の直し所で、前はしゃがみの後ろに
+     滑り込みを置いていて助走が2mしか無かった。
+     境(YARD_FAR)から最初の段(JUMP_A)まで、走り12m＋滑り6mが入る長さが要る */
+  const runway = L.YARD_FAR - L.JUMP_A;
+  ok(runway >= 24, `助走路が${runway}m（走り12m＋滑り6mに足りる）`);
+  // 助走路に障害物が無いこと。1mおきに立ってみる
+  let blocked = 0;
+  for (let z = L.YARD_FAR - 1; z > L.JUMP_A + 1; z -= 1) {
+    if (level.octree.capsuleIntersect(capsule(0, z, 1.74))) blocked++;
+  }
+  ok(blocked === 0, `助走路がまっすぐ空いている（詰まり${blocked}箇所）`);
+
+  /* ナイフで8m歩く区間。梁の奥から土嚢まで空いていること。
+     前はここが射撃線の中にあって、的に撃たれながら歩く形だった */
+  const knifeLane = L.BEAM - L.SANDBAG;
+  ok(knifeLane >= 10, `ナイフの区間が${knifeLane}m（課題の8mが入る）`);
 
   /* 課題の目的地(goalZ)が仕掛けの座標と噛み合っているか。
      表(tutorial.js)と通路(tutorial-level.js)は別ファイルなので、
-     片方だけ動かすと「段の手前なのにクリア」「くぐり切ったのにクリアされない」になる。
-     仕掛けの端の座標は通路の実装と同じ値（段: z=0で奥行き1.6→奥端-0.8、
-     梁: z=-4で奥行き1.4→奥端-4.7、最初の段の手前端4.8、土嚢-8） */
-  const gates = Object.fromEntries(TUTORIAL_STEPS.map((s) => [s.id, s]));
-  ok(gates.move.goalZ < level.playerSpawn.z - 4 && gates.move.goalZ > 4.8,
-    `歩きの目的地(z=${gates.move.goalZ})は湧きと最初の段の間`);
-  ok(gates.jump.goalZ < -0.8 && gates.jump.goalZ > -3.3,
+     片方だけ動かすと「段の手前なのにクリア」「くぐり切ったのにクリアされない」になる */
+  const gates = Object.fromEntries(TUTORIAL_STEPS.map((st) => [st.id, st]));
+  ok(gates.jump.goalZ < L.JUMP_B - 0.8 && gates.jump.goalZ > L.BEAM + 0.7,
     `ジャンプの目的地(z=${gates.jump.goalZ})は2つ目の段の奥・梁の手前`);
-  ok(gates.crouch.goalZ < -4.7 && gates.crouch.goalZ > -7.6,
+  ok(gates.crouch.goalZ < L.BEAM - 0.7 && gates.crouch.goalZ > L.SANDBAG + 0.4,
     `しゃがみの目的地(z=${gates.crouch.goalZ})は梁の奥・土嚢の手前`);
+  // 広場でやる課題は位置で見ない（広場は先へ進む場所ではない）
+  for (const id of ['look', 'move', 'moveBack', 'moveLeft', 'moveRight', 'lookMove']) {
+    ok(gates[id].goalZ === undefined, `${id}は位置で判定していない`);
+  }
 
   // 決まりごとのソース検査。**コメントを外してから見る**
   // （「呼ぶな」の理由コメントに名前が出ているので、生のまま見ると誤検知する。
@@ -310,7 +380,8 @@ console.log('\n[3] 小ステージ: 実際に組んで寸法を測る');
     .replace(/^\s*\/\/.*$/mg, '');
   ok(!/addMacroVariation|addGroundBlend/.test(src),
     '材質の混合層を二重適用していない（シェーダ破壊防止）');
-  ok(!/\.clone\(/.test(src), '材質をcloneしていない（着弾音・足音の引き当てが外れる）');
+  ok(!/mats\.[a-zA-Z]+\.clone\(/.test(src) && !/mat\.clone\(/.test(src),
+    '材質をcloneしていない（着弾音・足音の引き当てが外れる）');
   // サーバーが読んでいない（チュートリアルは通信しない決まり）
   const { execSync } = await import('node:child_process');
   const hit = execSync(

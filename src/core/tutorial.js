@@ -26,72 +26,116 @@
 // **そこに立っていること自体が「できた」の証明**になる。
 // goalZは通路のZ座標（+側で湧いて-側へ進む）。仕掛けの座標と噛み合っているかは
 // tools/check-tutorial.mjsが地形を実際に組んで突き合わせる
+/* 的に照準を「乗せた」と認める秒数。
+   一瞬かすっただけで数えると、マウスを一振りするだけで4枚まとめて緑になって、
+   狙いを止める練習にならない。0.25秒は「意識して止めた」と「通り過ぎた」の境 */
+const AIM_HOLD_S = 0.25;
+// 歩きながらの課題で「足が動いている」と認める速さ(m/s)。歩きは4.7m/s
+const MOVE_MIN_SPEED = 1.5;
+
 export const TUTORIAL_STEPS = [
+  /* **一番慣れていないのはマウス。** 前は「合計2.5ラジアン動かす」だけで、
+     狙う物が無かった。適当に振り回せば終わるので、**何ができれば正解なのかが
+     伝わらない**（遊んで「もうちょい上下左右に的を作って、それに合わせないと
+     進まないのにしてほしい」と言われた）。
+     4枚の的を順に狙わせる形にする。狙えた的は緑になる（tutorial-level.jsのsetAimDone） */
   {
     id: 'look',
-    main: 'マウスを動かして、まわりを見回す',
-    sub: '画面の向きはマウスで変わる',
-    goal: 2.5,   // ラジアン。ゆっくりでも2〜3秒で届く量
+    main: 'マウスを動かして、4枚の的に照準を合わせる',
+    sub: '上・下・左・右に1枚ずつ。合わせると緑になる',
+    aim: ['up', 'down', 'left', 'right'],
   },
   /* 移動キーは1つずつ練習する。まとめて「WASDで歩く」だと、
      Wだけで奥へ着いてクリアになり、A/S/Dを一度も押さないまま進む
      （「それぞれで案内して」と言われた 2026-08-09）。
      Wは通路の位置で、S/A/Dは「そのキーで実際に動けた距離」で見る
      （sprintと同じ理屈: 壁に向かって押しても進まなければ数えない） */
+  /* 4方向とも**同じ6m**にしてある。前はWだけ8mで、S/A/Dは2mだった。
+     2mは1秒足らずで終わるので「押した」で終わり、**その足で動く感覚が残らない**
+     （遊んで「SもAもDもちゃんと何メートルか用意してあげて」と言われた）。
+     広場は20m×22mあるので、どこから始めても6m動ける
+     （壁に詰まっても、視点を回せばA/Dの向きはついてくる） */
   {
     id: 'move',
-    main: 'W で通路の奥へ歩く',
-    sub: 'Wが前。まずは奥へ進む',
-    goalZ: 10,   // 湧き(z=18)から8m歩いた所
+    main: 'W で前の線まで歩く',
+    sub: 'Wが前。床の水色の線が6m先',
+    goal: 6,     // そのキーで動けた距離(m)
   },
   {
     id: 'moveBack',
-    main: 'S で少し下がる',
+    main: 'S で後ろの線まで下がる',
     sub: '撃ち合いながら間合いを取る時に使う',
-    goal: 2,     // 動けた距離(m)
+    goal: 6,
   },
   {
     id: 'moveLeft',
-    main: 'A で左へ動く',
+    main: 'A で左の線まで動く',
     sub: '左右の動きは弾をかわす基本',
-    goal: 2,
+    goal: 6,
   },
   {
     id: 'moveRight',
-    main: 'D で右へ動く',
+    main: 'D で右の線まで動く',
     sub: '左右の動きは弾をかわす基本',
-    goal: 2,
+    goal: 6,
+  },
+  /* **歩きながら視点を変える。** ここが一番の山で、前は課題そのものが無かった。
+     FPSは「足と手を別々に動かす」ゲームなので、止まって狙う・歩くだけ、を
+     別々にできても本編では何もできない。
+     的を通路の外の横に置いてあるので、歩いて通り過ぎながら首を振るしかない */
+  {
+    id: 'lookMove',
+    main: '歩きながら、左右の的に照準を合わせる',
+    sub: '足を止めずに。止まっている間は数えない',
+    aim: ['passL', 'passR'],
+    moving: true,
   },
   {
     id: 'sprint',
     main: 'Wで前に進みながら 左Shift で走る',
     sub: '前に進んでいる間だけ。息は3秒で切れて、体力の下の細い棒が戻るとまた走れる',
-    goal: 10,    // 走った距離(m)。速さ7.4m/sなので1.5秒ほど走れば届く
+    goal: 12,    // 走った距離(m)。助走路は28mあるので端まで使い切らない
+  },
+  /* 滑り込み。**走りの直後に置く。** ここが一番直したかった所で、
+     前はしゃがみ（梁）の後ろに置いていた。梁の先は助走が2mしか無く、
+     滑るのに要る6.3m/sへ乗る前に土嚢へ着く（「場所が間違ってるでしょ」）。
+     今は走りと同じ助走路の続きなので、**走り切ったその足でしゃがみを押せば出る。**
+
+     位置ではなく「1回滑れたか」で見る。どこで滑ってもよいことにしておくと、
+     引き返して助走を付け直すのも正解になる（位置で縛ると詰む人が出る） */
+  {
+    id: 'slide',
+    main: '走ったまま Ctrl か C でスライディング',
+    sub: 'トップスピードに乗っている時だけ出る。低い姿勢のまま前へ滑り込む',
+    goal: 1,     // 回
   },
   {
     id: 'jump',
     main: 'Space でジャンプして、2つの段差を越える',
     sub: '段の手前で押すと登れる',
-    goalZ: -2,   // 2つ目の段(z=0)の奥。跳ばないと辿り着けない
+    goalZ: -21,  // 2つ目の段(z=-20)の奥。跳ばないと辿り着けない
   },
   {
     id: 'crouch',
     main: 'Ctrl か C でしゃがんで、低い梁をくぐる',
-    sub: '押している間だけしゃがむ',
-    goalZ: -6,   // 梁(z=-4)の奥。しゃがまないと通れない
+    sub: '押している間だけしゃがむ。走っていなければ滑らない',
+    goalZ: -26,  // 梁(z=-24)の奥。しゃがまないと通れない
   },
-  /* 滑り込み。**走りとしゃがみの両方を教えた後に置く。**
-     押すキーはしゃがみと同じで、走っている時だけ意味が変わる操作なので、
-     どちらか片方しか知らない状態で出しても「なぜ今だけ違うのか」が伝わらない。
-
-     位置ではなく「1回滑れたか」で見る。梁の先(z=-6)から通路の端(z=-30)まで
-     24mあるので走る場所には困らないが、**どこで滑ってもよい**ことにしておくと、
-     引き返して助走を付け直すのも正解になる（位置で縛ると詰む人が出る） */
+  /* 持ち替えとナイフは**梁の先の開けた所**でやる。
+     前はナイフの8m歩きが射撃線（土嚢と的の前）にあって、
+     的に撃たれながら歩く形になっていた（「ナイフを構えさせる場所も変」）。
+     今は梁(-24)から土嚢(-40)まで14m空けてあるので、8m歩いても的に着かない */
   {
-    id: 'slide',
-    main: '走りながら Ctrl か C でスライディング',
-    sub: 'トップスピードに乗っている時だけ出る。低い姿勢のまま前へ滑り込む',
-    goal: 1,     // 回
+    id: 'switch',
+    main: '2 でピストルに持ち替えて、1 でライフルに戻す',
+    sub: '数字キーが武器の番号',
+    goal: 1,
+  },
+  {
+    id: 'knife',
+    main: '3 でナイフを持って、そのまま8m歩く',
+    sub: 'ナイフは足が少し速くなる。戦う前に 1 か 2 へ戻す',
+    goal: 8,     // ナイフを持ったまま動けた距離(m)。速さの違いを体で感じる長さ
   },
   {
     id: 'shoot',
@@ -110,18 +154,6 @@ export const TUTORIAL_STEPS = [
     main: 'R で弾を入れ替える（リロード）',
     sub: '撃ち合いの前に満タンにしておく',
     goal: 1,
-  },
-  {
-    id: 'switch',
-    main: '2 でピストルに持ち替えて、1 でライフルに戻す',
-    sub: '数字キーが武器の番号',
-    goal: 1,
-  },
-  {
-    id: 'knife',
-    main: '3 でナイフを持つと、足が少し速くなる',
-    sub: '移動したい時はナイフ。戦う前に 1 か 2 へ戻す',
-    goal: 8,     // ナイフを持ったまま動けた距離(m)。速さの違いを体で感じる長さ
   },
   {
     id: 'target',
@@ -165,9 +197,19 @@ export class TutorialMachine {
     this._entered = false; // 入場時の基準をまだ取っていない
     this._base = 0;       // count系の入場時基準（shots/kills）
     this._prev = null;    // 前フレームのスナップショット（エッジ検出用）
+    /* 狙う課題。どの的をもう合わせたか(_hitAim)と、
+       今どれに何秒乗っているか(_aimOn / _aimHold)。
+       **一瞬かすっただけでは数えない。** 数えると、マウスを一振りするだけで
+       4枚まとめて緑になって、狙いを止める練習にならない */
+    this._hitAim = new Set();
+    this._aimOn = null;
+    this._aimHold = 0;
   }
 
   get step() { return this.done ? null : TUTORIAL_STEPS[this.at]; }
+
+  /** もう合わせた的のid。画で緑にするのに使う（main.jsの_tutorialFrame） */
+  get aimHits() { return this._hitAim; }
 
   /**
    * 毎フレーム呼ぶ。達成して次へ進んだフレームだけ 'advance' を返す。
@@ -198,23 +240,36 @@ export class TutorialMachine {
 
     let hit = false;
     switch (s.id) {
-      case 'look': {
-        if (prev) {
-          this._progress += Math.abs(snap.yaw - prev.yaw) + Math.abs(snap.pitch - prev.pitch);
+      /* 狙う課題(look / lookMove)。表のaimに並んだidを全部合わせたら達成。
+         movingが付いている課題は、**足が止まっている間は数えない** */
+      case 'look':
+      case 'lookMove': {
+        const moving = !s.moving || snap.speed > MOVE_MIN_SPEED;
+        const on = moving && snap.aimId && s.aim.includes(snap.aimId) ? snap.aimId : null;
+        if (on !== this._aimOn) { this._aimOn = on; this._aimHold = 0; }
+        if (on) {
+          this._aimHold += snap.dt;
+          if (this._aimHold >= AIM_HOLD_S) this._hitAim.add(on);
         }
-        hit = this._progress >= s.goal;
+        this._progress = this._hitAim.size;
+        hit = s.aim.every((id) => this._hitAim.has(id));
         break;
       }
-      /* 移動系は位置で見る（表の頭のコメント参照）。
+      /* 位置で見る課題（表の頭のコメント参照）。
          先に奥まで進んでいた人は課題に入った瞬間クリアになるが、それでいい。
          段差の奥に立っている＝跳んだことは地形が保証している */
-      case 'move':
       case 'jump':
       case 'crouch':
         hit = snap.z <= s.goalZ;
         break;
-      /* S/A/Dは「そのキーを押しながら動けた距離」。時間でなく距離なのは
-         sprintと同じ理由（壁に向かって押しても進まなければ数えない） */
+      /* W/S/A/Dは「そのキーを押しながら動けた距離」。時間でなく距離なのは
+         sprintと同じ理由（壁に向かって押しても進まなければ数えない）。
+         **Wも位置ではなく距離で見る。** 広場は先へ進む場所ではないので、
+         「どこまで行けたか」では測れない */
+      case 'move':
+        if (snap.keyW) this._progress += snap.speed * snap.dt;
+        hit = this._progress >= s.goal;
+        break;
       case 'moveBack':
         if (snap.keyS) this._progress += snap.speed * snap.dt;
         hit = this._progress >= s.goal;
@@ -284,6 +339,11 @@ export class TutorialMachine {
     this._progress = 0;
     this._phase = 0;
     this._entered = false;
+    // 狙った的の記録も次の課題へ持ち越さない（lookで合わせた4枚が
+    // lookMoveの2枚と混ざると、歩かずにクリアになる）
+    this._hitAim.clear();
+    this._aimOn = null;
+    this._aimHold = 0;
     if (this.at >= TUTORIAL_STEPS.length) this.done = true;
     return 'advance';
   }
@@ -298,13 +358,17 @@ export class TutorialMachine {
     if (!s) return { main: '', sub: '' };
     let left = '';
     switch (s.id) {
-      case 'move': case 'jump': case 'crouch': {
+      case 'jump': case 'crouch': {
         // 目的地までの距離。位置はupdateで見た最後の値から出す
         const z = this._prev?.z;
         if (typeof z === 'number') left = `あと${Math.max(1, Math.ceil(z - s.goalZ))}m先へ`;
         break;
       }
-      case 'moveBack': case 'moveLeft': case 'moveRight': case 'sprint': case 'knife':
+      case 'look': case 'lookMove':
+        left = `あと${Math.max(0, s.aim.length - this._hitAim.size)}枚`;
+        break;
+      case 'move': case 'moveBack': case 'moveLeft': case 'moveRight':
+      case 'sprint': case 'knife':
         left = `あと${Math.max(1, Math.ceil(s.goal - this._progress))}m`;
         break;
       case 'shoot':
