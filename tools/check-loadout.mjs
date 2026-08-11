@@ -169,5 +169,73 @@ console.log('\n[6] 持ち物の並びに近接と投擲が最後に来ている'
     `銃が先、近接と投擲が後ろ (${kinds.join(' → ')})`);
 }
 
+console.log('\n[7] 数字キーに載らない枠（Qの狙撃銃・Eのショットガン・5で見る）');
+{
+  /* 2026-08-11に足した。「射撃訓練の時だけはショットガン出しておいて」と
+     「5を押したら武器を見るモーション」を同じ日に言われて、**5番が衝突した。**
+
+     持ち物(carry)へショットガンを入れると、main.jsのDigitの回しが
+     carry.length ぶん回るので自動で5番になる。5番は見るモーションに使うので、
+     Qの狙撃銃と同じ「carryの外側の例外枠」へ入れてある。
+
+     ここで見たいのは**枠が2つ別々にあること**。
+     1つを使い回すと、訓練場で狙撃銃とショットガンのどちらか片方しか持てない */
+  const { WeaponSystem, WEAPONS } = await import('../src/player/weapons.js');
+  const ws = new WeaponSystem(new THREE.Scene(),
+    new THREE.PerspectiveCamera(75, 1.6, 0.05, 900),
+    new THREE.PerspectiveCamera(55, 1.6, 0.002, 12), new THREE.Scene());
+
+  const sniperAt = WEAPONS.findIndex((w) => w.id === 'sniper');
+  const shotgunAt = WEAPONS.findIndex((w) => w.id === 'shotgun');
+  ok(!ws.carry.includes(sniperAt), '狙撃銃は数字キーの持ち物に入っていない');
+  ok(!ws.carry.includes(shotgunAt), 'ショットガンも数字キーの持ち物に入っていない');
+  ok(ws.carry.length < 5,
+    `数字キーの持ち物は4本まで（${ws.carry.length}本）。5番を見るモーションに使えている`);
+
+  // 枠に入れていない武器へは替われない
+  ok(!ws.switchTo(shotgunAt), '枠に入れる前はショットガンへ替われない');
+  ws.rangeIndex = shotgunAt;
+  ws.switching = 0;
+  ok(ws.switchTo(shotgunAt), 'Eの枠へ入れたら替われる');
+  // **2つの枠が別々であること。** ここが本題
+  ws.quickIndex = sniperAt;
+  ws.switching = 0;
+  ok(ws.rangeIndex === shotgunAt && ws.quickIndex === sniperAt,
+    'Qの枠とEの枠が同時に埋まる（訓練場で両方持てる）');
+
+  console.log('\n[8] 武器を見る動き（5キー）');
+  ws.switching = 0;
+  ws.switchTo(ws.carry[0]);
+  ws.switching = 0;
+  ok(ws.startInspect(), '手が空いていれば見られる');
+  ok(ws.inspect > 0, `残り時間が入る（${ws.inspect.toFixed(2)}秒）`);
+  // もう一度押したら止まる。1.6秒あるので押し間違えを待たされたくない
+  ok(!ws.startInspect() && ws.inspect === 0, 'もう一度押すと止まる');
+  /* **撃ったら止まること。** ここが一番大事で、止めないと
+     銃を横に向けて回している最中に弾が出る */
+  ws.startInspect();
+  const player = {
+    alive: true, sprinting: false, crouching: false, onFloor: true, horizontalSpeed: 0,
+    adsFactor: 0, moveMul: 1, roll: 0, healing: 0, bandages: 2, yaw: 0, pitch: 0,
+    bobAmount: 0, bobPhase: 0, addRecoil: () => {}, cancelHeal: () => {},
+    startHeal: () => false, collider: { start: new THREE.Vector3() },
+  };
+  ws._fire(player, {});
+  ok(ws.inspect === 0, '撃ったら見るのをやめる');
+  // 走ったら止まること
+  ws.startInspect();
+  ws.update(1 / 60, {
+    down: () => false, pressed: () => false, clicked: () => false, buttons: [false, false, false],
+  }, { ...player, sprinting: true }, {});
+  ok(ws.inspect === 0, '走り出したら見るのをやめる');
+  // 装填中は始められないこと
+  ws.reloading = 1;
+  ok(!ws.startInspect(), '装填中は見られない');
+  ws.reloading = 0;
+  ws.adsHeld = true;
+  ok(!ws.startInspect(), '覗いている間は見られない');
+  ws.adsHeld = false;
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);

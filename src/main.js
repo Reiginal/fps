@@ -1615,6 +1615,17 @@ class Game {
     // 最初から全部の武器を持たせる。狙撃銃は本編では第2波の解放だが、
     // 触って覚える場所がここなので先に触れて損は無い
     this._applySoloCarry(99);
+    /* **訓練場だけショットガンを持たせる（Eで出し入れ）。**
+       2026-08-11に「射撃訓練の時だけはショットガン出しておいて」で足した所。
+       表には元から入っているが持って出ない武器なので、
+       触って確かめられる場所がここしか無い。
+
+       carryではなく専用の枠へ入れる。carryへ入れると自動で5番になり、
+       **5番は武器を見るモーションで使う**ので衝突する
+       （weapons.jsのrangeIndexのコメント参照）*/
+    this.weapons.rangeIndex = WEAPONS.findIndex((w) => w.id === 'shotgun');
+    if (this.weapons.rangeIndex < 0) this.weapons.rangeIndex = null;
+    this.weapons.rangeBack = null;
     this._rangeKills = 0;
     this._rangeT = 0;
     this._spawnRangeTargets();
@@ -1655,6 +1666,14 @@ class Game {
     this.hud.setTutorial(false);
     this.hud.tutorial(null);
     this._shootables = null;
+    /* **ショットガンは持って帰れない。** 訓練場だけの物なので枠を空ける。
+       握ったまま出ると、本編で持っていない武器を撃てることになる */
+    if (this.weapons.index === this.weapons.rangeIndex) {
+      this.weapons.switching = 0;
+      this.weapons.switchTo(this.weapons.carry[0]);
+    }
+    this.weapons.rangeIndex = null;
+    this.weapons.rangeBack = null;
     for (const t of this._rangeTargets ?? []) {
       t.alive = false;
       t.root.visible = false;
@@ -1696,7 +1715,7 @@ class Game {
     // 本編で解放される物もここでは最初から触れる。**触れることを書いておく**
     // （書かないと、訓練場に居る間そこにあること自体に気づかれない）
     this.hud.tutorial('射撃訓練場',
-      `倒した ${this._rangeKills}体 ・ Qでスナイパー ・ 右クリックで手榴弾を手前へ ・ 弾は減らない`);
+      `倒した ${this._rangeKills}体 ・ Qでスナイパー ・ Eでショットガン ・ 5で武器を見る ・ 弾は減らない`);
   }
 
   async _joinMatch({ url, name }) {
@@ -4183,6 +4202,24 @@ class Game {
         this.weapons.holsterBandage();
         const to = this.weapons.quickSwap();
         if (to != null && this.mode === 'versus') this.net?.sendWeapon(to);
+      }
+      /* Eは訓練場のショットガン。**Qの隣**にしてあるのは、
+         WASDから指を浮かさずに届く所へ寄せたQと同じ理由。
+         訓練場の外ではrangeIndexがnullなので何も起きない。
+         対戦へは送らない（訓練場は1人用の場所なので、そこへ届く先が無い） */
+      if (canAct && input.pressed('KeyE')) {
+        this.player.cancelHeal();
+        this.weapons.holsterBandage();
+        this.weapons.rangeSwap();
+      }
+      /* 5で武器を見る。2026-08-11に「それぞれの武器で5を押したら
+         武器を見るモーション欲しい」で足した。買ったスキンを眺める場所。
+
+         **持ち物が5本以上ある時は譲る。** 上のDigitの回しは carry.length ぶん回るので、
+         ガンゲームでサーバーが5本以上配ってきた時（EV.ARM）は5番が武器の札になる。
+         その時は武器の持ち替えを優先する（眺めるのは後からでもできる）*/
+      if (canAct && carry.length < 5 && input.pressed('Digit5')) {
+        this.weapons.startInspect();
       }
 
       if (this.mode === 'versus') {

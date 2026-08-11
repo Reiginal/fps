@@ -6,7 +6,9 @@ import { muzzleFlashTexture, radialTexture, smokeTexture } from '../world/textur
 import { tryModelOverride } from './glbview.js';
 import { applySkin, skinFor, shapeOf } from './skins.js';
 // 持ち物の決まりだけ取り込む。protocol.jsはこちらを読まないので輪にならない
-import { loadoutOf, NADE, MELEE_HEAVY, MELEE_SWEEP } from '../net/protocol.js';
+import {
+  loadoutOf, NADE, MELEE_HEAVY, MELEE_SWEEP, DEFAULT_SKIN,
+} from '../net/protocol.js';
 // 強い一撃の音。低く長い（重い物を振ると空気の量が増える）
 import { swingTune, gunTune } from '../core/audio.js';
 
@@ -57,6 +59,18 @@ const BURST_GAP_S = 0.32;
 
    **強さは形で変わらない。**威力も間隔も間合いも全部同じ。
    形スキンはコインで買う物なので、強くなると「強さを買える」ことになる */
+/* 武器を見る動き（5キー）。2026-08-11に「それぞれの武器で5を押したら
+   武器を見るモーション欲しい」で足した。
+
+   **形ごとに分けていない。** 振り方(SWINGS)は刃の軌道そのものなので形ごとに要るが、
+   こちらは「手元へ引き寄せて回す」だけなので、どの武器でも同じ動きで成り立つ。
+   スキンを買った人が買った物を眺める場所なので、**回して裏側まで見せる**のが要件。
+
+   time … 全体の長さ(秒)
+   in/out … 引き寄せる・戻すのにかける割合。間は持ち上げたまま回す
+   turn … 回す量(rad)。1周させると裏側まで出る */
+const INSPECT = { time: 1.6, in: 0.16, out: 0.22, turn: Math.PI * 2 };
+
 export const SWINGS = {
   // ナイフ・左: 右上から左下への袈裟斬り。元からある動き
   'knife.light': {
@@ -3625,8 +3639,17 @@ const SHELL_INS = [[0.12, 0.62]];
 /* ------------------------------------------------------------ 実装 */
 
 class Weapon {
-  constructor(def, viewScene) {
+  /**
+   * @param def 武器の表の1つ
+   * @param viewScene ビューモデルを置く場面
+   * @param plain trueなら**スキンを一切着けない素の姿**で組む。
+   *              観戦（デスカメラ）で他人の武器を出す時に使う。
+   *              2026-08-11まで観戦でも自分の模型を出していて、
+   *              **相手が自分のスキンを着けて見えていた**
+   */
+  constructor(def, viewScene, plain = false) {
     this.def = def;
+    this.plain = plain;
     const v = def.view;
     // 組み立てにviewを渡す。**握り方（腕の入る向き・長さ・手の位置）を
     // 武器ごとに変えられるようにするため。** 渡さなかった頃は4つとも
@@ -3634,11 +3657,11 @@ class Weapon {
     /* **どの組み立てで作ったか。** 形違いのスキン（刀・ダガー）は
        組み立てそのものが別なので、着け替えの時にここを見て
        「作り直しが要るか」を決める（WeaponSystem.refreshSkins）*/
-    this.builtWith = shapeOf(skinFor(def.id)) || def.build;
+    this.builtWith = plain ? def.build : (shapeOf(skinFor(def.id)) || def.build);
     /* 着けている形違いスキンのid（色だけならnull）。**振り方と銃声がここを見る。**
        撃つたびに引き直さないのは、skinFor が中で品揃えの配列を作るため。
        毎秒12発の銃だと、その配列を毎秒12個捨てることになる */
-    this.shapeId = shapeIdOf(def.id);
+    this.shapeId = plain ? null : shapeIdOf(def.id);
     this.inner = this.builtWith(v);
     // ビューモデルは実寸のまま出すと画面を埋め尽くす。内側で縮めてから構える
     this.inner.scale.setScalar(v.scale);
@@ -3657,8 +3680,9 @@ class Weapon {
     tryModelOverride(this, def.id).catch(() => {});
 
     /* 選んだスキンの色を被せる。**組み上がった後で材質だけ差し替える。**
-       形の違いは上の builtWith が既に効いているので、ここは色だけ */
-    applySkin(this.inner, skinFor(def.id));
+       形の違いは上の builtWith が既に効いているので、ここは色だけ。
+       素の姿(plain)で組む時は標準を渡して、何も被せない */
+    applySkin(this.inner, plain ? DEFAULT_SKIN : skinFor(def.id));
 
     this.ammo = def.mag;
     this.reserve = def.reserve;
@@ -3802,8 +3826,26 @@ export class WeaponSystem {
        quickBackは、Qで戻る時の行き先（Qを押す直前に持っていた物） */
     this.quickIndex = null;
     this.quickBack = null;
+    /* **射撃訓練場だけで持てる武器。** Eで出し入れする。
+       2026-08-11に「射撃訓練の時だけはショットガン出しておいて」で足した所。
+
+       quickIndex(Q)と同じ「数字キーに載せない枠」にしてあるのは、
+       carryへ入れると自動で5番になって、**5番は武器を見るモーションに使う**ため
+       （main.jsのDigitの回しは carry.length ぶん回る）。
+       枠を2つに分けているので、訓練場ではQ=狙撃銃・E=ショットガンが同時に持てる。
+       nullなら「そんな物は持っていない」＝Eを押しても何も起きない */
+    this.rangeIndex = null;
+    this.rangeBack = null;
+    /* 武器を見ている残り時間（5キー）。0で構えに戻っている。
+       **撃つ・装填する・覗く・持ち替える・走るのどれかが来たら途中で止める。**
+       止めないと、眺めている最中に撃てて「銃を横に向けたまま弾が出る」ことになる */
+    this.inspect = 0;
     // 観戦中に出している相手の武器（showSpectated）。nullなら自分の物
     this._specWeapon = null;
+    /* 観戦で出す**素の姿の模型**。武器番号 → Weapon。
+       要求された時に1本ずつ組んで、以降は覚えておく。
+       自分のスキンが乗った模型を使い回すと、相手が自分のスキンで見える */
+    this._plain = new Map();
     this.current.model.visible = true;
 
     this.adsFactor = 0;
@@ -4025,6 +4067,7 @@ export class WeaponSystem {
     this.swing = 0;
     // 待っている判定も捨てる（持ち替えと同じ理由）
     this.strikeIn = 0;
+    this.inspect = 0;
     return true;
   }
 
@@ -4072,7 +4115,7 @@ export class WeaponSystem {
     // 元の武器のまま、という一番読めない食い違いになる）
     // **数字キーの4本＋Qの1本が持てる全部。** ここを外すと、
     // 画面に出ていない武器を握れることになる（対戦ではサーバーも同じ判断をする）
-    if (!this.carry.includes(i) && i !== this.quickIndex) return false;
+    if (!this.carry.includes(i) && i !== this.quickIndex && i !== this.rangeIndex) return false;
     // 使い切った投げ物は握らない。**無い物を持って構えるのが一番おかしい。**
     // 札は残したまま（残りの数を見せるため）、握るのだけ断る
     if (this.weapons[i].def.thrown && this.nades <= 0) return false;
@@ -4084,6 +4127,8 @@ export class WeaponSystem {
     // 持ち替えを跨いで前の武器の状態を残さない。
     // 振りの途中でナイフから銃へ替えると、銃が刃の軌道で振り回される
     this.swing = 0;
+    // 眺めている最中に持ち替えたら、そこで見るのをやめる
+    this.inspect = 0;
     /* **待っている判定も捨てる。** 捨てないと、振りかぶってすぐ銃へ持ち替えた時に
        銃を構えた状態で刃の判定が飛ぶ（見えない所から刺される形になる） */
     this.strikeIn = 0;
@@ -4133,13 +4178,44 @@ export class WeaponSystem {
    *
    * 毎フレーム呼ばれる前提。変わった時しか触らない
    */
+  /**
+   * 観戦（デスカメラ）で出す武器を切り替える。nullで自分の物へ戻る。
+   *
+   * **2026-08-11まで自分の模型をそのまま出していて、
+   * 倒した相手が自分のスキンを着けて見えていた。**
+   * 金色のライフルを着けていると、相手も金色のライフルで撃ってきたことになる。
+   *
+   * 直し方は「素の姿で組んだ模型を別に持って、観戦中はそちらを出す」。
+   * **相手の本当のスキンは出せない。** スキンは今どこにも運ばれていなくて
+   * （src/net/protocol.js に載っていない）、相手の3人称の姿も
+   * 兵士モデルの銃で出しているため（src/net/remote.js の _applyWeapon）。
+   * つまり**標準で出すのが、他の画面と揃った状態。**
+   * 本当のスキンを出すには、スキンを電文に乗せる所から要る。
+   *
+   * 素の模型は**要求された時に1本だけ組んで覚えておく**（実測16〜40ms）。
+   * 起動時に全部組むと、観戦しない人のぶんまで払うことになる
+   */
   showSpectated(i) {
     const at = i == null ? null : (i | 0);
     if (at === this._specWeapon) return;
     this._specWeapon = at;
     for (const w of this.weapons) w.model.visible = false;
-    const w = this.weapons[at == null ? this.index : at];
-    if (!w) return;
+    for (const w of this._plain.values()) w.model.visible = false;
+
+    // 自分の物へ戻る。素の模型は捨てずに持っておく（また倒れた時に組み直さない）
+    if (at == null) {
+      const mine = this.weapons[this.index];
+      if (mine) { mine.restPose(); mine.model.visible = true; }
+      return;
+    }
+
+    const def = this.weapons[at]?.def;
+    if (!def) return;
+    let w = this._plain.get(at);
+    if (!w) {
+      w = new Weapon(def, this.viewScene, true);
+      this._plain.set(at, w);
+    }
     // 前に持っていた人の装填途中の姿勢が残らないよう、素の形へ戻してから出す
     w.restPose();
     w.model.visible = true;
@@ -4156,6 +4232,43 @@ export class WeaponSystem {
     if (!this.switchTo(this.quickIndex)) return null;
     this.quickBack = from;
     return this.quickIndex;
+  }
+
+  /**
+   * 武器を見る動きを始める（5キー）。始められたらtrue。
+   *
+   * **手が空いている時だけ。** 装填中・持ち替え中・覗いている間・包帯を持っている間、
+   * それに投げ物を構えている間は断る。断らないと、
+   * 眺める動きと元の動きが同じ姿勢へ二重に足されて、武器が画面外へ飛ぶ。
+   *
+   * 既に見ている最中にもう一度押したら止める（トグル）。
+   * 1.6秒あるので、押し間違えた時に待たされるのは長い
+   */
+  startInspect() {
+    if (this.inspect > 0) { this.inspect = 0; return false; }
+    if (this.reloading > 0 || this.switching > 0 || this.shellReload) return false;
+    if (this.adsHeld || this.adsFactor > 0.02) return false;
+    if (this.bandageOut || this.swing > 0 || this._throwCharging) return false;
+    this.inspect = INSPECT.time;
+    return true;
+  }
+
+  /**
+   * 訓練場のショットガン（E）の出し入れ。quickSwapと同じ形。
+   *
+   * **枠を2つに分けてあるので、Qの狙撃銃と同時に持てる。**
+   * 1つの枠を使い回すと、訓練場で狙撃銃とショットガンのどちらか片方になる
+   */
+  rangeSwap() {
+    if (this.rangeIndex == null) return null;
+    if (this.index === this.rangeIndex) {
+      const back = this.carry.includes(this.rangeBack) ? this.rangeBack : this.carry[0];
+      return back != null && this.switchTo(back) ? back : null;
+    }
+    const from = this.index;
+    if (!this.switchTo(this.rangeIndex)) return null;
+    this.rangeBack = from;
+    return this.rangeIndex;
   }
 
   /**
@@ -4316,6 +4429,8 @@ export class WeaponSystem {
     const rightEdge = !!input.clicked?.(2);
     // 近接の右クリックは覗きではなく強い一撃。覗きの入り切りへ流さない
     if (rightEdge && !d.thrown && !d.melee) this.adsHeld = !this.adsHeld;
+    // 覗いた・振った瞬間に眺めるのをやめる。眺めながら覗くと照準が横を向く
+    if (rightEdge) this.inspect = 0;
     // 包帯を持っている間は武器そのものを下ろしているので、覗くも撃つも無い
     const busyHealing = this.bandageOut || player.healing > 0;
     // 近接は覗く物が無い。覗けると刃を目の前に構えて視界を塞ぐだけになる
@@ -4361,6 +4476,12 @@ export class WeaponSystem {
     this.fireTimer -= dt;
     this.pumping = Math.max(0, this.pumping - dt);
     this.swing = Math.max(0, this.swing - dt);
+    /* 武器を見る動きを進める。**走り出したら途中でも止める。**
+       走っている姿勢と眺める姿勢が同じ所へ二重に足されると武器が画面外へ飛ぶ。
+       撃つ・装填・覗くで止めるのは、それぞれの処理の中で0にしている */
+    if (this.inspect > 0) {
+      this.inspect = player.sprinting ? 0 : Math.max(0, this.inspect - dt);
+    }
 
     /* 刃が届いた。**ここで初めて当たり判定を出す。**
        渡すplayerは「今のフレームの」player なので、
@@ -4583,6 +4704,8 @@ export class WeaponSystem {
   }
 
   _fire(player, ctx) {
+    // 撃ったら眺めるのをやめる。**銃を横に向けたまま弾が出るのを止める**
+    this.inspect = 0;
     const w = this.current;
     const d = w.def;
     const v = d.view;
@@ -4966,6 +5089,29 @@ export class WeaponSystem {
       }
     }
 
+    /* ---- 武器を見る（5キー）。**手元へ引き寄せて1周回す。**
+       買ったスキンを眺める場所なので、裏側まで見えないと意味が無い。
+
+       ins … 引き寄せている量(0〜1)。始めと終わりだけ滑らかにして、間は持ち上げたまま
+       spin … 回した角度。1周させる（途中で折り返すと裏が見えない）*/
+    let insZ = 0, insH = 0, insP = 0, insY = 0, insR = 0;
+    if (this.inspect > 0) {
+      const k = 1 - clamp01(this.inspect / INSPECT.time);
+      // 台形の包絡。上がり(in)・保ち・下がり(out)
+      const ins = k < INSPECT.in ? k / INSPECT.in
+        : k > 1 - INSPECT.out ? (1 - k) / INSPECT.out : 1;
+      // 回すのは保っている間だけ。上がり下がりの最中に回すと引き寄せ切る前に裏を向く
+      const spinK = clamp01((k - INSPECT.in) / (1 - INSPECT.in - INSPECT.out));
+      const spin = spinK * INSPECT.turn;
+      // 手前へ引いて少し持ち上げる。**引きすぎると銃口が画面を覆う**ので0.06まで
+      insZ = ins * 0.06;
+      insH = ins * 0.035;
+      // 銃口を左へ振って、こちらへ傾ける。回すのはZ（銃身を軸にした回転）
+      insY = ins * 0.55 + Math.sin(spin) * 0.10;
+      insP = -ins * 0.30;
+      insR = spin;
+    }
+
     // 巻いている間は武器を大きく下げて画面の外へ寄せる。
     // lowerだけでは足りない（装填の下げ幅は「見えたまま傾く」量なので）
     const healDrop = this._healBlend * 0.30;
@@ -4973,18 +5119,19 @@ export class WeaponSystem {
       base.x + bobX + swX + breathX + sp * 0.05 + this.kickX + this._healBlend * 0.10,
       // 上下は振りの h をそのまま使う。前は前後(swingZ)の半分を流用していたので、
       // 突きのように「前へ出すだけで下げない」動きが作れなかった
-      base.y + bobY + swY + breathY - sp * 0.05 - lower * v.lower + this.kickY + swingH - healDrop,
-      base.z + this.kickZ - sp * 0.02 + swingZ,
+      base.y + bobY + swY + breathY - sp * 0.05 - lower * v.lower + this.kickY + swingH
+        - healDrop + insH,
+      base.z + this.kickZ - sp * 0.02 + swingZ + insZ,
     );
     // kickPitch/kickYawは反動なのでADSでも残す。ADSの減衰は_fireで
     // (1 - adsFactor*0.32)を1回だけ掛けてあるので、ここで重ねない
     model.rotation.set(
       THREE.MathUtils.lerp(w.hipRot.x, w.adsRot.x, t) + this.kickPitch + swY * 1.6
-        + sp * 0.22 + reloadT * 0.42 + switchT * 0.7 + swingP,
+        + sp * 0.22 + reloadT * 0.42 + switchT * 0.7 + swingP + insP,
       THREE.MathUtils.lerp(w.hipRot.y, w.adsRot.y, t) + this.kickYaw + swX * 2.2
-        + sp * 0.55 + reloadT * 0.30 + swingY,
+        + sp * 0.55 + reloadT * 0.30 + swingY + insY,
       THREE.MathUtils.lerp(w.hipRot.z, w.adsRot.z, t) - sp * 0.30 + reloadT * 0.20
-        + player.roll * 1.5 * (1 - this.adsFactor) + swingR,
+        + player.roll * 1.5 * (1 - this.adsFactor) + swingR + insR,
     );
 
     // 覗いている間はFOVを絞る。ビューモデルのFOVは本編より狭くしておくと
