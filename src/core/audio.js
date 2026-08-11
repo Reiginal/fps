@@ -378,6 +378,39 @@ export const SHAPE_GUN = {
     subVol: 0.10, subTime: 0.10, subDelay: 0.0,
   },
 
+  /* スケルトン（拳銃）。**軽い樹脂が鳴る音。**
+     サイバー(破裂6200・尾0.22)・クローム(破裂4600・尾0.44)と離す。
+     透ける樹脂の枠なので、金属の硬さを抜いて**胴を薄く・尾を一番長く**取る
+     （軽い箱は薄く長く鳴る。金属は硬く短い） */
+  skeleton: {
+    volume: 0.60, bodyFreq: 980, crackFreq: 3400,
+    bodyDecay: 0.06, tailDecay: 0.70, tailVol: 0.34, crackVol: 0.62,
+    thumpFrom: 220, thumpTo: 100, thumpTime: 0.05,
+    subVol: 0.06, subTime: 0.07,
+  },
+
+  /* 星（狙撃銃）。**遠くまで届く澄んだ音。**
+     アイス(破裂5200・尾0.55)・ヴェノム(破裂2000・尾0.62)と離す。
+     望遠鏡の系統なので、**尾を一番長く**取って余韻を残す
+     （空へ抜ける音に寄せる）。破裂は中ほどに置いて、どちらとも被らせない */
+  astro: {
+    volume: 0.82, bodyFreq: 260, crackFreq: 3600,
+    bodyDecay: 0.24, tailDecay: 1.60, tailVol: 0.56, crackVol: 0.66,
+    thumpFrom: 180, thumpTo: 60, thumpTime: 0.22,
+    subVol: 0.40, subTime: 0.26, subDelay: 0.02,
+  },
+
+  /* 竹（狙撃銃）。**木の筒が鳴る音。**
+     アイス・ヴェノム・星の3つと離す必要がある。
+     竹は中が空洞なので、**胴を高く・尾を短く**取る
+     （空洞の筒は「コン」と鳴って止まる。詰まった木は響く） */
+  bamboo: {
+    volume: 0.78, bodyFreq: 700, crackFreq: 2600,
+    bodyDecay: 0.10, tailDecay: 0.30, tailVol: 0.24, crackVol: 0.52,
+    thumpFrom: 200, thumpTo: 78, thumpTime: 0.09,
+    subVol: 0.20, subTime: 0.12,
+  },
+
   /* クローム（拳銃）。**磨いた金属が鳴る音。**
      元の拳銃は「パン」と切れる音（胴420・破裂3900・尾0.38）で、
      サイバーは電子音（胴1200・破裂6200・音程が上がる）。

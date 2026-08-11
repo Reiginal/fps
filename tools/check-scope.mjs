@@ -180,7 +180,7 @@ console.log('\n[2] 望遠照準（狙撃銃）');
   };
   const plain = blockers(def.build);
   ok(plain.length <= 1, `素のままで線を塞ぐ物は${plain.length}個（照門そのもの）`);
-  for (const [name, id] of [['サイバー', 'cyber'], ['クローム', 'chrome']]) {
+  for (const [name, id] of [['サイバー', 'cyber'], ['クローム', 'chrome'], ['スケルトン', 'skeleton']]) {
     const got = blockers(SHAPE_BUILDS[id]);
     ok(got.length <= plain.length,
       `${name} … 素のままより増やしていない（${got.length}個 / 素のまま${plain.length}個`
@@ -298,6 +298,38 @@ console.log('\n[4] ライフルの形違いが赤ドットの窓を狭めてい�
       `${name} … 窓が狭まっていない（${got.toFixed(1)}度 / 素のまま${base.toFixed(1)}度）`);
   }
   setAccount({ owned: [], equipped: {} });
+  ws.refreshSkins();
+}
+
+console.log('\n[5] 狙撃銃の形違いが望遠照準の窓を狭めていないか');
+{
+  /* ライフルの[4]と同じ理由。**狙撃銃も形違いが4つになった**
+     （アイス・ヴェノム・星・竹）。どれも先台と銃身へ飾りを足すので、
+     レール(0.042)より上へ出ると狙点のまわりが欠ける。
+
+     アイスの霜・ヴェノムの鱗・星の光る環・竹の節と、
+     **4つとも別の物を別の場所へ置いている**ので、1つずつ測る意味がある */
+  const { setAccount: setAcc } = await import('../src/player/skins.js');
+  const base = (() => {
+    const w = aim('sniper');
+    const v = windowOf(w.model);
+    relax();
+    return v;
+  })();
+  ok(base > 4.0, `素のままの窓は ${base.toFixed(1)}度`);
+
+  for (const [name, id] of [
+    ['アイス', 'ice'], ['ヴェノム', 'venom'], ['星', 'astro'], ['竹', 'bamboo'],
+  ]) {
+    setAcc({ owned: [`sniper:${id}`], equipped: { sniper: id } });
+    ws.refreshSkins();
+    const w = aim('sniper');
+    const got = windowOf(w.model);
+    relax();
+    ok(got >= base - 0.2,
+      `${name} … 窓が狭まっていない（${got.toFixed(1)}度 / 素のまま${base.toFixed(1)}度）`);
+  }
+  setAcc({ owned: [], equipped: {} });
   ws.refreshSkins();
 }
 
