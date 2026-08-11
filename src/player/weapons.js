@@ -720,9 +720,15 @@ export const MATS = {
      （このゲームの他の金属は全部使い込んだ物なので、ここだけ逆） */
   chrome: mat(0xc8d0d8, 1.0, 0.06, SURF_METAL, 2, 0.18, { envMapIntensity: 1.35 }),
   /* 象牙の握把板。**boneでは代わりが効かない**（0xc9bfa6で粗さ0.66は鈍い）。
-     一段明るく滑らかにして、磨いた銀の隣に置いても安物に見えない所まで持ってくる */
+     一段明るく滑らかにして、磨いた銀の隣に置いても安物に見えない所まで持ってくる。
+     **桜(sakura)の螺鈿にも使い回している**（貝の白は象牙と近い） */
   ivory: mat(0xe4dcc8, 0.0, 0.34, SURF_POLYMER, 4, 0.35, { envMapIntensity: 0.5 },
     { amount: 0.25, color: 0xf4efe2, metal: 0.0, rough: 0.28 }),
+  /* 朱（桜の紐と房）。**品揃えに赤が1つも無い。**
+     薬莢の赤(shell 0x8e211a)より明るく、布として置ける粗さにする
+     （あちらは樹脂の薬莢なので、紐に使うと硬く見える） */
+  vermilion: mat(0xb03828, 0.0, 0.86, SURF_FABRIC, 6, 1.2, null,
+    { amount: 0.40, color: 0xd4604a, metal: 0.0, rough: 0.90 }),
 };
 
 // レンズのフレネル反射。実物の対物レンズは正面から覗くと素通しなのに、
@@ -2430,6 +2436,85 @@ function cuteDeco(g) {
   g.add(part(torG(0.006, 0.0016, 4, 10), MATS.brass, 0.030, -0.129, 0.052, Math.PI / 2));
 }
 
+/* ライフルの装甲。**ドラゴンと逆を取る。**
+   あちらが有機的な曲線（棘・顎・鱗）なので、こちらは**輪郭を角張らせる。**
+   鉄板とボルトを重ねて、面と直線だけで作る。
+
+   **天面には何も置けない。** 赤ドットが y=0.075 に載っていて、
+   覗いた時の視線がそこを通る（addOpticの不変条件）。
+   足す物は R_RAIL(0.052) より下か、照準より前へ逃がす */
+function armorDeco(g) {
+  /* ---- 機関部の側面の装甲板。**ボルトで留めた形にする。**
+     板だけだと貼り紙に見えるので、留め具が要る（廃品で学んだ形） */
+  for (const s of [1, -1]) {
+    g.add(part(cboxG(0.006, 0.050, 0.150), MATS.phosphate, s * 0.0295, R_BORE - 0.004, -0.040));
+    for (const z of [-0.100, -0.040, 0.020]) {
+      g.add(part(cylG(0.0045, 0.0045, 0.007, 6), MATS.steel, s * 0.0330, R_BORE - 0.004, z, 0, 0, Math.PI / 2));
+    }
+  }
+
+  /* ---- 先台の装甲。**角柱で包む。** 元の八角筒を四角い箱で覆うと、
+     丸い物が角い物に変わって輪郭が一番大きく動く */
+  g.add(part(cboxG(0.062, 0.056, 0.250), MATS.anodized, 0, R_BORE, -0.400));
+  // 側面の抜き穴。無地の箱だと重そうに見えるだけで装備に見えない
+  for (const s of [1, -1]) {
+    for (let i = 0; i < 3; i++) {
+      g.add(part(boxG(0.004, 0.024, 0.038), MATS.enamel, s * 0.0305, R_BORE, -0.480 + i * 0.078));
+    }
+  }
+
+  /* ---- 銃口の制退器。**角張った塊。** 丸い物を付けるとドラゴンの顎に寄る */
+  g.add(part(cboxG(0.048, 0.048, 0.070), MATS.phosphate, 0, R_BORE, -0.640));
+  for (const s of [1, -1]) {
+    g.add(part(boxG(0.010, 0.030, 0.050), MATS.enamel, s * 0.0175, R_BORE + 0.016, -0.640));
+  }
+
+  /* ---- 弾倉の増加装甲。**下は空いている**（照準の制約が無い）ので、ここは厚くできる */
+  g.add(part(cboxG(0.046, 0.020, 0.056), MATS.phosphate, 0, -0.120, 0.030));
+}
+
+/* ライフルの桜。**品揃えに「和」が1つも無い**（刀はナイフ側）。
+   漆の黒に金の桜、朱の紐、螺鈿の白。
+   キャンディ（パステルの可愛い方）とは、同じ「飾る」でも系統が別
+   ——あちらは丸くする方向、こちらは**平らな面に絵を置く**方向 */
+function sakuraDeco(g) {
+  /* ---- 桜の花。**花びらは5枚。** 潰した球を5つ回して並べると、
+     形を1つも作らずに花に見える（押し出した多角形より軽い）。
+     3輪だけ。増やすと柄になって、置いた絵に見えなくなる */
+  const flower = (x, y, z, r) => {
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2;
+      g.add(partS(sphG(r, 8, 6), MATS.brass,
+        x + Math.cos(a) * r * 1.15, y, z + Math.sin(a) * r * 1.15, 1, 0.34, 1));
+    }
+    // 花の芯。少し明るい金
+    g.add(partS(sphG(r * 0.5, 8, 6), MATS.charm, x, y + 0.0008, z, 1, 0.4, 1));
+  };
+  for (const s of [1, -1]) {
+    flower(s * 0.0262, R_BORE + 0.006, -0.070, 0.0085);
+    flower(s * 0.0262, R_BORE - 0.010, -0.020, 0.0062);
+  }
+  flower(0, R_RAIL - 0.004, -0.150, 0.0072);
+
+  /* ---- 螺鈿の帯。**貝の白を細く通す。** 象牙(ivory)を使い回している
+     （貝の白は象牙と近い。材質を1つ増やす価値が無い）*/
+  for (const s of [1, -1]) {
+    g.add(part(boxG(0.002, 0.006, 0.170), MATS.ivory, s * 0.0258, R_BORE + 0.018, -0.045));
+  }
+  g.add(part(boxG(0.020, 0.002, 0.150), MATS.ivory, 0, R_RAIL - 0.010, -0.160));
+
+  /* ---- 朱の紐と房。**握把から下げる。** キャンディの星のチャームと同じ位置だが、
+     あちらは金属の板でこちらは布。**布は房で終わらせる**のが和の作り */
+  g.add(part(cylG(0.0026, 0.0026, 0.048, 6), MATS.vermilion, 0.026, -0.148, 0.046, 0.24));
+  g.add(part(cylG(0.0075, 0.0055, 0.026, 8), MATS.vermilion, 0.030, -0.184, 0.052));
+  // 紐の留め金
+  g.add(part(torG(0.0060, 0.0016, 4, 10), MATS.brass, 0.026, -0.122, 0.046, Math.PI / 2));
+
+  /* ---- 銃口の環。漆器の口金にあたる。**金を1本回す**と、
+     黒い筒の先が締まって「塗り物」に見える */
+  g.add(part(torG(0.0250, 0.0026, 5, 16), MATS.brass, 0, R_BORE, -0.648));
+}
+
 const buildRifleDragon = (view = {}) => buildRifle(view, dragonDeco);
 const buildRifleCute = (view = {}) => buildRifle(view, cuteDeco);
 
@@ -3525,6 +3610,8 @@ export const SHAPE_BUILDS = {
   glove: buildGlove,
   dragon: buildRifleDragon,
   cute: buildRifleCute,
+  armor: (view = {}) => buildRifle(view, armorDeco),
+  sakura: (view = {}) => buildRifle(view, sakuraDeco),
   western: (view = {}) => buildShotgun(view, westernDeco),
   shark: (view = {}) => buildShotgun(view, sharkDeco),
   ice: (view = {}) => buildSniper(view, iceDeco),
