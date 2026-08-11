@@ -1108,6 +1108,10 @@ class Game {
        「効いていない」と読まれる（実際そう見える） */
     this.look = new LookMenu();
     this.look.onChange = () => this.weapons?.refreshSkins?.();
+    /* 買えた合図。**ホームから直でストアへ来た人は、まだ音が起きていない。**
+       WebAudioは操作を起点にしないと走らないので、ここでも起こしてから鳴らす
+       （買うボタンを押した所なので、操作は起きている） */
+    this.look.onBought = () => { this._wakeAudio(); this.audio.purchase(); };
     // ホームの入口は2つ（スキン変更・ストア）。画面は1枚を2つの面で使う
     menu.onLook = (store) => this.look.show(store);
 

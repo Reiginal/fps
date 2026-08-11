@@ -1783,6 +1783,58 @@ export class AudioEngine {
   }
 
   /**
+   * 買えた合図。「チャリン」。
+   *
+   * **ロビー入室(lobbyJoin)と混ざらないようにする。** あちらも上がる2音なので、
+   * 音程を並べただけでは「誰か入ってきた」と区別が付かない。
+   * 買い物の音は、電子音ではなく**硬貨が当たる音**に寄せる:
+   *
+   * - 3音の和音を短くばらして鳴らす（分散和音）。1音より「めでたい」感じになる
+   * - 上に金属の当たる音を薄く1枚重ねる。倍音が整数比から外れている音を
+   *   帯域で切って出すと、硬貨や鈴の当たる音に聞こえる
+   * - **尾を短く切る。** 残ると「まだ処理中」に聞こえる。買い物は一瞬で終わる
+   *
+   * 場所を持たない音なので、距離減衰も残響も通さない（lobbyJoinと同じ扱い）
+   */
+  purchase() {
+    if (!this.ready || !this.enabled) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+
+    // 分散和音。C6→E6→G6。上がる形にして「増えた」に寄せる
+    const tone = (at, freq, vol, len) => {
+      const o = ctx.createOscillator();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(freq, at);
+      const g = ctx.createGain();
+      o.connect(g); g.connect(this.postBus);
+      this._env(g, at, vol, 0.003, len);
+      this._reap([g], len + 0.4);
+      o.start(at); o.stop(at + len + 0.05);
+    };
+    /* 3音の間隔は75ms。重なったまま鳴るので、測ると打点は1つ（1回の「チャリン」）。
+       ここを150msまで離すと3つに分かれて聞こえるが、そうすると
+       「チャ・リ・ン」と間延びして、レジではなく着信音になる */
+    tone(t, 1047, 0.17, 0.09);
+    tone(t + 0.075, 1319, 0.16, 0.11);
+    tone(t + 0.150, 1568, 0.15, 0.30);
+
+    /* 硬貨の当たる音。**整数比から外した2つの高い音**を短く重ねる。
+       ここを整数比にすると、ただの高い和音になって金属に聞こえない */
+    for (const [at, f, v] of [[t + 0.005, 3140, 0.10], [t + 0.012, 4730, 0.075],
+      [t + 0.152, 3970, 0.055]]) {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(f, at);
+      const g = ctx.createGain();
+      o.connect(g); g.connect(this.postBus);
+      this._env(g, at, v, 0.001, 0.09);
+      this._reap([g], 0.5);
+      o.start(at); o.stop(at + 0.15);
+    }
+  }
+
+  /**
    * 爆発。銃声と同じ3層の作りだが、比率が逆になる。
    * 銃声は高いクラックが主役で低音が支え。爆発は低音が主役で、
    * 高域は「立ち上がりの割れ」として一瞬だけ乗る。

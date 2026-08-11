@@ -608,10 +608,26 @@
   .lkitem.on { color: var(--accent); border-color: var(--accent); background: rgba(99,210,255,.1); }
   /* 色の見本。3Dの絵が出るまでの間も、どんな色かがここで読める */
   .lkitem .sw { width: 13px; height: 13px; border: 1px solid rgba(255,255,255,.25); }
-  /* 形違いの印。色違いと値打ちが違うので一目で分かるようにする */
+  /* 形違いの印。色違いと値打ちが違うので一目で分かるようにする。
+     **9pxでは字が潰れて「緑の四角」にしか見えなかった**（遊んで
+     「左右のマークがなんなのか謎」と言われた）。読める大きさまで上げる */
   .lkitem .kd {
-    font-size: 9px; letter-spacing: 0; color: var(--bg);
-    background: var(--ok); padding: 1px 4px;
+    font-size: 10px; font-weight: 700; letter-spacing: .04em; color: var(--bg);
+    background: var(--ok); padding: 2px 5px;
+  }
+  /* マークの読み方。**印だけ置いても、初見の人には意味が伝わらない** */
+  .lkhelp {
+    font-size: 10px; letter-spacing: .08em; color: var(--dim);
+    margin: 2px 0 6px; line-height: 1.6;
+  }
+  .lkhelp .sw {
+    display: inline-block; width: 10px; height: 10px; vertical-align: -1px;
+    background: linear-gradient(135deg, #6d5f45 50%, #a8811f 50%);
+    border: 1px solid rgba(255,255,255,.25);
+  }
+  .lkhelp b {
+    font-weight: 700; color: var(--bg); background: var(--ok);
+    padding: 1px 4px; font-size: 9px;
   }
   /* 値段。ストアの面だけ出る */
   .lkitem .pr { color: var(--accent); }
@@ -1308,6 +1324,8 @@
     <div class="lknote" id="lkNote"></div>
 
     <div class="lklist" id="lkList"></div>
+    <!-- 並んだ物に付いている印の読み方。中身はlook.jsが入れる -->
+    <div class="lkhelp" id="lkHelp"></div>
 
     <div id="lkStatus"></div>
 
