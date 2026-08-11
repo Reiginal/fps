@@ -588,6 +588,11 @@ class Game {
     this._userScale = 1;
     this._toRemote = new THREE.Vector3();
     this._plateV = new THREE.Vector3();
+    // チュートリアルの「照準が乗っているか」に使う入れ物（_tutAimId）
+    this._aimDir = new THREE.Vector3();
+    this._aimTo = new THREE.Vector3();
+    // 今いくつ的を緑にしたか。数が変わった時だけ材質を触る
+    this._tutAimShown = -1;
     this._ray = new THREE.Ray();
     this._evPos = new THREE.Vector3();
     this._evNormal = new THREE.Vector3();
@@ -1335,6 +1340,9 @@ class Game {
       knifeIndex: this.weapons.carry[2],
     });
     this._tutMachine.reset();
+    // 案内の的を橙へ戻す。戻さないと、2回目に入った時に最初から全部緑になっている
+    this._tutLevel.resetAim?.();
+    this._tutAimShown = -1;
     this._tutFlags = { nadeKill: false, healed: false };
     this._tutDoneHold = 0;
     this._tutFinishT = null;
@@ -1423,6 +1431,38 @@ class Game {
     `);
   }
 
+  /**
+   * 今どの案内の的に照準が乗っているか。乗っていなければnull。
+   *
+   * **距離ではなく角度で見る。** 「照準が乗っている」は画面の上での話なので、
+   * 近い的ほど広く・遠い的ほど狭く当たるのが正しい。
+   * 板は0.7m四方なので、半分の0.35mを見込む角度で判定する。
+   * そこへ0.6度だけ足してあるのは、板のふちギリギリで「乗っていない」に
+   * なると、マウスに慣れていない人には理由が分からないため
+   *
+   * 的は6枚しかないので毎フレーム全部見てよい（レイは1本も飛ばさない）
+   */
+  _tutAimId() {
+    const list = this.level?.aimTargets;
+    if (!list || !list.length) return null;
+    const cam = this.camera;
+    cam.getWorldDirection(this._aimDir);
+    const eye = cam.position;
+    let best = null;
+    let bestOff = Infinity;
+    for (const t of list) {
+      this._aimTo.subVectors(t.pos, eye);
+      const dist = this._aimTo.length();
+      if (dist < 0.3) continue;
+      this._aimTo.divideScalar(dist);
+      // 照準と的の中心の間の角度
+      const off = Math.acos(clamp(this._aimTo.dot(this._aimDir), -1, 1));
+      const allow = Math.atan2(0.35, dist) + 0.0105;
+      if (off <= allow && off < bestOff) { bestOff = off; best = t.id; }
+    }
+    return best;
+  }
+
   /** 毎フレーム（ソロのループから）。課題の判定と的の面倒だけ */
   _tutorialFrame(dt) {
     // 死んだ的だけ動かして倒れ演出を進める。倒れ切ったら少し置いて起き上がる
@@ -1451,10 +1491,13 @@ class Game {
       crouching: p.crouching,
       // 滑り込みの課題。滑っている間ずっと立つ
       sliding: p.sliding,
-      // S/A/Dの課題は「そのキーで動けた距離」で見る（押している印＋実速度）
+      // W/S/A/Dの課題は「そのキーで動けた距離」で見る（押している印＋実速度）
+      keyW: this.input.down('KeyW'),
       keyA: this.input.down('KeyA'),
       keyS: this.input.down('KeyS'),
       keyD: this.input.down('KeyD'),
+      // 今どの的に照準が乗っているか。視点の課題はこれだけで判定する
+      aimId: this._tutAimId(),
       shots: this.shotsFired,
       kills: this._tutKills,
       adsFactor: w.adsFactor,
@@ -1465,6 +1508,14 @@ class Game {
     });
     this._tutFlags.nadeKill = false;
     this._tutFlags.healed = false;
+    /* 合わせた的を緑にする。**できたことが画で分かるのが仕事。**
+       文字だけだと、乗っているのか外しているのかが読めない。
+       枚数が変わった時だけ触る（毎フレーム材質を差し替えない） */
+    const hits = this._tutMachine.aimHits;
+    if (hits.size !== this._tutAimShown) {
+      this._tutAimShown = hits.size;
+      for (const t of this.level.aimTargets || []) this.level.setAimDone(t.id, hits.has(t.id));
+    }
     if (res === 'advance') {
       /* できた合図。前は中央のバナー(達成)と小さいカチッだけで、
          「できたかどうかわかりづらい」と言われた(2026-08-09)。
