@@ -26,7 +26,9 @@ import { logs, canViewLogs, isLocal, renderPage } from './logs.js';
 import { WEAPONS, weaponsSource } from './sim.js';
 import * as db from './db.js';
 import * as auth from './auth.js';
-import { addCoins, getCoins, coinsFor } from './wallet.js';
+import {
+  addCoins, getCoins, coinsFor, COIN, soloCoinsFor, addSoloCoins,
+} from './wallet.js';
 import { buy, equip, ownedOf, equippedOf } from './store.js';
 import { sendVerifyMail } from './mail.js';
 import {
@@ -338,6 +340,17 @@ async function routeApi(url, req, res) {
        ここで失敗にすると、台帳には会員が居るのに画面には「登録できませんでした」と出て、
        もう一度登録しても「登録済みです」で詰む */
     await sendVerifyMail(r.user.email, r.emailToken);
+    /* 入会祝い。**一番安いスキンが1つ買えるだけ配る。**
+       0枚から始めると、店を開いても全部が灰色で、
+       何が売っているのかを見る前に閉じることになる。
+
+       **配れなくても登録は成功のまま返す。**メールと同じ理由で、
+       ここで失敗にすると台帳に会員だけが残る */
+    try {
+      await addCoins(db.query, r.user.id, COIN.SIGNUP);
+    } catch (e) {
+      console.warn(`[wallet] ${r.user.name} に入会祝いを配れなかった: ${e && e.message}`);
+    }
     // 入会したらそのままログイン状態にする。登録の直後にもう一度
     // メアドとパスワードを打たせる理由が無い
     const s = await auth.login(db.query, { email: body.email, password: body.password });
@@ -376,6 +389,30 @@ async function routeApi(url, req, res) {
     const r = await equip(db.query, me.id, String(body.weapon ?? ''), String(body.skin ?? ''));
     if (!r.ok) { sendJson(res, 400, r); return; }
     sendJson(res, 200, { ok: true, equipped: await equippedOf(db.query, me.id) });
+    return;
+  }
+
+  /* 1人プレイの取り分。**ここだけ本人の申告を受け取る。**
+     1人プレイはサーバーに繋がっていないので、何波まで行ったかは本人しか知らない。
+     信じないで済むように、天井を台帳の中で決める（server/wallet.jsのSOLO）。
+     嘘をついて取れる最大が対戦2試合ぶんにも満たないので、嘘をつく意味が消える */
+  if (url === '/api/solo') {
+    if (!buyLimit.allow(`solo|${ip}`, Date.now())) {
+      sendJson(res, 429, { ok: false, error: '続けて押しすぎです。少し待ってください' });
+      return;
+    }
+    const me = await auth.sessionUser(db.query, token);
+    if (!me) { sendJson(res, 401, { ok: false, error: 'ログインしてください' }); return; }
+    const body = await readJson(req, res);
+    if (body === undefined) return;
+    if (!body) { sendJson(res, 400, { ok: false, error: '送られた中身が読めません' }); return; }
+
+    const want = soloCoinsFor(body);
+    // 取引を使うので1本の接続の上で（買う時と同じ理由）
+    const r = await db.withClient((q) => addSoloCoins(q, me.id, want));
+    if (!r.ok) { sendJson(res, 200, { ok: false, error: r.error, coins: r.coins }); return; }
+    logs.add('coin', { message: `1人用で${r.got}枚`, name: me.name });
+    sendJson(res, 200, { ok: true, got: r.got, coins: r.coins });
     return;
   }
 

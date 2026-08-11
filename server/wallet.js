@@ -15,22 +15,65 @@
    撃破数もラウンド数も、クライアントが送ってきた数字ではない。
 
    数字の決め方: 4人のデスマッチを1試合終えると、
-   勝った人が 20 + 12撃破*5 + 3ラウンド*15 + 50 = 175枚、
-   負けた人が 20 + 5撃破*5 = 45枚くらいになる。
-   スキン1つを数百枚にすれば「何試合か遊んだら1つ買える」になる */
+   勝った人が 40 + 12撃破*10 + 3ラウンド*35 + 100 = 365枚、
+   負けた人が 40 + 5撃破*10 = 90枚くらいになる。
+
+   **2026-08-11に倍にした。** それまでは勝ち175・負け45で、
+   一番安いスキン(300)が勝っても2試合ぶんだった。
+   「対戦をやってくれる機会が増えるように上げたい」と言われて、
+   gold(1500)が4〜5試合、ドラゴン(2000)が6試合になる所まで持ってきた */
 export const COIN = {
   // 参加賞。**0にしない。** 勝てない人が永久に何も買えないと、
   // 買い物そのものが「上手い人だけの物」になる
-  JOIN: 20,
-  KILL: 5,
-  ROUND: 15,
-  TOP: 50,
+  JOIN: 40,
+  KILL: 10,
+  ROUND: 35,
+  TOP: 100,
   /* 1試合で出せる上限。**実装事故の止め金。**
      ラウンド数の数え方を間違えて桁が飛んでも、ここで止まる。
      「気づいた時には全員が100万枚持っていた」は取り返しがつかない
      （減らすと、遊ぶ側からは没収に見える） */
-  MAX_PER_MATCH: 500,
+  MAX_PER_MATCH: 800,
+  /* 登録した時に1回だけ配る。**一番安いスキン(300)が1つ買えて200枚残る額。**
+     狙いは金額ではなく、**「買う」を1回体験させること。**
+     0枚から始めると、店を開いても全部が灰色で、
+     何が売っているのかを見る前に閉じることになる */
+  SIGNUP: 500,
 };
+
+/**
+ * 1人プレイの取り分。**ここだけ本人の申告が混じる。**
+ *
+ * 1人プレイはサーバーに一切繋がっていないので、何波まで行ったかは
+ * 開発者ツールから好きな数を送れる。**それでも構わない形にしてある。**
+ *
+ * 信じる代わりに天井を置く:
+ *   PER_RUN … 1回で受け取れる上限
+ *   PER_DAY … その日に受け取れる上限（台帳が数える。migrations.jsの8番）
+ *   MIN_GAP_S … 前回からこれだけ空いていないと受け取れない
+ *
+ * PER_DAY(600)は**対戦2試合ぶんにも満たない。**
+ * 嘘をついて取れる最大が対戦を普通に回すより少ないので、嘘をつく意味が消える。
+ *
+ * 代わりに、**1人プレイは上手さより回数が効く。**
+ * 時間で縛る以上そうなるので、そこは承知のうえで置いている
+ */
+export const SOLO = {
+  WAVE: 20,
+  KILL: 1,
+  PER_RUN: 400,
+  PER_DAY: 600,
+  MIN_GAP_S: 60,
+};
+
+/** 1人プレイ1回ぶんの枚数。申告された数字はここで上限まで丸める */
+export function soloCoinsFor({ wave, kills } = {}) {
+  // 申告の桁が飛んでいても、掛ける前にここで止める。
+  // 上限だけで守ると、途中の掛け算がとんでもない数になってから丸めることになる
+  const w = Math.min(500, Math.max(0, wave | 0));
+  const k = Math.min(5000, Math.max(0, kills | 0));
+  return Math.min(SOLO.PER_RUN, w * SOLO.WAVE + k * SOLO.KILL);
+}
 
 /**
  * 1人ぶんの枚数を数える。**引数は全部サーバーが持っている値。**
@@ -76,6 +119,82 @@ export async function addCoins(query, userId, amount) {
     [userId, add],
   );
   return Number(res.rows[0]?.coins ?? 0);
+}
+
+/* 何が起きて払えなかったのか。**画面に出す文言はここが持つ。**
+   クライアント側でも同じ判定を書くと、必ずどちらかが古くなる */
+export const SOLO_ERR = {
+  SOON: '少し間を空けてからどうぞ',
+  FULL: '今日のぶんはここまで。明日また貯まります',
+};
+
+/**
+ * 1人プレイの取り分を財布へ入れる。**天井は台帳の中で決める。**
+ *
+ * `withClient` で1本の線を借りて呼ぶこと（BEGIN と COMMIT が散ると取引にならない）。
+ *
+ * **なぜ SELECT してから UPDATE してよいのか。**
+ * addCoins では「読んでから書く」を避けている（同時に2試合終わると片方消える）が、
+ * ここは避けようがない。**その日いくらまで、を決めるには今日ぶんを読むしかない。**
+ * だから代わりに `FOR UPDATE` で行に鍵を掛ける。
+ * 同じ人の2回目が同時に来たら、1回目が COMMIT するまで待たされるので、
+ * 2つが同じ「今日ぶん」を読むことが起きない。
+ *
+ * @param want 申告から計算した希望額（soloCoinsFor の返り値）
+ * @param now  「今日」を決める時刻。検査から日を跨がせるために引数にしてある
+ * @returns { ok:true, got, coins, today } か { ok:false, error }
+ */
+export async function addSoloCoins(query, userId, want, now = new Date()) {
+  const add = Math.max(0, Math.round(want || 0));
+  // 日付はサーバーの時計で決める。UTCで切るので、日付が変わるのは日本時間の朝9時
+  const today = now.toISOString().slice(0, 10);
+
+  await query('BEGIN');
+  try {
+    // 財布がまだ無い人のために先に作る。**DO NOTHING なので既にあれば何も起きない**
+    await query('INSERT INTO wallets (user_id) VALUES ($1) ON CONFLICT DO NOTHING', [userId]);
+    const cur = await query(
+      `SELECT coins, solo_at,
+              CASE WHEN solo_day = $2 THEN solo_today ELSE 0 END AS used
+         FROM wallets WHERE user_id = $1 FOR UPDATE`,
+      [userId, today],
+    );
+    const row = cur.rows[0];
+    const used = Number(row?.used ?? 0);
+
+    // 連投を弾く。倒れた直後に何十回も送りつける形を止めるだけで、
+    // 本当の天井は下の1日ぶん
+    const last = row?.solo_at ? new Date(row.solo_at).getTime() : 0;
+    if (last && now.getTime() - last < SOLO.MIN_GAP_S * 1000) {
+      await query('ROLLBACK');
+      return { ok: false, error: SOLO_ERR.SOON };
+    }
+
+    const got = Math.max(0, Math.min(add, SOLO.PER_DAY - used));
+    if (got <= 0) {
+      /* 受け取れなくても**時刻は進める。**進めないと、上限に当たった人が
+         上限に当たっている間だけ連投し放題になる（弾く条件を通らなくなるので） */
+      await query(
+        'UPDATE wallets SET solo_day = $2, solo_today = $3, solo_at = now() WHERE user_id = $1',
+        [userId, today, used],
+      );
+      await query('COMMIT');
+      return { ok: false, error: SOLO_ERR.FULL, coins: Number(row?.coins ?? 0) };
+    }
+
+    const res = await query(
+      `UPDATE wallets
+          SET coins = coins + $2, solo_day = $3, solo_today = $4,
+              solo_at = now(), updated_at = now()
+        WHERE user_id = $1 RETURNING coins`,
+      [userId, got, today, used + got],
+    );
+    await query('COMMIT');
+    return { ok: true, got, coins: Number(res.rows[0]?.coins ?? 0), today: used + got };
+  } catch (e) {
+    await query('ROLLBACK').catch(() => {});
+    throw e;
+  }
 }
 
 /** 今いくら持っているか。財布がまだ無い人は0 */
