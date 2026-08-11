@@ -2210,6 +2210,9 @@ class Game {
         wave: this.director.wave, kills: this.kills, score: this.score,
       });
       // 重さの報告は上の_flushStatsの中で送られている（先に送ってから標本を捨てる順）
+      // コインの受け取りは倒れた瞬間に投げる。結果画面が出るのは0.9秒後なので、
+      // 大抵は間に合うが、間に合わなくても後から書き換わる形にしてある
+      this._soloPay = this._claimSoloCoins();
     }
     // すぐ結果を出さない。倒れる間を見せてから出す。
     // 260msで切り替えていた頃は、撃たれた次の瞬間に文字が出ていて、
@@ -2334,6 +2337,44 @@ class Game {
     this.hud.spectating(null);
   }
 
+  /**
+   * 1人プレイの取り分を貰いに行く。**ログインしていなければ何もしない。**
+   *
+   * 送るのは到達ウェーブと撃破数だけで、**枚数は送らない。**
+   * 枚数はサーバーが決めるし、そもそも上限も向こうが持っている
+   * （server/wallet.jsのSOLO）。ここが書き換えられても、
+   * 1日に取れる枚数は変わらない。
+   *
+   * @returns { got, coins } か、貰えなかった理由 { error }、繋がらなければ null
+   */
+  async _claimSoloCoins() {
+    if (!this.account?.user) return null;
+    try {
+      const res = await fetch('/api/solo', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ wave: this.director.wave, kills: this.kills }),
+        credentials: 'same-origin',
+        // 返らないサーバーを待ち続けると、結果画面に「…」が残り続ける
+        signal: AbortSignal.timeout(10_000),
+      });
+      // 台帳を持たないサーバーでは受け口ごと無い。黙って何も出さない
+      if (res.status === 404) return null;
+      const r = await res.json();
+      if (r?.ok) this.account?.setCoins(r.coins);
+      return r;
+    } catch { return null; }
+  }
+
+  /* 結果画面のコインの行を書き換える。**返事が来た時に呼ばれる。**
+     画面がもう閉じていれば掴めないだけで、何も起きない */
+  _paintSoloCoins(r) {
+    const el = document.getElementById('dCoins');
+    if (!el) return;
+    if (!r) { el.textContent = '—'; return; }
+    el.textContent = r.ok ? `＋${r.got}枚` : (r.error || '—');
+  }
+
   _showDeath() {
     this.hud.show(false);
     const acc = this.shotsFired ? Math.round((this.shotsHit / this.shotsFired) * 100) : 0;
@@ -2360,6 +2401,10 @@ class Game {
         ${row('撃破', this.kills, 2)}
         ${row('ヘッドショット', this.headshots, 3)}
         ${row('命中率', `${acc}%`, 4)}
+        ${/* コインの行はログインしている時だけ。**ログインしていない人に
+              「0枚」と出さない。**貯まらない理由がログインだと分からないまま
+              「壊れている」に見える（対戦の結果画面と同じ考え方） */''}
+    ${this.account?.user ? row('コイン', '<span id="dCoins">…</span>', 5) : ''}
       </div>
       ${isBest
     ? `<div class="dbest hit" style="animation-delay:.62s">自己ベスト更新</div>`
@@ -2369,6 +2414,11 @@ class Game {
         <button id="ovHome" class="ovhome" type="button">ホームへ戻る</button>
       </div>
     `);
+    // 受け取りの返事。**先に画面を出してから書き換える。**
+    // 待ってから出すと、繋がらない日は結果画面そのものが遅れる
+    if (this.account?.user) {
+      Promise.resolve(this._soloPay).then((r) => this._paintSoloCoins(r), () => this._paintSoloCoins(null));
+    }
   }
 
   _restart() {
