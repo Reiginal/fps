@@ -113,18 +113,35 @@ export function tokens(segment) {
   return found.map((t) => t.replace(/^["']|["']$/g, ''));
 }
 
+/* 流し込む文章（heredoc）を取り除く。
+   **PR本文やコミット文には、gitの打ち方そのものを書くことがある。**
+   実際にこの見張りを入れた日に、PR本文へ書いた「git add .」という
+   説明の文字列を命令だと読んで、PR作成を止めてしまった。
+   文章は命令ではないので、見る前に落とす */
+export function stripHeredocs(cmd) {
+  // <<'EOF' … 行頭のEOF まで。<<-EOF や <<"EOF" も同じ形
+  return cmd.replace(/<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1[\s\S]*?\n\s*\2\s*(\n|$)/g, ' HEREDOC\n');
+}
+
 /* 1回のBashに複数の命令が入る（git add ... && git commit ...）。
    **繋がった全部を見る。** 頭だけ見ると、後ろに付けた方を素通しする */
 export function segments(cmd) {
-  return cmd.split(/&&|\|\||[;|\n]/);
+  return stripHeredocs(cmd).split(/&&|\|\||[;|\n]/);
 }
 
-/* 「git なんとか」を取り出す。-C や -c は git 自身への指定なので読み飛ばす */
+/* 命令の頭に付く飾り。ここを読み飛ばした先が git かどうかを見る */
+const LEAD = new Set(['do', 'then', 'else', 'sudo', 'time', 'exec', 'command', 'nohup', '{', '(', '!']);
+
+/* 「git なんとか」を取り出す。-C や -c は git 自身への指定なので読み飛ばす。
+   **その段の先頭が git でなければ見ない。**
+   途中に出てくる git を拾うと、別の命令に渡した文章の中の「git add .」まで
+   命令として読んでしまう（実際にPR作成が止まった） */
 export function gitCall(segment) {
   const t = tokens(segment);
-  const at = t.indexOf('git');
-  if (at < 0) return null;
-  let i = at + 1;
+  let i = 0;
+  while (i < t.length && (LEAD.has(t[i]) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(t[i]))) i += 1;
+  if (t[i] !== 'git') return null;
+  i += 1;
   while (i < t.length && (t[i] === '-C' || t[i] === '-c')) i += 2;
   if (i >= t.length) return null;
   return { sub: t[i], args: t.slice(i + 1) };

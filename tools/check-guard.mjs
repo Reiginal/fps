@@ -97,6 +97,31 @@ console.log('\n[3] 普通の打ち方を邪魔しない');
     'メッセージの中の . で止まらない');
 }
 
+console.log('\n[3b] 文章を命令だと読まない');
+{
+  /* **見張りを入れた当日に実際に誤爆した形。**
+     PR本文に「git add . はやめる」と書いたら、その説明の文字列を命令として読んで
+     gh pr create ごと止めた。文章は命令ではない。
+     誤って止まる方が、見逃すより作業には効く（止まった側は理由を選べない） */
+  const body = [
+    'gh pr create --base main --body "$(cat <<\'EOF\'',
+    '## 対応内容',
+    '- git add -A / git add . / git commit -a を止めるようにした',
+    'git stash もパス無しは止まる',
+    'EOF',
+    ')"',
+  ].join('\n');
+  ok(judge(body) === null, '**PR本文に書いた git add -A の説明で止まらない**');
+
+  ok(judge('echo "git add -A はやめる" >> メモ.md') === null,
+    '別の命令へ渡した文章の中の git add -A で止まらない');
+  ok(judge('rg -n "git add" CLAUDE.md') === null, '検索語の中の git add で止まらない');
+
+  // ただし、本物の命令は heredoc を挟んでも見落とさない
+  ok(judge('gh pr create --body "$(cat <<\'EOF\'\nほげ\nEOF\n)" && git add -A') !== null,
+    'heredocの後ろに本物の git add -A が続けば止まる');
+}
+
 /* ------------------------------------------------ 誰が触ったかの台帳 */
 
 console.log('\n[4] 別のセッションが触った物をコミットに入れない');
