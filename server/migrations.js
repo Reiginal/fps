@@ -165,7 +165,29 @@ export const STEPS = [
       ADD COLUMN solo_today INTEGER NOT NULL DEFAULT 0 CHECK (solo_today >= 0),
       ADD COLUMN solo_at    TIMESTAMPTZ`,
   },
-  // 現金を入れる時の明細(ledger)はここへ足す。上の8つには二度と触らない
+  {
+    n: 9,
+    name: 'スキンの枠を形と色に分ける',
+    /* **1つの武器に枠が2つになった（形・色）。**
+       前は主キーが (user_id, weapon_id) で1行しか置けず、形と色が
+       同じ枠を取り合っていた。刀を着けている人がゴールドを選ぶと刀が消える。
+
+       slot を足して主キーへ入れる。既にある行は、形違いのidなら'shape'、
+       それ以外は'paint'へ振り分ける。**中身を読んで振り分けないと、
+       刀を着けていた人が全員「金色の普通のナイフ」になる。**
+
+       形違いのidをここに直書きしているのは、SQLからprotocol.jsを呼べないため。
+       **増えた時にここへ足す必要は無い**（足さなくても新しい形は
+       最初からslot付きで書かれる。ここが効くのは既にある行だけ）。
+       tools/check-store.mjs が、この並びと SHAPE_LIST のずれを見張る */
+    sql: `ALTER TABLE equipped_skins
+        ADD COLUMN slot TEXT NOT NULL DEFAULT 'paint';
+      UPDATE equipped_skins SET slot = 'shape'
+        WHERE skin_id IN ('katana', 'dagger', 'dragon', 'cute');
+      ALTER TABLE equipped_skins DROP CONSTRAINT equipped_skins_pkey;
+      ALTER TABLE equipped_skins ADD PRIMARY KEY (user_id, weapon_id, slot)`,
+  },
+  // 現金を入れる時の明細(ledger)はここへ足す。上の9つには二度と触らない
 ];
 
 /**

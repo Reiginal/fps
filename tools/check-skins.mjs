@@ -12,10 +12,11 @@ import { readFileSync, readdirSync } from 'node:fs';
 import '../server/dom-stub.js';
 import * as THREE from 'three';
 import {
-  SKINS, skinAt, applySkin, skinFor, hasSkin, wearSkin, setAccount,
+  SKINS, skinAt, applySkin, shapeFor, paintFor, paintIdFor, shapeOf,
+  hasSkin, wearSkin, setAccount,
 } from '../src/player/skins.js';
 import { SKIN_LIST, SKINNABLE, DEFAULT_SKIN, skuOf } from '../src/net/protocol.js';
-import { WEAPONS, MATS, recolor } from '../src/player/weapons.js';
+import { WEAPONS, MATS, recolor, SHAPE_BUILDS } from '../src/player/weapons.js';
 
 let bad = 0;
 const ok = (c, msg) => { console.log(`  ${c ? '○' : '× 失敗:'} ${msg}`); if (!c) bad++; };
@@ -153,25 +154,91 @@ console.log("\n[7] 武器ごとに別のスキンを着ける");
 {
   // 何も持っていない状態から始める（ログインしていない人と同じ）
   setAccount({ owned: [], equipped: {} });
-  for (const w of SKINNABLE) ok(skinFor(w) === DEFAULT_SKIN, `${w} … 最初は標準`);
+  for (const w of SKINNABLE) {
+    ok(shapeFor(w) === DEFAULT_SKIN && paintFor(w) === DEFAULT_SKIN, `${w} … 最初は標準`);
+  }
   ok(!wearSkin('rifle', 'gold'), '**持っていない物は着けられない**');
-  ok(skinFor('rifle') === DEFAULT_SKIN, '着けようとしても標準のまま');
-  ok(wearSkin('rifle', DEFAULT_SKIN), '標準はいつでも着けられる（買う物ではない）');
+  ok(paintFor('rifle') === DEFAULT_SKIN, '着けようとしても標準のまま');
+  ok(wearSkin('rifle', DEFAULT_SKIN, 'paint'), '標準はいつでも着けられる（買う物ではない）');
 
   // 買ってある状態にする
   setAccount({ owned: [skuOf('rifle', 'gold'), skuOf('pistol', 'desert')], equipped: {} });
   ok(hasSkin('rifle', 'gold'), 'ライフルのゴールドを持っている');
   ok(!hasSkin('pistol', 'gold'), '**ピストルのゴールドは別の商品**（持っていない）');
   ok(wearSkin('rifle', 'gold'), '持っている物は着けられる');
-  ok(skinFor('rifle') === 'gold' && skinFor('pistol') === DEFAULT_SKIN,
+  ok(paintFor('rifle') === 'gold' && paintFor('pistol') === DEFAULT_SKIN,
     '**武器ごとに別々**（ライフルはゴールド、ピストルは標準）');
-  ok(wearSkin('pistol', 'desert') && skinFor('rifle') === 'gold',
+  ok(wearSkin('pistol', 'desert') && paintFor('rifle') === 'gold',
     'ピストルを変えてもライフルは変わらない');
 
   // 台帳側で持ち物を消された時。着せたままにしない
-  setAccount({ owned: [], equipped: { rifle: 'gold' } });
-  ok(skinFor('rifle') === DEFAULT_SKIN,
+  setAccount({ owned: [], equipped: { rifle: { paint: 'gold' } } });
+  ok(paintFor('rifle') === DEFAULT_SKIN,
     '**持っていない物が届いても着せない**（持ち物を消した時の保険）');
+}
+
+console.log("\n[7a] 形と色は別々の枠");
+{
+  /* **ここが今回の山。** 前は枠が1つで、形と色が同じ枠を取り合っていた。
+     刀を着けている人がゴールドを選ぶと刀が消えて、普通のナイフが金色になる。
+     遊んで「ナイフだろうが刀だろうが、それぞれのスキンが見えるべき」と言われた */
+  setAccount({
+    owned: [skuOf('knife', 'katana'), skuOf('knife', 'gold'), skuOf('knife', 'dagger')],
+    equipped: {},
+  });
+  ok(wearSkin('knife', 'katana'), '刀を着けられる');
+  ok(shapeFor('knife') === 'katana', '形の枠に入る');
+  ok(wearSkin('knife', 'gold'), 'そのままゴールドも着けられる');
+  ok(shapeFor('knife') === 'katana' && paintFor('knife') === 'gold',
+    '**金色の刀になる**（色を着けても刀が消えない）');
+
+  // 塗る時に使うid。色を選んでいなければ、その形が持っている色
+  ok(paintIdFor('knife') === 'gold', '色を選んでいればその色で塗る');
+  ok(wearSkin('knife', DEFAULT_SKIN, 'paint'), '色だけ外せる');
+  ok(shapeFor('knife') === 'katana', '色を外しても形は残る');
+  ok(paintIdFor('knife') === 'katana',
+    '**色を外すと、その形が持っている色で塗る**（刀は鋼のまま。元の紺黒に戻らない）');
+
+  // 形だけ元へ戻す。標準はどちらの枠にも属さないので、枠を明示して送る
+  ok(wearSkin('knife', 'gold') && wearSkin('knife', DEFAULT_SKIN, 'shape'),
+    '形だけ元へ戻せる');
+  ok(shapeFor('knife') === DEFAULT_SKIN && paintFor('knife') === 'gold',
+    '形を戻しても色は残る（金色の普通のナイフ）');
+
+  // 枠を跨いだ指定は通さない。通ると、形の枠が色で埋まって形が消える
+  ok(!wearSkin('knife', 'gold', 'shape'), '**色を形の枠へは入れられない**');
+  ok(!wearSkin('knife', 'katana', 'paint'), '**形を色の枠へは入れられない**');
+
+  // 台帳から届く形も枠付き
+  setAccount({
+    owned: [skuOf('knife', 'katana'), skuOf('knife', 'gold')],
+    equipped: { knife: { shape: 'katana', paint: 'gold' } },
+  });
+  ok(shapeFor('knife') === 'katana' && paintFor('knife') === 'gold',
+    '台帳から届いた組み合わせがそのまま乗る');
+
+  /* **本当に金色の刀が出るか。** ここまでは記録の話なので、
+     組み立てて塗るところまでやって、目に見える物が変わっているかを見る。
+     形の側だけ直して塗りを繋ぎ忘れると、記録は正しいのに画は素の刀のまま */
+  const knife = WEAPONS.find((w) => w.id === 'knife');
+  const build = shapeOf(shapeFor('knife'));
+  ok(build === SHAPE_BUILDS.katana, '組み立てが刀になっている');
+  const goldBlade = build(knife.view);
+  applySkin(goldBlade, paintIdFor('knife'));
+  const plainBlade = build(knife.view);
+  applySkin(plainBlade, DEFAULT_SKIN);
+  /* 面に貼ってある材質そのもので比べる。**色の値では比べられない。**
+     色は焼いた地図(map)が全部持っていて、materialのcolorは白のまま
+     （[5]で同じ理由から地図の中身を平均している） */
+  const matsOf = (g) => {
+    const out = [];
+    g.traverse((o) => { if (o.isMesh) out.push(o.material); });
+    return out;
+  };
+  const gold = matsOf(goldBlade);
+  const plain = matsOf(plainBlade);
+  const diff = gold.filter((m, i) => m !== plain[i]).length;
+  ok(diff > 0, `**素の刀と塗りが違う**（${diff}個の面に金色が乗っている）`);
 }
 
 console.log("\n[7b] 値段の表が1つしかない");
@@ -239,6 +306,28 @@ console.log("\n[9] 画面の器");
   const kd = html.match(/\.lkitem \.kd \{[^}]*\}/);
   const kdSize = Number(kd?.[0].match(/font-size:\s*(\d+)px/)?.[1] || 0);
   ok(kdSize >= 10, `「形」の札が読める大きさ (${kdSize}px / 10px以上)`);
+}
+
+console.log('\n[9.2] 形と色を別々に並べているか');
+{
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const js = readFileSync(new URL('../src/ui/look.js', import.meta.url), 'utf8');
+  /* **列が2つある。** 1つの列に混ぜると、押した物がどちらの枠へ入るのかが
+     読めない（前は枠が1つで、色を押すと形が消えていた） */
+  ok(html.includes('id="lkShapes"') && html.includes('id="lkList"'), '形と色で列が分かれている');
+  ok(/lkShapeRow/.test(html) && /shapeRow\.classList\.toggle\('hidden'/.test(js),
+    '形を持たない武器では形の列を隠す');
+  // 試着は枠ごと。ここが1つの値だと、色を試着した瞬間に形が消えて見える
+  ok(/slot === 'shape' \? this\.preview : shapeFor/.test(js),
+    '**試着はその物が入る枠だけを差し替える**（刀の上に色が乗る）');
+  // 着ける時も買う時も枠を明示する。標準はどちらの枠にも属さないので割り出せない
+  ok(/slot, skin: /.test(js), '台帳へ枠を送っている');
+  ok(!/api\('\/api\/equip', \{ weapon: this\.weapon, skin:/.test(js),
+    '枠を送らない古い呼び方が残っていない');
+  // ストアで持っている物を隠さない。買うほど品揃えが減って寂しくなる
+  ok(/所持/.test(js), '持っている物には「所持」と出る');
+  ok(!/this\.store && \(have \|\| s\.id === DEFAULT_SKIN\)\) continue/.test(js),
+    '**買った物がストアから消えない**');
 }
 
 console.log('\n[9.5] 買えた合図の音');

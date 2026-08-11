@@ -314,7 +314,7 @@ console.log('\n[8] 形スキンで強くならない');
   ok(!/skin|shape/.test(room), '**サーバーはスキンを知らない**（知らない物では強くできない）');
 
   // 実際に刀を着けて確かめる
-  setAccount({ owned: ['knife:katana'], equipped: { knife: 'katana' } });
+  setAccount({ owned: ['knife:katana'], equipped: { knife: { shape: 'katana' } } });
   ok(swingOf('knife', 'light') === SWINGS['katana.light'], '刀を着けると振り方が変わる');
   ok(swingTune('katana', false) !== SWING_TUNE, '刀を着けると音も変わる');
   setAccount({ owned: [], equipped: {} });
@@ -356,7 +356,7 @@ console.log('\n[9] 振る音が形と強さで分かれている');
   ok(/swing\?\.\(swingTune\(w\.shapeId, this\.heavy\)\)/.test(w),
     '振った時に形と強さで鳴り分ける');
   /* 形は**構えた時に1回引いて覚えておく。**撃つたびに引き直していた頃、
-     skinFor が中で品揃えの配列を毎回作っていた（毎秒12発ぶんのごみ） */
+     shapeFor が中で品揃えの配列を毎回作っていた（毎秒12発ぶんのごみ） */
   ok(/this\.shapeId = shapeIdOf\(def\.id\)/.test(w), '形は組み立てた時に1回だけ引く');
   ok(/w\.shapeId = shapeIdOf\(w\.def\.id\)/.test(w), '着け替えた時に引き直している');
 }

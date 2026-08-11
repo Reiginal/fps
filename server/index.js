@@ -386,7 +386,10 @@ async function routeApi(url, req, res) {
       return;
     }
 
-    const r = await equip(db.query, me.id, String(body.weapon ?? ''), String(body.skin ?? ''));
+    const r = await equip(
+      db.query, me.id,
+      String(body.weapon ?? ''), String(body.slot ?? ''), String(body.skin ?? ''),
+    );
     if (!r.ok) { sendJson(res, 400, r); return; }
     sendJson(res, 200, { ok: true, equipped: await equippedOf(db.query, me.id) });
     return;

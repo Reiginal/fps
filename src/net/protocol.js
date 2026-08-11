@@ -813,6 +813,39 @@ export function parseSku(sku) {
 export const canEquip = (weapon, skin) =>
   skin === DEFAULT_SKIN || itemsFor(weapon).some((s) => s.id === skin);
 
+/* **1つの武器に枠が2つある。形と色。**
+ *
+ * 前は枠が1つで、形と色が同じ枠を取り合っていた。
+ * だから刀を着けている人がゴールドを選ぶと刀が消えて、普通のナイフが金色になる。
+ * 遊んで「ナイフだろうが刀だろうが、それぞれのスキンが見えるべき」と言われた所で、
+ * 買った物の組み合わせが作れないのは、買う理由そのものを削っていた。
+ *
+ * 枠を分けると、**持っている形×持っている色**が全部組める（金色の刀が出る）。
+ * 商品の数は増やしていない（刀1本・ゴールド1本を買えば、その組み合わせは無料）。
+ *
+ * どちらの枠も「何も選んでいない」を標準(stock)で表す:
+ *   形が標準 … その武器の元の形
+ *   色が標準 … **その形が持っている色**（刀は鋼、ドラゴンは赤銅）。
+ *              ここを「元の紺黒」にすると、飾りだけ足した中途半端な見た目になる
+ */
+export const SLOTS = ['shape', 'paint'];
+
+/** そのスキンがどちらの枠に入るか。標準はどちらにも入れる */
+export const slotOf = (skin) => (isShape(skin) ? 'shape' : 'paint');
+
+/** その枠にそれを入れてよいか。**枠を跨いだ指定を通さない**
+    （形の枠にゴールドが入ると、色の枠が空いたまま形が消える） */
+export const canEquipSlot = (weapon, slot, skin) =>
+  SLOTS.includes(slot) && canEquip(weapon, skin)
+  && (skin === DEFAULT_SKIN || slotOf(skin) === slot);
+
+/** 装備の記録の初期値。{ rifle: {shape:'stock', paint:'stock'}, ... } */
+export const emptyLook = () => {
+  const out = {};
+  for (const w of SKINNABLE) out[w] = { shape: DEFAULT_SKIN, paint: DEFAULT_SKIN };
+  return out;
+};
+
 /* -------------------------------------------------------------- 発言 */
 
 // 1回の発言の長さ。長文を投げられると画面が埋まる。

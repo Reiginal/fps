@@ -16,6 +16,7 @@
 // 「画面では300なのに引かれるのは1500」になる）。ここが持つのは塗り方だけ。
 import {
   SKIN_LIST, SHAPE_LIST, SKINNABLE, DEFAULT_SKIN, skuOf, canEquip,
+  SLOTS, slotOf, canEquipSlot, emptyLook,
 } from '../net/protocol.js';
 import { skinnedFrom, matNameOf, SHAPE_BUILDS } from './weapons.js';
 
@@ -132,19 +133,39 @@ export const shapeOf = (id) => SHAPE_BUILDS[id] || null;
 /* 持っている物。skuの集合。**ログインしていない人は空**＝標準しか着けられない。
    ここが空でも遊べる（標準はいつでも着けられる） */
 let owned = new Set();
-/* 武器ごとに何を着けているか。{ rifle:'desert', ... } */
+/* 武器ごとに何を着けているか。**枠が2つある**（形・色）。
+   { rifle: { shape:'dragon', paint:'gold' }, ... } */
 let worn = loadWorn();
 /* 装備が変わった時に呼ぶ。今持っている銃へ掛け直すのは呼ぶ側の仕事 */
 let onWear = () => {};
 
 export const setOnWear = (fn) => { onWear = fn || (() => {}); };
 
-/** その武器に今着いているスキンのid。何も着けていなければ標準 */
-export const skinFor = (weaponId) => {
-  const id = worn[weaponId];
-  // **その武器で扱える物か**まで見る。形違いは武器専用なので、
+/** その武器の、その枠に今入っているid。何も入っていなければ標準 */
+export const skinAtSlot = (weaponId, slot) => {
+  const id = worn[weaponId]?.[slot];
+  // **その武器の、その枠で扱える物か**まで見る。形違いは武器専用なので、
   // 別の武器のidが紛れ込んでいたら標準へ寄せる
-  return (id && canEquip(weaponId, id)) ? id : DEFAULT_SKIN;
+  return (id && canEquipSlot(weaponId, slot, id)) ? id : DEFAULT_SKIN;
+};
+
+/** その武器に今着いている**形**のid（標準なら元の形） */
+export const shapeFor = (weaponId) => skinAtSlot(weaponId, 'shape');
+
+/** その武器に今着いている**色**のid（標準ならその形が持っている色） */
+export const paintFor = (weaponId) => skinAtSlot(weaponId, 'paint');
+
+/**
+ * 実際に塗る時に使うid。**色を選んでいなければ、その形が持っている色を使う。**
+ *
+ * ここを素直に「色の枠の中身」にすると、刀やドラゴンを着けた人が
+ * 色を選ぶまで**元の紺黒のまま**になる。形違いは飾りを足すだけでなく
+ * 本体の色も持っている（skins.jsのSHAPE_LOOK）ので、
+ * 飾りだけ浮いた中途半端な見た目になってしまう
+ */
+export const paintIdFor = (weaponId) => {
+  const paint = paintFor(weaponId);
+  return paint === DEFAULT_SKIN ? shapeFor(weaponId) : paint;
 };
 
 /** 持っているか。標準はいつでも持っている扱い */
@@ -162,11 +183,13 @@ export const ownedSkus = () => [...owned];
  */
 export function setAccount({ owned: list, equipped } = {}) {
   owned = new Set(Array.isArray(list) ? list : []);
-  worn = {};
+  worn = emptyLook();
   for (const w of SKINNABLE) {
-    const id = equipped?.[w];
-    // **持っていない物が届いても着せない。** 台帳側で持ち物を消した時の保険
-    worn[w] = (id && canEquip(w, id) && hasSkin(w, id)) ? id : DEFAULT_SKIN;
+    for (const slot of SLOTS) {
+      const id = equipped?.[w]?.[slot];
+      // **持っていない物が届いても着せない。** 台帳側で持ち物を消した時の保険
+      if (id && canEquipSlot(w, slot, id) && hasSkin(w, id)) worn[w][slot] = id;
+    }
   }
   saveWorn();
   onWear();
@@ -176,10 +199,11 @@ export function setAccount({ owned: list, equipped } = {}) {
  * 装備する。**手元だけ先に変える。** サーバーへ送るのは呼ぶ側（look.js）。
  * 押した瞬間に見た目が変わらないと、効いていないように見える
  */
-export function wearSkin(weaponId, skinId) {
+export function wearSkin(weaponId, skinId, slot = slotOf(skinId)) {
   if (!SKINNABLE.includes(weaponId)) return false;
+  if (!canEquipSlot(weaponId, slot, skinId)) return false;
   if (!hasSkin(weaponId, skinId)) return false;
-  worn[weaponId] = skinId;
+  worn[weaponId][slot] = skinId;
   saveWorn();
   onWear();
   return true;
@@ -193,11 +217,22 @@ export function setOwned(list) {
 /* localStorageは設定次第で読み書きどちらも例外を投げる。
    覚えられないだけで遊べなくなるのは割に合わない（netmenu.jsと同じ作法）*/
 function loadWorn() {
-  const out = {};
-  for (const w of SKINNABLE) out[w] = DEFAULT_SKIN;
+  const out = emptyLook();
   try {
     const raw = JSON.parse(localStorage.getItem(STORE) || '{}');
-    for (const w of SKINNABLE) if (canEquip(w, raw[w])) out[w] = raw[w];
+    for (const w of SKINNABLE) {
+      const v = raw[w];
+      /* **枠が1つだった頃の控えを読む。** 前は文字列1つ（'katana'）で覚えていた。
+         そのまま捨てると、ログインしていない人の装備が全部標準へ戻る。
+         中身を見て、形なら形の枠・色なら色の枠へ入れ直す */
+      if (typeof v === 'string') {
+        if (canEquip(w, v)) out[w][slotOf(v)] = v;
+        continue;
+      }
+      for (const slot of SLOTS) {
+        if (canEquipSlot(w, slot, v?.[slot])) out[w][slot] = v[slot];
+      }
+    }
   } catch { /* 覚えていないだけ */ }
   return out;
 }
