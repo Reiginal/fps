@@ -397,25 +397,54 @@ console.log('\n[4.7] 形スキンの銃声が、見た目の通りに鳴って�
     const pairs = [
       ['廃品', 'scrap', 'ウエスタン', 'western', 'shotgun'],
       ['ヴェノム', 'venom', 'アイス', 'ice', 'sniper'],
-      ['ボーン', 'bone', 'サイバー', 'cyber', 'pistol'],
     ];
     for (const [nA, a, nB, b, weapon] of pairs) {
       const base = GUNS.find((g) => g.id === weapon).sound;
       _seed = 20260811;
+      const plainM = await capture((x) => x.gunshot(base, null, null));
+      _seed = 20260811;
       const mA = await capture((x) => x.gunshot(gunTune(a, base), null, null));
       _seed = 20260811;
       const mB = await capture((x) => x.gunshot(gunTune(b, base), null, null));
+
+      /* **ここが2026-08-11に足した所。元の銃と比べる。**
+         「ベノムとかって銃声全く変わってないよね」と言われて、その通りだった。
+
+         それまでこの節は「1つ目と2つ目が違うか」しか見ていなかった。
+         ヴェノムは胴165・尾1.30に置いてあって、アイス(胴520)とは充分離れていたので
+         **検査は通っていた。** ところが元の狙撃銃が胴180・尾1.50で、
+         そこから少ししか動いていなかったので、遊ぶ側には何も変わって聞こえない。
+
+         **「兄弟と違う」は「元と違う」を保証しない。** 両方見る */
+      ok(Math.abs(mA.centroid - plainM.centroid) > 200
+        || Math.abs(mA.lowPct - plainM.lowPct) > 8,
+      `${nA}は元の${weapon}と違う（重心 ${plainM.centroid.toFixed(0)}→${mA.centroid.toFixed(0)}Hz`
+        + ` / 低音 ${plainM.lowPct.toFixed(1)}→${mA.lowPct.toFixed(1)}%）`);
       /* 重心が200Hz以上離れていること。**同じ帯で鳴っていたら同じ音に聞こえる。**
          200Hzは、並べて鳴らした時に「高い方／低い方」が言える差 */
       ok(Math.abs(mA.centroid - mB.centroid) > 200,
         `${nA}と${nB}は別の音（重心 ${mA.centroid.toFixed(0)}Hz と ${mB.centroid.toFixed(0)}Hz）`);
       ok(mA.peak < 0.95, `${nA}が割れていない（${mA.peak.toFixed(2)}）`);
     }
-    /* **サイバーとボーンだけは機関部の音でも分かれている。**
-       あちらは真鍮が跳ねる音を切って電子銃にしてあるので、
-       こちらは残す（同じ拳銃で2種類あることが音でも読める）*/
-    ok(SHAPE_GUN.cyber.mech === false && SHAPE_GUN.bone.mech !== false,
-      'サイバーは機関部の音を切って、ボーンは残している');
+
+    /* 1つ目の3つも同じ目で見る。**あちらは元の銃と比べて作ったので通るはず**だが、
+       通ることを確かめておかないと「見ていない」のと同じ */
+    for (const [name, shape, weapon] of [
+      ['ウエスタン', 'western', 'shotgun'],
+      ['アイス', 'ice', 'sniper'],
+      ['サイバー', 'cyber', 'pistol'],
+    ]) {
+      const base = GUNS.find((g) => g.id === weapon).sound;
+      _seed = 20260811;
+      const p0 = await capture((x) => x.gunshot(base, null, null));
+      _seed = 20260811;
+      const p1 = await capture((x) => x.gunshot(gunTune(shape, base), null, null));
+      ok(Math.abs(p1.centroid - p0.centroid) > 200 || Math.abs(p1.lowPct - p0.lowPct) > 8,
+        `${name}も元の${weapon}と違う（重心 ${p0.centroid.toFixed(0)}→${p1.centroid.toFixed(0)}Hz`
+        + ` / 低音 ${p0.lowPct.toFixed(1)}→${p1.lowPct.toFixed(1)}%）`);
+    }
+    // サイバーは真鍮が跳ねる音を切ってある（電子銃に聞こえないので）
+    ok(SHAPE_GUN.cyber.mech === false, 'サイバーは機関部の音を切っている');
   }
 
   /* **形が全部そろっているか。** 見た目を足して音を書き忘れると、

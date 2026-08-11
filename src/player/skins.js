@@ -168,22 +168,6 @@ const SHAPE_LOOK = {
       steel: { color: 0x6a7a48, wear: { color: 0xaebc78 } },
     },
   },
-  bone: {
-    note: '髑髏の握把、肋骨、銃口の牙。骨に憑かれた拳銃',
-    swatch: '#c9bfa6',
-    /* サイバー（黒と青緑の光）に対して、こちらは**黒と骨の白。**
-       光らせないので、白い骨と黒い地の**明暗差だけ**で読ませる。
-       地を一番黒くしてあるのはそのため */
-    over: {
-      enamel: { color: 0x14120f, wear: { color: 0x6a6254, amount: 0.8 } },
-      anodized: { color: 0x1a1814, wear: { color: 0x7a7264 } },
-      polymer: { color: 0x121110, wear: { color: 0x5a5348 } },
-      phosphate: { color: 0x100e0c, wear: { color: 0x6e6658 } },
-      // 地金を骨寄りの色へ。骨の飾りと地金が繋がって、銃が骨から生えて見える
-      steel: { color: 0xa89e88, wear: { color: 0xe0d8c4 } },
-    },
-  },
-
   cute: {
     note: '猫耳・丸めた角・パステルの縞・星のチャーム',
     swatch: '#d98aa6',
