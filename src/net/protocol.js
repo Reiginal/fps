@@ -762,8 +762,21 @@ export const SKIN_LIST = [
   // 標準は商品ではない。**最初から全員が持っている**（買う物が無い状態を作らない）
   { id: 'stock', name: '標準', price: 0 },
   /* 迷彩。材質ごとに違う色を置いて4色に見せる。
-     1色で塗る商品より手間は同じで、見た目の情報量が多いぶん高い */
-  { id: 'camo', name: '迷彩', price: 800 },
+     1色で塗る商品より手間は同じで、見た目の情報量が多いぶん高い。
+
+     **weaponが付いている物は、その武器でだけ売る。**
+     2026-08-11に「迷彩ってどれか1つのスキンでいいよ」と言われて絞った。
+     それまで色スキン2つ（迷彩・ゴールド）が5武器すべてで売られていて、
+     **どの武器も「4種類」のうち2枠が同じ色で埋まっていた。**
+     武器ごとの個性が形違いの2つだけで決まる形になっていた。
+
+     ライフルにしたのは、**塗り替えが届く面が49.9%で一番広い**から
+     （測った値。画面の6割が手と袖で、スキンはそこを触らない）。
+     一番よく見る武器でもある。
+
+     ゴールドにweaponを付けていないのは、あちらが「派手枠」で
+     どの武器でも同じ意味を持つ商品だから。迷彩は柄なので武器ごとの絵になる */
+  { id: 'camo', name: '迷彩', price: 800, weapon: 'rifle' },
   { id: 'gold', name: 'ゴールド', price: 1500 },
 ];
 export const SKIN_IDS = SKIN_LIST.map((s) => s.id);
@@ -804,6 +817,10 @@ export const SHAPE_LIST = [
      （塗り替えが届く面は41.7%と47.3%）。
      拳銃が安いのは届く面が12.6%しかなく、光で見せるぶん部品が少ないから */
   { weapon: 'shotgun', id: 'western', name: 'ウエスタン', price: 1800 },
+  /* ショットガンの2つ目。**ウエスタン（手入れされた木と真鍮）と生き物で分ける。**
+     近距離で噛みつく武器なので、形と中身が一致するのが選んだ理由。
+     散弾＝粒が散る武器に顎を付けると、何の武器かが飾りから読める */
+  { weapon: 'shotgun', id: 'shark', name: 'サメ', price: 1700 },
   { weapon: 'sniper', id: 'ice', name: 'アイス', price: 1800 },
   { weapon: 'pistol', id: 'cyber', name: 'サイバー', price: 1400 },
   /* 2026-08-11に**各武器2つ目**を足した。「各武器に4種類ぐらい」と言われた所で、
@@ -816,7 +833,6 @@ export const SHAPE_LIST = [
 
      値段は1つ目より少し安い。飾りの量が同じくらいでも、
      **後から出た物の方が安い**方が「増えていく」感じになる */
-  { weapon: 'shotgun', id: 'scrap', name: '廃品', price: 1600 },
   { weapon: 'sniper', id: 'venom', name: 'ヴェノム', price: 1600 },
   /* 拳銃の4つ目。**ボーンを消した枠へ入れた物。**
      ボーンは「光らせない拳銃」の縛りの中で明暗差だけに頼って地味になったので、
@@ -837,7 +853,11 @@ export const SHAPE_LIST = [
 export function itemsFor(weapon) {
   if (!SKINNABLE.includes(weapon)) return [];
   return [
+    /* **weaponが書いてある色は、その武器でだけ売る。**
+       書いていない物（ゴールド）は今まで通り全武器で売る。
+       ここで絞ると canEquip も一緒に直る（あちらはこの関数を通っている）*/
     ...SKIN_LIST.filter((s) => s.id !== DEFAULT_SKIN)
+      .filter((s) => !s.weapon || s.weapon === weapon)
       .map((s) => ({ ...s, weapon, kind: 'paint' })),
     ...SHAPE_LIST.filter((s) => s.weapon === weapon)
       .map((s) => ({ ...s, kind: 'shape' })),

@@ -395,7 +395,7 @@ console.log('\n[4.7] 形スキンの銃声が、見た目の通りに鳴って�
      ここでは「同じ武器の1つ目と、測って別方向へ動いていること」を見る */
   {
     const pairs = [
-      ['廃品', 'scrap', 'ウエスタン', 'western', 'shotgun'],
+      ['サメ', 'shark', 'ウエスタン', 'western', 'shotgun'],
       ['ヴェノム', 'venom', 'アイス', 'ice', 'sniper'],
       ['クローム', 'chrome', 'サイバー', 'cyber', 'pistol'],
     ];

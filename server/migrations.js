@@ -331,6 +331,38 @@ export const STEPS = [
       DELETE FROM owned_skins    WHERE sku LIKE '%:bone';
       DELETE FROM equipped_skins WHERE skin_id = 'bone'`,
   },
+  {
+    n: 15,
+    name: '廃品を消して、迷彩をライフルだけにする',
+    /* 2026-08-11。2つまとめて。
+
+       **廃品（ショットガンの形違い）** … 「全然かっこよくもユニークでもないっす」。
+       ボーン(14番)と同じで、**構想を説明せずに作って出した物**だった。
+
+       **迷彩** … 「どれか1つのスキンでいいよ」。
+       それまで色スキン2つ（迷彩・ゴールド）が5武器すべてで売られていて、
+       **どの武器も「4種類」のうち2枠が同じ色で埋まっていた。**
+       ライフルだけで売る形にしたので、他の4武器で買った分を返す。
+
+       どちらも13番・14番と同じやり方（払った額を返してから消す）。
+
+       **ライフルの迷彩は残す。** skuが 'rifle:camo' の行だけ触らないので、
+       LIKE ではなく列挙で書いてある（'%:camo' にすると全部消える）*/
+    sql: `UPDATE wallets w
+             SET coins = w.coins + r.back, updated_at = now()
+            FROM (SELECT user_id, SUM(price) AS back
+                    FROM owned_skins
+                   WHERE sku LIKE '%:scrap'
+                      OR sku IN ('shotgun:camo', 'pistol:camo', 'sniper:camo', 'knife:camo')
+                GROUP BY user_id) r
+           WHERE w.user_id = r.user_id;
+      DELETE FROM owned_skins
+            WHERE sku LIKE '%:scrap'
+               OR sku IN ('shotgun:camo', 'pistol:camo', 'sniper:camo', 'knife:camo');
+      DELETE FROM equipped_skins WHERE skin_id = 'scrap';
+      DELETE FROM equipped_skins
+            WHERE skin_id = 'camo' AND weapon_id <> 'rifle'`,
+  },
   // 現金を入れる時の明細(ledger)はここへ足す。上の11には二度と触らない
 ];
 

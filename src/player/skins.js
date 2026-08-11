@@ -106,6 +106,26 @@ const SHAPE_LOOK = {
       steel: { color: 0x8a7a66, wear: { color: 0xd8c8aa } },
     },
   },
+  shark: {
+    note: '銃口の顎と歯、鰓の切れ込み、背と胸の鰭。青灰の背と白い腹',
+    swatch: '#4a5c6a',
+    /* ウエスタン（焦茶＋真鍮）に対して、こちらは**青灰。**
+       **腹の白は塗りでは出せない**（塗り替えは材質ごとにしか効かないので、
+       上下の塗り分けが作れない）。腹の板を飾り側(sharkDeco)が持っていて、
+       ここが塗るのは背の側だけ。
+
+       鰭と顎に anodized を使ってあるので、ここで anodized を青灰にすると
+       **鰭も一緒に染まる**（材質を増やさずに背の色が乗る） */
+    over: {
+      enamel: { color: 0x2e3a44, wear: { color: 0x6a8090, amount: 0.9 } },
+      anodized: { color: 0x4a5c6a, wear: { color: 0x8aa4b4, amount: 0.8 } },
+      polymer: { color: 0x36444e, wear: { color: 0x6e8492 } },
+      phosphate: { color: 0x28323a, wear: { color: 0x62788a } },
+      // 地金は濡れた鮫肌の照り。青を残したまま明るくする
+      steel: { color: 0x8ea4b2, wear: { color: 0xd4e2ea } },
+    },
+  },
+
   ice: {
     note: '霜の結晶と氷輪、銃口から垂れる氷柱。白と薄氷の青',
     swatch: '#dce8f2',
@@ -139,21 +159,6 @@ const SHAPE_LOOK = {
 
   /* ---- 各武器の2つ目。2026-08-11 ----
      **1つ目と色の系統を変えている。** 同じ武器に似た色を2つ並べても選択にならない */
-  scrap: {
-    note: '錆びた鉄板と布テープ、赤い塗り文字。拾って継ぎ足した銃',
-    swatch: '#6a4a34',
-    /* ウエスタン（焦茶＋真鍮）に対して、こちらは**錆と煤。**
-       金属を赤茶へ寄せて、擦れの色も明るい地金ではなく錆にする
-       （普通の金属と逆。使い込むほど錆が濃くなる物なので） */
-    over: {
-      enamel: { color: 0x40352c, wear: { color: 0x8a5a34, amount: 1.4, dust: 0.30 } },
-      polymer: { color: 0x3a322a, wear: { color: 0x6a4e38, amount: 1.2, dust: 0.32 } },
-      anodized: { color: 0x4a3a2c, wear: { color: 0x9a6a3e, amount: 1.3, dust: 0.26 } },
-      phosphate: { color: 0x352c24, wear: { color: 0x7a5230, amount: 1.4, dust: 0.30 } },
-      // 地金だけは擦れて出る。**触る所は錆が落ちる**ので、ここが唯一明るい
-      steel: { color: 0x7a6e60, wear: { color: 0xc4b8a4 } },
-    },
-  },
   venom: {
     note: '黄緑の鱗と牙、垂れる毒。蛇に飲まれた狙撃銃',
     swatch: '#5a6a1e',
