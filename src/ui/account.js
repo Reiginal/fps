@@ -57,6 +57,12 @@ async function api(path, { method = 'GET', body } = {}) {
     credentials: 'same-origin',
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
+  return read(res);
+}
+
+/* 返事の読み方。**ここ1箇所しか無い。**
+   index.htmlが先に投げておいた分もここを通す（あちらで書き写すと必ずずれる） */
+async function read(res) {
   /* 404は「この置き場に会員証の仕組みが無い」。中身は読まない。
      「/api/me」はこれを返さない（台帳が無くても200で accounts:false と答える）。
      ここへ来るのは登録・ログイン・ログアウトの口だけ */
@@ -64,6 +70,21 @@ async function api(path, { method = 'GET', body } = {}) {
   let json = null;
   try { json = await res.json(); } catch { /* 中身が無い返事もある */ }
   return { status: res.status, ...(json || {}) };
+}
+
+/* index.htmlが読み込みの前に投げておいた /api/me を受け取る。**1回だけ。**
+   受け取った後は捨てて、2回目からは普通に自分で聞く
+   （ログイン・ログアウトの後にこれを使い回すと、変わる前の状態が返る）。
+
+   **無ければ何事もなく自分で聞く形にしてある。** index.html側の1行を
+   消したり書き換えたりしても、遅くなるだけで壊れないようにするため */
+async function earlyMe() {
+  const p = window.__me;
+  if (!p) return null;
+  window.__me = null;
+  const res = await p;
+  // 繋がらなかった時はnullが来る。会員証は無いものとして扱う
+  return res ? read(res) : { off: true };
 }
 
 export class AccountMenu {
@@ -120,7 +141,9 @@ export class AccountMenu {
   async refresh() {
     let r;
     try {
-      r = await api('/api/me');
+      // 起動時の1回目は、index.htmlが先に投げてある分がここで受け取れる
+      r = await earlyMe();
+      if (!r) r = await api('/api/me');
     } catch {
       // 繋がらない。会員証は無いものとして扱う（遊べなくはならない）
       r = { off: true };
