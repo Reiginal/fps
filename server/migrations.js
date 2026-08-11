@@ -187,7 +187,31 @@ export const STEPS = [
       ALTER TABLE equipped_skins DROP CONSTRAINT equipped_skins_pkey;
       ALTER TABLE equipped_skins ADD PRIMARY KEY (user_id, weapon_id, slot)`,
   },
-  // 現金を入れる時の明細(ledger)はここへ足す。上の9つには二度と触らない
+  {
+    n: 10,
+    name: 'パスワード再設定の合言葉',
+    /* **メール確認の合言葉(email_tokens)と分けてある。**
+       同じ表に混ぜて「種類」の列で分けることもできるが、
+       混ぜると**確認メールのリンクでパスワードを変えられる**作りを
+       うっかり書けてしまう（種類を見る1行を忘れるだけで成立する）。
+       表が別なら、間違えようがない。
+
+       期限が短いのもここの特徴で、メール確認は24時間なのに対して
+       こちらは**1時間**（server/auth.jsのRESET_TOKEN_MINUTES）。
+       受信箱に残ったリンクは、拾われたらパスワードを変えられる物なので、
+       確認のリンクより値打ちが高い＝生きている時間を短くする。
+
+       user_id に索引を張るのは、**新しい物を出す時に古い物を消す**ため。
+       消さないと、何度も押した人の受信箱にある古いリンクが全部生きたままになる */
+    sql: `CREATE TABLE password_resets (
+      token_hash TEXT PRIMARY KEY,
+      user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+      CREATE INDEX password_resets_user_id_idx ON password_resets (user_id)`,
+  },
+  // 現金を入れる時の明細(ledger)はここへ足す。上の10には二度と触らない
 ];
 
 /**
