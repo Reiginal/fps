@@ -1360,7 +1360,9 @@
     <div class="title" id="acTitle">ログイン</div>
     <div class="subtitle" id="acSub">買った物が端末を跨いで残ります</div>
 
-    <div class="field">
+    <!-- メールアドレスは「新しいパスワードを決める」面だけ要らない
+         （メールのリンクを踏んで来た人は、もう誰かが分かっている） -->
+    <div class="field" id="acEmailField">
       <label class="label" for="acEmail">メールアドレス</label>
       <input id="acEmail" type="email" autocomplete="email" spellcheck="false" maxlength="254">
     </div>
@@ -1369,7 +1371,9 @@
       <label class="label" for="acName">名前（ゲームに出る）</label>
       <input id="acName" type="text" maxlength="12" autocomplete="off" spellcheck="false">
     </div>
-    <div class="field">
+    <!-- メールアドレスの欄は「忘れた」の面でも使う。パスワードの欄は
+         そこだけ要らないので、面ごとに畳めるよう入れ物で囲ってある -->
+    <div class="field" id="acPassField">
       <label class="label" for="acPass">パスワード</label>
       <input id="acPass" type="password" autocomplete="current-password" maxlength="200">
     </div>
@@ -1386,6 +1390,11 @@
     </div>
     <div class="hint">
       <button id="acSwap" class="swaplink" type="button">アカウントを作る</button>
+    </div>
+    <!-- パスワードを忘れた時の入口。**ログインの面でだけ出す。**
+         登録の面にも出しておくと、まだアカウントが無い人が押すことになる -->
+    <div class="hint" id="acForgotRow">
+      <button id="acForgot" class="swaplink" type="button">パスワードを忘れた</button>
     </div>
     <div class="hint">
       預かるのはメールアドレスと名前だけです。<a href="/privacy.html" target="_blank" rel="noopener">個人情報の扱い</a>

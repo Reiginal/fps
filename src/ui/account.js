@@ -14,6 +14,35 @@
 
 const $ = (id) => document.getElementById(id);
 
+/* 面ごとの見せ方。**1枚のDOMを4通りに着替えさせる表。**
+   email/name/pass はその欄を出すか、newPass はブラウザの補完へ
+   「新しいパスワードを決めている所」と伝えるか。
+   swap が空の面には、切り替えの文字リンクを出さない */
+const MODES = {
+  login: {
+    title: 'ログイン', sub: '買った物が端末を跨いで残ります', go: 'ログイン',
+    swap: 'アカウントを作る', email: true, name: false, pass: true, newPass: false,
+  },
+  register: {
+    title: '新規登録', sub: 'メールアドレスとパスワードだけです', go: '登録',
+    swap: 'アカウントを持っている（ログインする）',
+    email: true, name: true, pass: true, newPass: true,
+  },
+  forgot: {
+    title: 'パスワードの再設定',
+    sub: '登録したメールアドレスへ、再設定のリンクを送ります',
+    go: 'リンクを送る', swap: 'ログインに戻る',
+    email: true, name: false, pass: false, newPass: false,
+  },
+  reset: {
+    title: '新しいパスワード',
+    sub: '決めると、今までのログインは全部切れます',
+    go: '決定', swap: '',
+    // メールのリンクから来た人なので、誰かはもう分かっている
+    email: false, name: false, pass: true, newPass: true,
+  },
+};
+
 /* 返事を待つ間の上限。返らないサーバーを待ち続けると、
    押した本人には「固まった」としか見えない */
 const TIMEOUT_MS = 15_000;
@@ -44,8 +73,11 @@ export class AccountMenu {
       row: $('acctRow'), who: $('acctWho'),
       open: $('acctOpen'), new: $('acctNew'), out: $('acctOut'),
       title: $('acTitle'), sub: $('acSub'), status: $('acStatus'),
-      email: $('acEmail'), name: $('acName'), nameField: $('acNameField'), pass: $('acPass'),
+      email: $('acEmail'), emailField: $('acEmailField'),
+      name: $('acName'), nameField: $('acNameField'),
+      pass: $('acPass'), passField: $('acPassField'),
       close: $('acClose'), swap: $('acSwap'), go: $('acGo'),
+      forgot: $('acForgot'), forgotRow: $('acForgotRow'),
     };
 
     /** 今ログインしている人。していなければnull */
@@ -55,17 +87,28 @@ export class AccountMenu {
     /** ログイン状態が変わった時に呼ぶ。名前欄の差し替えは呼ぶ側の仕事 */
     this.onChange = () => {};
 
-    this._register = false;   // 今「新規登録」の面か
+    /* 今どの面か。**4つある。**
+         login    … 入る
+         register … 作る
+         forgot   … パスワードを忘れた（メールアドレスだけ打つ）
+         reset    … 新しいパスワードを決める（メールのリンクから来た人だけ）
+       1枚のDOMを使い回すのは、行き来するたびに入力が消えるのを避けるため */
+    this.mode = 'login';
+    /* 再設定の合言葉。**URLから受け取って、ここで預かる。**
+       画面に出さないのは、貼り付けて共有される事故を減らすため */
+    this._resetToken = '';
     this._busy = false;
 
     // addEventListenerではなく代入。DOMは1組しかないので、
     // 2回作られた時に古い方まで動くのを防ぐ（netmenu.jsと同じ作法）
     // ホームから直接どちらの面でも開ける。開いてから切り替えさせない
-    this.el.open.onclick = () => this.show(false);
-    this.el.new.onclick = () => this.show(true);
+    this.el.open.onclick = () => this.show('login');
+    this.el.new.onclick = () => this.show('register');
     this.el.out.onclick = () => this._logout();
     this.el.close.onclick = () => this.hide();
-    this.el.swap.onclick = () => this._setMode(!this._register);
+    // 「忘れた」からは必ずログインの面へ戻す（登録の面へ行っても意味が無い）
+    this.el.swap.onclick = () => this._setMode(this.mode === 'register' ? 'login' : 'register');
+    this.el.forgot.onclick = () => this._setMode('forgot');
     this.el.go.onclick = () => this._submit();
     // Enterで送れないと、パスワードを打った後にマウスへ持ち替えることになる
     for (const i of [this.el.email, this.el.name, this.el.pass]) {
@@ -88,7 +131,24 @@ export class AccountMenu {
     this.user = r.user || null;
     this._paint();
     this._verifiedNote();
+    this._resetNote();
     this.onChange(this.user);
+  }
+
+  /* 再設定のリンクを踏んで来た時。**URLから合言葉を取って、すぐ消す。**
+     残したままにすると、履歴・共有・スクショから拾える所に
+     パスワードを変えられる文字列が居座ることになる。
+     台帳を持たない置き場では画面ごと無いので、何も出さない */
+  _resetNote() {
+    const q = new URLSearchParams(location.search);
+    const t = q.get('reset');
+    if (!t) return;
+    q.delete('reset');
+    const rest = q.toString();
+    history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : ''));
+    if (!this.available) return;
+    this._resetToken = t;
+    this.show('reset');
   }
 
   /* 確認メールのリンクを踏んで戻ってきた時の印。
@@ -101,7 +161,7 @@ export class AccountMenu {
     this._say(v === '1'
       ? 'メールアドレスを確認しました'
       : 'リンクが古いか、既に使われています', v !== '1');
-    if (v === '1') this.show(false);
+    if (v === '1') this.show('login');
     q.delete('verified');
     const rest = q.toString();
     history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : ''));
@@ -142,36 +202,47 @@ export class AccountMenu {
 
   get isOpen() { return !this.el.root.classList.contains('hidden'); }
 
-  show(register = false) {
+  show(mode = 'login') {
     if (!this.available) return;
-    this._setMode(register);
+    this._setMode(mode);
     this._say('');
     this.el.root.classList.remove('hidden');
-    this.el.email.focus();
+    // 新しいパスワードを決める面では、打ってもらう所はパスワードだけ
+    (mode === 'reset' ? this.el.pass : this.el.email).focus();
   }
 
   hide() { this.el.root.classList.add('hidden'); }
 
-  /* ログインの面と新規登録の面を切り替える。**入力は消さない。**
-     打ち間違えて往復するたびに消えるのが一番いらつく */
-  _setMode(register) {
-    this._register = !!register;
-    const { title, sub, swap, go, nameField, name, pass } = this.el;
-    title.textContent = this._register ? '新規登録' : 'ログイン';
-    sub.textContent = this._register
-      ? 'メールアドレスとパスワードだけです'
-      : '買った物が端末を跨いで残ります';
+  /* 面を切り替える。**入力は消さない。**
+     打ち間違えて往復するたびに消えるのが一番いらつく。
+
+     **1枚のDOMを4通りに着替えさせている。**見出し・説明・ボタンの文言と、
+     出す入力欄の組み合わせだけが違う。表にしてあるのは、
+     if を4つ並べると必ずどこかの面だけ文言が古くなるため */
+  _setMode(mode) {
+    this.mode = MODES[mode] ? mode : 'login';
+    const m = MODES[this.mode];
+    const {
+      title, sub, swap, go, name, pass,
+      emailField, nameField, passField, forgotRow,
+    } = this.el;
+    title.textContent = m.title;
+    sub.textContent = m.sub;
+    go.textContent = m.go;
     /* **どこへ行くのかを文で書く。**「ログイン」「新規登録」の単語だけだと、
        今どちらの面にいて押すとどうなるのかが読めない */
-    swap.textContent = this._register
-      ? 'アカウントを持っている（ログインする）'
-      : 'アカウントを作る';
-    go.textContent = this._register ? '登録' : 'ログイン';
-    nameField.classList.toggle('hidden', !this._register);
+    swap.textContent = m.swap;
+    swap.parentElement.classList.toggle('hidden', !m.swap);
+    emailField.classList.toggle('hidden', !m.email);
+    nameField.classList.toggle('hidden', !m.name);
+    passField.classList.toggle('hidden', !m.pass);
+    // 「忘れた」への入口はログインの面だけ。登録の面に出すと、
+    // まだアカウントが無い人が押すことになる
+    forgotRow.classList.toggle('hidden', this.mode !== 'login');
     // 名前の初期値は、ホームで打っていた物を引き継ぐ。もう一度打たせない
-    if (this._register && !name.value) name.value = $('nmName')?.value || '';
-    // ブラウザのパスワード補完へ、今どちらの面かを伝える
-    pass.autocomplete = this._register ? 'new-password' : 'current-password';
+    if (this.mode === 'register' && !name.value) name.value = $('nmName')?.value || '';
+    // ブラウザのパスワード補完へ、今どの面かを伝える
+    pass.autocomplete = m.newPass ? 'new-password' : 'current-password';
     this._say('');
   }
 
@@ -188,21 +259,24 @@ export class AccountMenu {
 
   async _submit() {
     if (this._busy) return;
+    const m = MODES[this.mode];
     const email = this.el.email.value.trim();
     const password = this.el.pass.value;
     const name = this.el.name.value.trim();
 
     // 打ち終わる前に押された時。サーバーまで行かせずここで返す
-    if (!email || !password) { this._say('メールアドレスとパスワードを入れてください', true); return; }
-    if (this._register && !name) { this._say('名前を入れてください', true); return; }
+    if (m.email && !email) { this._say('メールアドレスを入れてください', true); return; }
+    if (m.pass && !password) { this._say('パスワードを入れてください', true); return; }
+    if (this.mode === 'register' && !name) { this._say('名前を入れてください', true); return; }
 
     this._lock(true);
-    this._say(this._register ? '登録しています…' : '確かめています…');
+    this._say({
+      login: '確かめています…', register: '登録しています…',
+      forgot: '送っています…', reset: '変えています…',
+    }[this.mode]);
     let r;
     try {
-      r = this._register
-        ? await api('/api/register', { method: 'POST', body: { email, password, name } })
-        : await api('/api/login', { method: 'POST', body: { email, password } });
+      r = await this._send({ email, password, name });
     } catch {
       this._lock(false);
       this._say('サーバーに繋がりません。少し待ってからもう一度', true);
@@ -215,12 +289,37 @@ export class AccountMenu {
     // こちら側でも同じ判定を書くと、片方だけ直した時に食い違う
     if (!r.ok) { this._say(r.error || 'うまくいきませんでした', true); return; }
 
+    /* 「忘れた」だけは画面を閉じない。**送った後に見る物が無いと、
+       押せたのかどうかが分からない。**居ない人でもここへ来る
+       （サーバーが言い分けないので）ので、文言も「あれば送った」にする */
+    if (this.mode === 'forgot') {
+      this.el.pass.value = '';
+      this._say('登録があれば、メールを送りました。受信箱を見てください');
+      return;
+    }
+
     this.user = r.user;
+    this._resetToken = '';
     // パスワードは画面に残さない。次に開いた時に入ったままなのは気持ちが悪い
     this.el.pass.value = '';
     this._paint();
     this.onChange(this.user);
     this.hide();
+  }
+
+  /* どの口へ投げるか。面ごとに1行ずつ。
+     ここを_submitの中でifで分けていた頃は、面が2つしか無かった */
+  _send({ email, password, name }) {
+    if (this.mode === 'register') {
+      return api('/api/register', { method: 'POST', body: { email, password, name } });
+    }
+    if (this.mode === 'forgot') {
+      return api('/api/forgot', { method: 'POST', body: { email } });
+    }
+    if (this.mode === 'reset') {
+      return api('/api/reset', { method: 'POST', body: { token: this._resetToken, password } });
+    }
+    return api('/api/login', { method: 'POST', body: { email, password } });
   }
 
   async _logout() {
