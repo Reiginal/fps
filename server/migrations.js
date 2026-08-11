@@ -245,6 +245,40 @@ export const STEPS = [
         ADD CONSTRAINT equipped_skins_user_id_fkey
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`,
   },
+  {
+    n: 12,
+    name: '手榴弾をスキンの対象から外す',
+    /* 2026-08-11。**手榴弾は色を変えても画面の1割も変わらない。**
+       測った数字（銃と手のうちスキンが色を変える面の割合）:
+
+         ライフル 49.9% / スナイパー 47.3% / ショットガン 41.7%
+         ピストル 12.6% / 手榴弾 7.7% / ナイフ 6.5%
+
+       画面の6割が手と袖で、スキンは手と袖を触らない作りなので、
+       手榴弾は塗っても投げる腕しか見えない。しかも形違いも無いので、
+       **買う理由が作れない商品**だった。棚から下げる。
+
+       **買った人には返す。** owned_skins に price を残してあるのがここで効く
+       （6番の「後で値段を変えても、いくらで買ったかが消えないように」）。
+       値段の表を見に行かず、その人が実際に払った額をそのまま戻せる。
+
+       返した後で消す。順番を逆にすると、返す額が計算できなくなる。
+
+       装備の行も消す。残しても itemsFor('nade') が空を返すので画面には出ないが、
+       **台帳に「実在しない商品を着けている」行が残る**のは後から読む人を混乱させる。
+
+       ナイフも6.5%だが外さない。**あちらは形違い（刀・ダガー）が主役**で、
+       色は添え物。手榴弾には形違いが無いので事情が違う */
+    sql: `UPDATE wallets w
+             SET coins = w.coins + r.back, updated_at = now()
+            FROM (SELECT user_id, SUM(price) AS back
+                    FROM owned_skins
+                   WHERE sku LIKE 'nade:%'
+                GROUP BY user_id) r
+           WHERE w.user_id = r.user_id;
+      DELETE FROM owned_skins    WHERE sku LIKE 'nade:%';
+      DELETE FROM equipped_skins WHERE weapon_id = 'nade'`,
+  },
   // 現金を入れる時の明細(ledger)はここへ足す。上の11には二度と触らない
 ];
 

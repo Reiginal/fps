@@ -753,7 +753,11 @@ export const skinInfo = (id) => SKIN_LIST.find((s) => s.id === id) || SKIN_LIST[
 /* スキンを着せられる武器。**武器の表(weapons.js)そのものは読まない。**
    あちらを読むとサーバーがテクスチャを焼き始める。
    名前がずれていないかは tools/check-store.mjs が突き合わせる */
-export const SKINNABLE = ['rifle', 'shotgun', 'pistol', 'sniper', 'knife', 'nade'];
+/* **手榴弾は入っていない。** 2026-08-11に外した。
+   塗り替えが届く面が7.7%しかなく（画面の6割が手と袖で、スキンはそこを触らない）、
+   形違いも無いので買う理由が作れなかった。買った人には返金してある
+   （server/migrations.js の12番）。数字の出し方は tools/check-skins.mjs の[届く面] */
+export const SKINNABLE = ['rifle', 'shotgun', 'pistol', 'sniper', 'knife'];
 
 /* **形違いのスキン。こちらは武器ごとに品揃えが違う。**
  *
@@ -771,6 +775,17 @@ export const SHAPE_LIST = [
   // ライフルは一番見る武器なので高い。飾りの量も多い
   { weapon: 'rifle', id: 'dragon', name: 'ドラゴン', price: 2000 },
   { weapon: 'rifle', id: 'cute', name: 'キャンディ', price: 1600 },
+  /* 2026-08-11に3つ足した。**武器ごとに違うテーマにしてある。**
+     同じ系統を配ると「どの銃も同じスキンを着ている」だけになるので、
+     色の系統が既存2つ（ドラゴン=暗い赤銅と金／キャンディ=パステル）と
+     被らない物を選んだ。
+
+     ショットガンと狙撃銃が同じ1800なのは、飾りの量と塗る面積が近いため
+     （塗り替えが届く面は41.7%と47.3%）。
+     拳銃が安いのは届く面が12.6%しかなく、光で見せるぶん部品が少ないから */
+  { weapon: 'shotgun', id: 'western', name: 'ウエスタン', price: 1800 },
+  { weapon: 'sniper', id: 'ice', name: 'アイス', price: 1800 },
+  { weapon: 'pistol', id: 'cyber', name: 'サイバー', price: 1400 },
 ];
 
 /** その武器で買える物（色＋形）。画面はこれを並べる */
