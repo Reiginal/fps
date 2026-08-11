@@ -93,7 +93,16 @@ node tools/map.mjs 発砲    # 「発砲」を含む区切りがどのファイ�
 
 ## 本番
 
-**https://blackout-fps.fly.dev** — Fly.io 東京(nrt)、512MB、常時起動、月$3。
+**https://blackoutfps.com** — Fly.io 東京(nrt)、512MB、常時起動、月$3。
+
+**`https://blackout-fps.fly.dev` も生きている。** ドメインを取っても
+Flyが元から配っているアドレスは消えないので、両方から同じ試合に入れる
+（2026-08-11。DNSはCloudflare、`www`も同じ所を指している）。
+遊ぶ人に送るのは`blackoutfps.com`の方。
+
+**Cloudflareは間に立てていない（DNS onlyの灰色の雲）。** 立てると
+`force_https = true`との噛み合わせと対戦の通信(WebSocket)を確かめる作業が要るので、
+CDNを前に置くのは`やりたいこと.md`で別の項目にしてある。
 
 ```bash
 flyctl status              # 動いているか
@@ -107,7 +116,7 @@ mainへマージすると `.github/workflows/deploy.yml` が自動で出す。
 ### 出来事のログ（/logs）
 
 入退場・試合の結果・画面のエラーを、サーバーの**記憶の中に最新500件**溜めてある。
-`https://blackout-fps.fly.dev/logs?k=<鍵>` をブラウザで開くと表で読める。
+`https://blackoutfps.com/logs?k=<鍵>` をブラウザで開くと表で読める。
 
 - **デプロイすると全部消える。** ディスクを使っていないので。
   想定している使い方が「遊ぶ→不具合→その日に見る→直す→出す」なので、
