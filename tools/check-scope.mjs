@@ -146,7 +146,49 @@ console.log('\n[2] 望遠照準（狙撃銃）');
   ok(px > H * 0.5,
     `覗いた窓が画面の半分より大きい（${px.toFixed(0)}画素 / 高さ${H}）`);
 
-  console.log('\n[3] レティクルの太さ（画素）');
+  console.log('\n[2.5] 拳銃の照準線が飾りで塞がれていないか');
+{
+  /* 2026-08-11に足した。**拳銃には望遠照準が無いので上の測り方が使えない。**
+     あちらは目から放射状にレイを撃つが、拳銃は「後ろの照門から前の照星へ
+     線が通っているか」だけが要件で、円錐ではなく1本の線。
+
+     なぜ要るか: 拳銃の形違いが2つになった（サイバー・クローム）。
+     どちらも飾りをスライドの天面や後端へ足すので、
+     **1つでも照門より高い物を置くと狙点が読めなくなる。**
+     数字で見ないと「少し高いだけ」が通ってしまう。
+
+     見るのは**素のままと同じ数しか塞いでいないこと。**
+     素のままでも照門そのものに1個当たるので、0個を求めても意味がない */
+  const { SHAPE_BUILDS, matNameOf } = await import('../src/player/weapons.js');
+  const def = WEAPONS.find((w) => w.id === 'pistol');
+  const line = new THREE.Raycaster();
+  line.far = 1;
+  // 照門(z=0.026)の後ろから、照星(z=-0.128)の高さへ向けて1本通す
+  const P_BORE = 0.012;
+  const from = new THREE.Vector3(0, P_BORE + 0.0235, 0.060);
+  const to = new THREE.Vector3(0, P_BORE + 0.0235, -0.128);
+  const dir = to.clone().sub(from).normalize();
+  const blockers = (build) => {
+    const g = build(def.view);
+    g.updateMatrixWorld(true);
+    line.set(from, dir);
+    return line.intersectObject(g, true)
+      .filter((h) => h.object.material && !h.object.material.transparent)
+      // 照星そのものは終点なので数えない
+      .filter((h) => h.distance < from.distanceTo(to) - 0.004)
+      .map((h) => matNameOf(h.object.material) || '?');
+  };
+  const plain = blockers(def.build);
+  ok(plain.length <= 1, `素のままで線を塞ぐ物は${plain.length}個（照門そのもの）`);
+  for (const [name, id] of [['サイバー', 'cyber'], ['クローム', 'chrome']]) {
+    const got = blockers(SHAPE_BUILDS[id]);
+    ok(got.length <= plain.length,
+      `${name} … 素のままより増やしていない（${got.length}個 / 素のまま${plain.length}個`
+      + `${got.length > plain.length ? ` ← ${[...new Set(got)].join('、')}` : ''}）`);
+  }
+}
+
+console.log('\n[3] レティクルの太さ（画素）');
   /* 線の太さは模型の寸法ではなく**画面の画素**で決まる。
      覗くと画角が14.4度まで絞られて1度が50画素になるので、
      腰だめの感覚で置くと的を隠す帯になる（実際に9画素の帯になっていた）*/

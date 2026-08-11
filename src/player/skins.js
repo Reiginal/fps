@@ -168,6 +168,26 @@ const SHAPE_LOOK = {
       steel: { color: 0x6a7a48, wear: { color: 0xaebc78 } },
     },
   },
+  chrome: {
+    note: '磨いた銀と象牙の握把、真鍮の撃鉄。品揃えで唯一の明るい拳銃',
+    swatch: '#c8d0d8',
+    /* サイバー（黒＋青緑の光）に対して、こちらは**明るい銀。**
+       **地を明るくするのがこの商品の本体。** 飾りだけ銀にして地を黒く残すと、
+       ボーン（消した物）と同じ「暗い銃に明るい飾り」になって地味に戻る。
+
+       擦れの色を暗くしないのも決めごと。
+       他の商品は全部「使い込んだ物」だが、これは磨いてある物なので、
+       剥げた所も明るいままにする */
+    over: {
+      enamel: { color: 0x9aa4ae, metalness: 1.0, roughness: 0.14, wear: { color: 0xdce4ec, amount: 0.4, rough: 0.10 } },
+      anodized: { color: 0xb4bec8, metalness: 1.0, roughness: 0.10, wear: { color: 0xe8f0f6, amount: 0.35, rough: 0.08 } },
+      polymer: { color: 0x8e98a2, wear: { color: 0xc4ccd4, amount: 0.3 } },
+      phosphate: { color: 0x8a949e, metalness: 1.0, roughness: 0.16, wear: { color: 0xd0d8e0, amount: 0.4 } },
+      // 地金は一番磨かれている所。鏡面の飾り(chrome)と繋がる明るさへ
+      steel: { color: 0xc8d0d8, wear: { color: 0xf4f8fc } },
+    },
+  },
+
   cute: {
     note: '猫耳・丸めた角・パステルの縞・星のチャーム',
     swatch: '#d98aa6',

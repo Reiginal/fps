@@ -397,6 +397,7 @@ console.log('\n[4.7] 形スキンの銃声が、見た目の通りに鳴って�
     const pairs = [
       ['廃品', 'scrap', 'ウエスタン', 'western', 'shotgun'],
       ['ヴェノム', 'venom', 'アイス', 'ice', 'sniper'],
+      ['クローム', 'chrome', 'サイバー', 'cyber', 'pistol'],
     ];
     for (const [nA, a, nB, b, weapon] of pairs) {
       const base = GUNS.find((g) => g.id === weapon).sound;
@@ -445,6 +446,10 @@ console.log('\n[4.7] 形スキンの銃声が、見た目の通りに鳴って�
     }
     // サイバーは真鍮が跳ねる音を切ってある（電子銃に聞こえないので）
     ok(SHAPE_GUN.cyber.mech === false, 'サイバーは機関部の音を切っている');
+    /* **音程のある層はサイバーだけの手。** クロームで同じ向きに滑らせると
+       同じ系統の音になって、拳銃の2つが区別できなくなる */
+    ok(SHAPE_GUN.chrome.thumpTo < SHAPE_GUN.chrome.thumpFrom,
+      'クロームは音程を上げない（上がるのはサイバーだけ）');
   }
 
   /* **形が全部そろっているか。** 見た目を足して音を書き忘れると、
