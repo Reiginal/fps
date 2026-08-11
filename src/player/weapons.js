@@ -3828,6 +3828,11 @@ export class WeaponSystem {
     // **振っている最中に装備を替えても、始めた時の動きで振り切る**
     // （途中で別の軌道へ飛ぶより、1回ぶん古い動きの方がまし）
     this.swingAnim = SWINGS['knife.light'];
+    /* 刃が届くまでの残り時間。0より大きい間は「振りかぶっているが、まだ当たらない」。
+       **2026-08-11に足した。**それまでは押した瞬間に当たり判定を出していて、
+       刀の右クリックだと**突き出す0.36秒前にダメージが入っていた**。
+       詳しくは _strikeDelay のコメント */
+    this.strikeIn = 0;
     // 手榴弾を長押しで構えている最中か。trueの間に離すと投げる
     this._throwCharging = false;
     /* 投げ物の残り。**弾倉と違って武器ではなく持ち主が持つ物**なので、
@@ -4018,6 +4023,8 @@ export class WeaponSystem {
     this.adsHeld = false;
     this.burstLeft = 0;
     this.swing = 0;
+    // 待っている判定も捨てる（持ち替えと同じ理由）
+    this.strikeIn = 0;
     return true;
   }
 
@@ -4077,6 +4084,9 @@ export class WeaponSystem {
     // 持ち替えを跨いで前の武器の状態を残さない。
     // 振りの途中でナイフから銃へ替えると、銃が刃の軌道で振り回される
     this.swing = 0;
+    /* **待っている判定も捨てる。** 捨てないと、振りかぶってすぐ銃へ持ち替えた時に
+       銃を構えた状態で刃の判定が飛ぶ（見えない所から刺される形になる） */
+    this.strikeIn = 0;
     this.burstLeft = 0;
     this.adsHeld = false;
     // 手榴弾を構えたまま(離さずに)持ち替えると、離した扱いが漏れて
@@ -4352,6 +4362,19 @@ export class WeaponSystem {
     this.pumping = Math.max(0, this.pumping - dt);
     this.swing = Math.max(0, this.swing - dt);
 
+    /* 刃が届いた。**ここで初めて当たり判定を出す。**
+       渡すplayerは「今のフレームの」player なので、
+       振りかぶっている間に向きを変えれば、変えた先へ当たる。
+       押した瞬間の向きを覚えて後で使う形にはしていない
+       （そうすると、見ている所と当たる所が別になる） */
+    if (this.strikeIn > 0) {
+      this.strikeIn -= dt;
+      if (this.strikeIn <= 0) {
+        this.strikeIn = 0;
+        this._fire(player, ctx);
+      }
+    }
+
     const trigger = input.buttons[0];
     const triggerEdge = trigger && !this._prevTrigger;
     // 手榴弾は離した瞬間に投げる（課題.md #1）。_prevTriggerは下で今の値へ
@@ -4462,7 +4485,10 @@ export class WeaponSystem {
       player.cancelHeal?.();
       this.heavy = true;
       this._startSwing('heavy');
-      this._fire(player, ctx);
+      /* **判定は刃が届いてから出す。**押した瞬間に出すと、
+         腰へ引いている間にもう相手が倒れている（実際そうなっていた）。
+         間隔(fireTimer)は押した瞬間から数える。そこを遅らせると連打が速くなる */
+      this.strikeIn = this._strikeDelay();
       this.fireTimer = (60 / d.rpm) * MELEE_HEAVY.COST;
     } else if (wantFire && canFire) {
       if (w.ammo > 0) {
@@ -4470,7 +4496,11 @@ export class WeaponSystem {
         player.cancelHeal?.();
         // 近接は撃つのではなく振る。刃が通り過ぎる動きを出す
         if (d.melee) { this.heavy = false; this._startSwing('light'); }
-        this._fire(player, ctx);
+        /* 近接だけ、判定を刃が届く時刻まで待たせる（右クリックと同じ理由）。
+           **銃は待たせない。**弾は引金を引いた瞬間に出る物なので、
+           ここで遅らせると撃ち味が丸ごと変わる。手榴弾も投げた瞬間で正しい */
+        if (d.melee && !d.thrown) this.strikeIn = this._strikeDelay();
+        else this._fire(player, ctx);
         this.fireTimer = 60 / d.rpm;
         if (burst) {
           this.burstLeft--;
@@ -4518,6 +4548,38 @@ export class WeaponSystem {
     const w = this.current;
     this.swingAnim = swingOf(w.def.id, kind, w.shapeId);
     this.swing = this.swingAnim.time;
+  }
+
+  /**
+   * 刃が一番遠くへ届く時刻（振り始めからの秒数）。
+   *
+   * **2026-08-11。「押した瞬間にダメージが入っている」と言われて計算したら、本当だった。**
+   *
+   * 振りの再生（_animateの中）は2段になっている:
+   *
+   *   k < wind         … 振りかぶり。引いて溜めている。**刃は後ろにある**
+   *   k >= wind        … 振り抜き。a=(k-wind)/(1-wind) が進み、
+   *                      m=min(1, a*speed) が1になった所で刃が thru（一番遠く）へ届く
+   *
+   * つまり刃が届くのは m=1 のとき、すなわち a=1/speed のとき。
+   * kに直すと wind + (1/speed)*(1-wind) で、それに time を掛けると秒になる。
+   *
+   * 実際の値:
+   *
+   *   ナイフ左   0.24秒 ／ ナイフ右 0.36秒
+   *   刀左       0.32秒 ／ 刀右     0.40秒
+   *   ダガー左   0.14秒 ／ ダガー右 0.28秒
+   *
+   * **判定は0秒に出ていたので、刀の右は0.40秒も先走っていた。**
+   *
+   * ここで数字を新しく置いていないのが大事な所で、**全部SWINGSの表から出している。**
+   * 表を触れば当たるタイミングも一緒に動くので、片方だけ古くなることが起きない
+   * （MELEE_HEAVY.TIME_Sのコメントにある「当たり判定にも効かない見た目だけの数字」は、
+   *   この変更でもう正しくない。あちらのコメントも直してある）
+   */
+  _strikeDelay() {
+    const s = this.swingAnim;
+    return (s.wind + (1 / s.speed) * (1 - s.wind)) * s.time;
   }
 
   _fire(player, ctx) {
