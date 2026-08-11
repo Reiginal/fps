@@ -3477,6 +3477,11 @@ class Game {
     // 数字キーに載らない武器（支給された狙撃銃）は2行目、包帯と同じ行へ
     const q = WEAPONS[w.quickIndex];
     this.hud.quickSlot(q ? q.nick || q.name : null, w.index === w.quickIndex);
+    /* 射撃訓練場だけのショットガン(E)。**訓練場の外ではrangeIndexがnullなので畳まれる。**
+       出せるようにしただけで札を出していなかったので、知る方法が無かった
+       （訓練場の上の一行にだけ書いてあった。2026-08-11に指摘された） */
+    const e = WEAPONS[w.rangeIndex];
+    this.hud.rangeSlot(e ? e.nick || e.name : null, w.index === w.rangeIndex);
   }
 
   /**

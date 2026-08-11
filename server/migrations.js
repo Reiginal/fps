@@ -309,6 +309,28 @@ export const STEPS = [
       DELETE FROM equipped_skins
             WHERE skin_id IN ('desert', 'urban', 'veteran')`,
   },
+  {
+    n: 14,
+    name: 'ボーン（拳銃の形違い）を棚から下げる',
+    /* 2026-08-11。出したその日に「マジダサすぎる。いらない」と言われた。
+
+       13番と同じやり方で払った額を返してから消す。
+       **出した当日なので買った人は居ないはずだが、手順は書く。**
+       「居ないはず」で消すと、居た時に黙って持ち物が消える。
+
+       この商品は**構想を説明せずに作って出した物**で、そこが失敗の原因だった。
+       見た目の良し悪しはこちらで測れないので、
+       次に足す時は先に説明してから作る（memoryに残してある）*/
+    sql: `UPDATE wallets w
+             SET coins = w.coins + r.back, updated_at = now()
+            FROM (SELECT user_id, SUM(price) AS back
+                    FROM owned_skins
+                   WHERE sku LIKE '%:bone'
+                GROUP BY user_id) r
+           WHERE w.user_id = r.user_id;
+      DELETE FROM owned_skins    WHERE sku LIKE '%:bone';
+      DELETE FROM equipped_skins WHERE skin_id = 'bone'`,
+  },
   // 現金を入れる時の明細(ledger)はここへ足す。上の11には二度と触らない
 ];
 

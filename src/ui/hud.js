@@ -39,6 +39,7 @@ export class HUD {
       healWrap: $('healWrap'), healBar: $('healBar'), healFill: $('healFill'),
       healPips: $('healPips'), healState: $('healState'), slotHeal: $('slotHeal'),
       slotQuick: $('slotQuick'),
+      slotRange: $('slotRange'),
       elim: $('elim'), elimName: $('elimName'), elimTag: $('elimTag'),
       achfeed: $('achfeed'),
       voice: $('voice'), voiceText: $('voiceText'),
@@ -306,6 +307,29 @@ export class HUD {
     if (key === this._lastQuick) return;
     this._lastQuick = key;
     if (name) el.textContent = `Q ${name}`;
+    el.classList.toggle('hide', !name);
+    el.classList.toggle('on', !!on);
+  }
+
+  /**
+   * 射撃訓練場だけのショットガン(E)の札。**Qと同じ作り。**
+   *
+   * 2026-08-11に「射撃訓練場に行った時のショットガンのEっていうのは、
+   * 画面の右下のあそこに出てないじゃん。出してよ」と言われて足した。
+   * 出せるようにしただけで札を出していなかったので、**知る方法が無かった**
+   * （訓練場の上の一行にだけ書いてあった）。
+   *
+   * nameがnullなら畳む。訓練場の外では持てないので、そこでは常に畳まれる。
+   *
+   * **同じ値で呼ばれた時は何もしない**（毎フレーム呼ばれる。quickSlotと同じ）
+   */
+  rangeSlot(name, on) {
+    const el = this.el.slotRange;
+    if (!el) return;
+    const key = `${name || ''}/${on ? 1 : 0}`;
+    if (key === this._lastRange) return;
+    this._lastRange = key;
+    if (name) el.textContent = `E ${name}`;
     el.classList.toggle('hide', !name);
     el.classList.toggle('on', !!on);
   }
