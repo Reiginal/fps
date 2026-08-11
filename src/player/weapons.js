@@ -595,6 +595,31 @@ export const MATS = {
     color: new THREE.Color(0.25, 3.4, 3.0), toneMapped: false,
     transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false,
   }),
+
+  /* ---- 2026-08-11に足した各武器2つ目のぶん ----
+     **新しい材質は3つだけ。** 残りは既にある物を使い回している:
+       骨・牙        … bone（ドラゴンの角と牙）
+       赤い塗り文字  … shell（赤いショットシェル）
+       布テープ      … strap（負い紐。同じ布）
+       暗い当て板    … cyberShell（サイバーの筐体）
+     材質を1つ増やすと描画呼び出しが1回増えるので、色が近い物は分けない */
+
+  // 廃品（ショットガン）。錆びた鉄板。**擦れると地金ではなく錆が濃くなる**ので、
+  // 擦れの色を明るい方ではなく赤茶へ振ってある（普通の金属と逆）
+  rustPlate: mat(0x6a4a34, 0.75, 0.82, SURF_METAL, 5, 1.5, { envMapIntensity: 0.35 },
+    { amount: 1.3, color: 0x9a6a3e, rough: 0.90, dust: 0.30, dustColor: 0x7a6248 }),
+
+  /* ヴェノム（狙撃銃）。鱗。**黄緑は彩度を上げすぎると玩具になる**ので、
+     緑を黄へ寄せたうえで暗く保つ。光るのは下のvenomGlowだけ */
+  venomScale: mat(0x5a6a1e, 1.0, 0.44, SURF_METAL, 5, 1.1, { envMapIntensity: 0.55 },
+    { amount: 0.9, color: 0x9ab040, rough: 0.26, dust: 0.10 }),
+  /* 毒の滴と蛇の目。ドラゴンのemberと同じ作りで色だけ違う。
+     **黄緑にしてあるのはサイバーの青緑と分けるため**
+     （暗い場所で2つ並ぶと、どちらも「光る銃」で終わる） */
+  venomGlow: new THREE.MeshBasicMaterial({
+    color: new THREE.Color(1.6, 3.6, 0.35), toneMapped: false,
+    transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false,
+  }),
 };
 
 // レンズのフレネル反射。実物の対物レンズは正面から覗くと素通しなのに、
@@ -2483,6 +2508,138 @@ function cyberDeco(g) {
   g.add(part(sphG(0.0030), MATS.circuit, 0, P_BORE + 0.019, 0.031));
 }
 
+/* ショットガンの廃品。**ウエスタンと同じ武器なので、系統を正面から変える。**
+   あちらが「手入れされた木と真鍮」なら、こちらは「拾って継ぎ足した鉄と布」。
+   同じ武器に似た系統を2つ並べても選択にならない。
+
+   動く部品と消える部品の扱いはウエスタンと同じ（westernDecoの上のコメント参照）*/
+function scrapDeco(g) {
+  const rear = g.userData.rear;
+  const pump = g.userData.pump;
+
+  /* ---- 機関部の側面に錆びた鉄板を当てる。**ボルトで留めた形にする。**
+     板だけだと貼り紙に見えるので、留め具が要る */
+  for (const s of [1, -1]) {
+    g.add(part(boxG(0.004, 0.042, 0.092), MATS.rustPlate, s * 0.0270, 0.000, -0.020));
+    for (const z of [-0.056, 0.016]) {
+      g.add(part(cylG(0.0038, 0.0038, 0.006, 6), MATS.steel, s * 0.0295, 0.000, z, 0, 0, Math.PI / 2));
+    }
+  }
+  /* 赤い塗り文字。**既にある薬莢の赤を使う**（材質を増やさない）。
+     数字に見える形は作れないので、四角を3つ並べて「何か書いてある」に留める */
+  for (let i = 0; i < 3; i++) {
+    g.add(part(boxG(0.001, 0.010, 0.008), MATS.shell, -0.0292, 0.014, -0.052 + i * 0.014));
+  }
+
+  /* ---- 銃身の下に鉄板の補強。**継ぎ足した感じを出す一番大きい部品。**
+     放熱筒(z -0.530〜-0.300)に隠れない所へ置く */
+  g.add(part(boxG(0.020, 0.005, 0.120), MATS.rustPlate, 0, 0.004, -0.180));
+  g.add(part(cylG(0.0225, 0.0225, 0.008, 8), MATS.rustPlate, 0, 0.022, -0.556, Math.PI / 2, Math.PI / 8));
+
+  /* ---- 銃床に布テープを巻く。**rearの中へ**（構えたら一緒に消える）。
+     負い紐と同じ布(strap)を使う。テープは等間隔にしない——
+     等間隔だと工場で巻いた物に見えて、拾って直した感じが消える */
+  if (rear) {
+    for (const [z, w] of [[0.152, 0.020], [0.206, 0.014], [0.268, 0.024]]) {
+      rear.add(part(cboxG(0.050, 0.100, w), MATS.strap, 0, -0.022, z, 0.10));
+    }
+    // 折れた所に当てた鉄板。**斜めに当てる**と、直した物に見える
+    rear.add(part(boxG(0.052, 0.004, 0.040), MATS.rustPlate, 0, 0.026, 0.190, 0, 0, 0.12));
+  }
+
+  /* ---- ポンプに布テープ。**pumpの中へ**（前後に動く）。
+     中の座標は局所（pump群は z=-0.280 に居る）*/
+  if (pump) {
+    for (const z of [-0.040, 0.026]) {
+      pump.add(part(cylG(0.0295, 0.0295, 0.018, 8), MATS.strap, 0, -0.008, z, Math.PI / 2, Math.PI / 8));
+    }
+  }
+}
+
+/* 狙撃銃のヴェノム。**アイスと系統を分ける**（白と氷 ↔ 黄緑と黒）。
+   望遠照準の視界を塞がないのはアイスと同じ制約で、
+   機関部の上（レール0.042〜光軸0.072の間）は空けたまま、棘と鱗は横と前へ逃がす */
+function venomDeco(g) {
+  const rear = g.userData.rear;
+
+  /* ---- 先台の側面に鱗板を重ねる。**前下がりに角度を変えながら**並べる
+     （等間隔で平らに並べると鎧の帯にしかならない。ドラゴンで学んだ所）*/
+  for (let i = 0; i < 5; i++) {
+    const z = -0.410 + i * 0.058;
+    for (const s of [1, -1]) {
+      g.add(part(cboxG(0.006, 0.030, 0.052), MATS.venomScale,
+        s * 0.0268, S_BORE - 0.006, z, 0, 0, s * (0.18 + i * 0.04)));
+    }
+  }
+  // 天面にも1列。**レールより低く**置く（0.042より上へ出すと照準が塞がる）
+  for (let i = 0; i < 3; i++) {
+    g.add(part(cboxG(0.036, 0.005, 0.044), MATS.venomScale, 0, 0.036, -0.360 + i * 0.062));
+  }
+
+  /* ---- 銃口の牙。**上下から寄せる。**骨はドラゴンの物を使い回す */
+  for (const s of [1, -1]) {
+    g.add(part(cylG(0, 0.0105, 0.052, 6), MATS.bone, 0, S_BORE + s * 0.026, -0.842, s * 0.34));
+  }
+  // 制退器の付け根に鱗。銃身が蛇の口から出ているように見せる
+  g.add(part(cboxG(0.040, 0.042, 0.030), MATS.venomScale, 0, S_BORE, -0.786));
+
+  /* ---- 蛇の目。**機関部の側面に。**上に置くと照準の視界へ入る。
+     2つだけ（光る物を増やすと暗い場所で提灯になる。ドラゴンと同じ理由）*/
+  for (const s of [1, -1]) {
+    g.add(part(sphG(0.0070), MATS.venomGlow, s * 0.0262, 0.014, -0.100));
+  }
+  /* ---- 毒の滴。銃身の下に3つ、下向きに垂らす。
+     cylG(0, r, h) は先が上を向いた円錐なので rx へ π を入れる */
+  for (const [z, len] of [[-0.520, 0.026], [-0.610, 0.034], [-0.700, 0.022]]) {
+    g.add(part(cylG(0, 0.0042, len, 5), MATS.venomGlow, 0, S_BORE - 0.016 - len * 0.4, z, Math.PI));
+  }
+
+  // 銃床。頬当てを鱗で覆う（rearの中へ。構えたら一緒に消える）
+  if (rear) {
+    rear.add(part(cboxG(0.042, 0.026, 0.106), MATS.venomScale, 0, 0.056, 0.230));
+    rear.add(part(cboxG(0.040, 0.018, 0.146), MATS.venomScale, 0, -0.034, 0.236, 0.10));
+  }
+}
+
+/* 拳銃のボーン。**サイバーと系統を分ける**（黒と青緑の光 ↔ 黒と骨の白）。
+   光らせないので、**サイバーで使った「光で勝負する」手が使えない。**
+   塗り替えが届く面が12.6%しかない武器なので、
+   代わりに**輪郭を変える**（骨は白くて明るいので、暗い銃の上で形が読める）*/
+function boneDeco(g) {
+  /* ---- 握把の髑髏。**この1個で系統が決まる。**
+     弾倉の底板のあたりへ置く。握った手の下から覗く位置 */
+  g.add(part(sphG(0.0130, 10, 8), MATS.bone, 0, -0.100, 0.052, P_GRIP_TILT));
+  // 顎。球の下へ小さい箱を付けると頭骨に見える
+  g.add(part(cboxG(0.016, 0.008, 0.012), MATS.bone, 0, -0.111, 0.048, P_GRIP_TILT));
+  // 眼窩。**暗い当て板を2つ埋める**（穴は開けられないので、黒を置いて穴に見せる）
+  for (const s of [1, -1]) {
+    g.add(part(sphG(0.0034), MATS.cyberShell, s * 0.0048, -0.098, 0.041));
+  }
+
+  /* ---- 肋骨。フレームの側面に横板を並べる。**間隔を狭くしすぎない**
+     （細かく並べると滑り止めの溝に見えて、骨に読めない）*/
+  for (const s of [1, -1]) {
+    for (let i = 0; i < 4; i++) {
+      const z = -0.086 + i * 0.026;
+      g.add(part(cboxG(0.004, 0.014, 0.006), MATS.bone, s * 0.0142, -0.006, z, 0, 0, s * 0.10));
+    }
+  }
+  // 背骨。フレームの底に1本通す
+  g.add(part(cboxG(0.010, 0.006, 0.096), MATS.bone, 0, -0.017, -0.052));
+
+  /* ---- 銃口の牙。**下向きに2本。**照準線（後ろz0.026→前z-0.128）を跨がない
+     ように、銃身より下だけに付ける */
+  for (const s of [1, -1]) {
+    g.add(part(cylG(0, 0.0040, 0.020, 5), MATS.bone,
+      s * 0.0062, P_BORE - 0.010, -0.146, Math.PI));
+  }
+  /* ---- スライドの天面に骨の背。**照門より低く抑える。**
+     照門の天面が y=P_BORE+0.0255 なので、届かない高さで止める */
+  for (let i = 0; i < 3; i++) {
+    g.add(part(cboxG(0.008, 0.005, 0.010), MATS.bone, 0, P_BORE + 0.016, -0.100 + i * 0.024));
+  }
+}
+
 /* ------------------------------------------------------------ ショットガン */
 
 /**
@@ -3237,6 +3394,9 @@ export const SHAPE_BUILDS = {
   western: (view = {}) => buildShotgun(view, westernDeco),
   ice: (view = {}) => buildSniper(view, iceDeco),
   cyber: (view = {}) => buildPistol(view, cyberDeco),
+  scrap: (view = {}) => buildShotgun(view, scrapDeco),
+  venom: (view = {}) => buildSniper(view, venomDeco),
+  bone: (view = {}) => buildPistol(view, boneDeco),
 };
 
 // 手榴弾。持ち替えると手に持つだけで、左クリックで投げる。

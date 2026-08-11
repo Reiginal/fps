@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import { buy, equip, ownedOf, equippedOf, BUY_ERR } from '../server/store.js';
 import { STEPS } from '../server/migrations.js';
 import {
-  SKIN_LIST, SKINNABLE, SKIN_IDS, DEFAULT_SKIN, skuOf, parseSku, skinInfo,
+  SKIN_LIST, SKINNABLE, DEFAULT_SKIN, skuOf, parseSku, skinInfo, itemsFor,
 } from '../src/net/protocol.js';
 
 let bad = 0;
@@ -79,13 +79,25 @@ const GOLD = skinInfo('gold').price;
 
 console.log('\n[1] 品揃えと値段');
 {
-  ok(SKIN_LIST.length >= 3, `${SKIN_LIST.length}種`);
+  ok(SKIN_LIST.length >= 3, `色は${SKIN_LIST.length}種（標準を含む）`);
   ok(SKIN_LIST[0].id === DEFAULT_SKIN && SKIN_LIST[0].price === 0,
     '標準は0コイン（**最初から全員が持っている**）');
   ok(SKIN_LIST.every((s) => s.id === DEFAULT_SKIN || s.price > 0), '標準以外は必ず有料');
   ok(SKINNABLE.length >= 4, `スキンを着せられる武器が ${SKINNABLE.length} 本`);
-  const items = (SKIN_IDS.length - 1) * SKINNABLE.length;
+  /* **色だけで数えない。** 2026-08-11に色を4種から2種（迷彩・ゴールド）へ減らして、
+     そのぶん形違いを武器ごとに2つずつ揃えた。
+     色の数だけで数えていた頃の式は、その入れ替えで数が半分になったように見える。
+
+     遊ぶ側から見た品揃えは itemsFor(武器) が返す物なので、そこを数える */
+  const perWeapon = SKINNABLE.map((w) => ({ w, n: itemsFor(w).length }));
+  const items = perWeapon.reduce((a, x) => a + x.n, 0);
   ok(items >= 12, `商品は ${items} 品（武器ごとに別の商品）`);
+  /* **どの武器にも同じ数だけある。** 1本だけ品揃えが薄いと、
+     その武器を使う人だけ買う物が無い状態になる。
+     「各武器に4種類ぐらい」と言われた所（2026-08-11）*/
+  const thin = perWeapon.filter((x) => x.n < 4);
+  ok(thin.length === 0,
+    `どの武器にも4種類以上ある${thin.length ? ` ← ${thin.map((x) => `${x.w}(${x.n})`).join('、')}` : ''}`);
 }
 
 console.log('\n[2] 商品の文字列');
@@ -190,7 +202,7 @@ console.log('\n[8] 装備 — 持っている物しか着けられない');
 
 console.log('\n[9] 持ち物の読み取り');
 {
-  const db = fakeDb(0, [RIFLE_GOLD, skuOf('pistol', 'desert')]);
+  const db = fakeDb(0, [RIFLE_GOLD, skuOf('pistol', 'camo')]);
   const list = await ownedOf(db.query, '7');
   ok(list.length === 2 && list.includes(RIFLE_GOLD), '持っている物が全部返る');
   const none = await ownedOf(fakeDb(0, []).query, '7');

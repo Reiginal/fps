@@ -245,6 +245,44 @@ export const SHAPE_GUN = {
     subVol: 0.04, subTime: 0.06,
     mech: false,
   },
+
+  /* ---- 各武器2つ目のぶん。**1つ目と音でも分ける。**
+     見た目だけ2種類あって音が同じだと、着け替えた実感が半分になる ---- */
+
+  /* 廃品（ショットガン）。**壊れかけた銃の音。**
+     ウエスタン（木が響く／胴240・尾0.92）に対して、こちらは**響かない。**
+     継ぎ足した鉄板と布テープで覆われた銃なので、
+     胴を上げて尾を短く切る（箱を叩いた時の「ガシャン」に寄せる）。
+     破裂の帯は上げる。鉄板が鳴る成分がそこに乗る */
+  scrap: {
+    volume: 0.88, bodyFreq: 460, crackFreq: 3400,
+    bodyDecay: 0.16, tailDecay: 0.42, tailVol: 0.30, crackVol: 0.92,
+    thumpFrom: 120, thumpTo: 44, thumpTime: 0.14,
+    subVol: 0.34, subTime: 0.16, subDelay: 0.02,
+  },
+
+  /* ヴェノム（狙撃銃）。**低く粘る音。**
+     アイス（硬くて澄む／胴520・破裂5200）に対して、こちらは**逆へ振る。**
+     胴を下げて尾を長く垂らし、破裂を落とす。
+     蛇の系統なので「鋭い」ではなく「重く残る」方が合う。
+     ドラゴンと向きは同じだが、あちらより破裂を残して狙撃銃の芯を保つ */
+  venom: {
+    volume: 0.86, bodyFreq: 165, crackFreq: 2400,
+    bodyDecay: 0.32, tailDecay: 1.30, tailVol: 0.62, crackVol: 0.40,
+    thumpFrom: 140, thumpTo: 26, thumpTime: 0.32,
+    subVol: 0.70, subTime: 0.36, subDelay: 0.03,
+  },
+
+  /* ボーン（拳銃）。**乾いた骨の音。**
+     サイバー（電子音／音程が上がる）に対して、こちらは**音程を持たせない。**
+     骨は硬くて軽いので、低音を抜いて破裂を上げ、尾を切る。
+     機関部の音は残す（真鍮が跳ねる音があった方が拳銃らしい。サイバーとの違い） */
+  bone: {
+    volume: 0.66, bodyFreq: 620, crackFreq: 4800,
+    bodyDecay: 0.07, tailDecay: 0.24, tailVol: 0.22, crackVol: 0.94,
+    thumpFrom: 200, thumpTo: 90, thumpTime: 0.05,
+    subVol: 0.06, subTime: 0.07,
+  },
 };
 
 /** その形の銃声。形が無ければ元の武器の音をそのまま返す */

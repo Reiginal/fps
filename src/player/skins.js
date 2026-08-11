@@ -33,72 +33,30 @@ const STORE = 'blackout.skins';
  * **CS:GOの「摩耗度」と同じ考え方**で、色を変えずに値段の幅を作れる */
 const PAINT = {
   stock: { note: '支給品のまま', swatch: '#2c2f34', over: null },
-  /* ここから3つは2026-08-11に塗り直した。**「地味すぎる」と言われて測ったら本当に地味だった。**
-     元の値と、目で見た変化の大きさ（元の色との距離の平均）:
+  /* 迷彩。2026-08-11に、削った3つ（デザート・アーバン・歴戦）の代わりに入れた。
 
-       デザート  121 … 砂色なので変わってはいたが、隣のキャンディ(376)に食われていた
-       アーバン   30 … 紺黒(#1d2024)の上に青灰(#2b323c)。**暗い色に暗い色を塗っていた**
-       歴戦        0 … 色の指定が1つも無い。擦れの量だけ上げたスキンだった
+     **1色で塗るのをやめたのがこの商品の中身。**
+     削った3つはどれも銃全体を同じ色で塗る形で、測ると
+     「材質ごとに明暗を割らないと銃が1つの塊のまま」だと分かっていた
+     （アーバンは元の色との距離が30しかなかった）。
 
-     **効いたのは「材質ごとに明暗を割る」ことで、色を変えること自体ではない。**
-     全部を同じ明るさで塗ると、どんな色にしても銃は1つの塊のまま。
-     機関部(phosphate)を暗いまま残して外装(enamel/polymer)を明るくすると、
-     同じ形の銃が二色に割れて、遠目にも別の銃に見える。
+     迷彩は**材質ごとに違う色を置く**ので、その問題が原理的に起きない。
+     部品ごとに模様を描くことはできない作り（skins.jsの冒頭）だが、
+     材質は5つに分かれているので、**そこへ別々の色を配れば迷彩に見える。**
+     実銃の迷彩塗装も面ごとに色を分けて塗るので、見た目の理屈も合っている。
 
-     ここを触る時は `tools/check-skins.mjs` の [変化の大きさ] が下限を見張っている */
-  desert: {
-    note: '砂色の外装に、暗いままの機関部。埃を強めに',
-    swatch: '#a89170',
+     色の選び方: 中間の緑褐色を一番広い面(enamel)に置き、
+     樹脂を明るい砂、レールを暗い緑、機関部を暗い茶、地金を明るい灰緑。
+     **明暗が4段に散る**ので、遠目にも「単色でない」ことが読める */
+  camo: {
+    note: '材質ごとに色を分けた4色の迷彩',
+    swatch: '#5a6142',
     over: {
-      // 外装は明るい砂(FDE)。ここが一番広いので、スキンの印象はほぼこの1色で決まる
-      enamel: { color: 0x8f7a58, wear: { color: 0xc0ab86, dust: 0.24 } },
-      polymer: { color: 0xa89170, wear: { color: 0xcdbb99, dust: 0.26 } },
-      anodized: { color: 0x7a6748, wear: { color: 0xa8956e, dust: 0.20 } },
-      // **機関部は暗いまま。** ここまで砂色にすると一色の塊に戻る
-      phosphate: { color: 0x3e392e, wear: { dust: 0.20 } },
-      steel: { color: 0x8a8272, wear: { color: 0xbdb5a2 } },
-    },
-  },
-  urban: {
-    note: '明るい灰の外装と、暗いレール。市街地の二色',
-    swatch: '#8e969e',
-    /* **元は青灰1色で、変化が30しかなかった。**
-       都市迷彩は「明るい灰と濃い灰の二色」なので、そこを素直に作る。
-       外装を上げてレールと機関部を下げると、明度差が一番開く */
-    /* 外装は0x8e969eまで上げて変化265まで出したが、そこから一段落とした。
-       **手袋で同じ罠を踏んでいる**（weapons.jsのglove）。明るい無彩色を広い面に置くと、
-       背景のコンクリートと明度が並んで「塗り忘れた白い塊」に見える。
-       二色に割れているのはレール側を沈めているからなので、外装を下げても効果は残る */
-    over: {
-      enamel: { color: 0x7a828a, wear: { color: 0xb4bcc4, dust: 0.10 } },
-      polymer: { color: 0x5f676f, wear: { color: 0x8e969e } },
-      // レールは逆に沈める。**上げると外装と溶けて、また1色の塊になる**
-      anodized: { color: 0x2a3038, wear: { color: 0x7d8794 } },
-      phosphate: { color: 0x22262b, wear: { color: 0x8e969e } },
-      steel: { color: 0x98a0a8, wear: { color: 0xd0d6dc } },
-    },
-  },
-  veteran: {
-    note: '塗装が剥げて錆が回った銃。褪せた茶灰と錆',
-    swatch: '#6a5a48',
-    /* **元は「色を変えずに擦れだけ上げる」スキンだった。**
-       考え方としては面白いが、擦れは角にしか出ないので測ると変化が0で、
-       600コイン出して何も変わらない商品になっていた。
-
-       擦れの量を上げるのは残したまま、**地の色を褪せた茶灰へ落として、
-       剥げた所から出る色を錆にする。** これで「長く使った物」が色でも読める。
-       擦れだけに頼らないので、角以外も変わる */
-    /* 一度 0x4a4038 で組んだが、測ると変化76で**塗り直した3つの中でまだ最下位**だった
-       （デザート224・アーバン200台）。600コインで一番安い物より変わらないのは通らない。
-       錆は元から中間の明るさなので、黒に近い地からの距離を稼ぐには**褪せ側へ持ち上げる**
-       しかない。日に焼けて色が飛んだ銃はむしろ明るくなるので、見た目にも合う */
-    over: {
-      enamel: { color: 0x6a5a48, wear: { amount: 1.6, color: 0xc08a52, dust: 0.26 } },
-      polymer: { color: 0x5e5346, wear: { amount: 1.1, color: 0x9a7852, dust: 0.30 } },
-      anodized: { color: 0x74604a, wear: { amount: 1.5, color: 0xd09a5e, dust: 0.24 } },
-      phosphate: { color: 0x4e4034, wear: { amount: 1.6, color: 0xb87c48, dust: 0.28 } },
-      // 地金は錆びずに磨かれる所。**ここだけ明るいと「使い込んだ」に見える**
-      steel: { color: 0xa89a86, wear: { amount: 0.9, color: 0xe4dcc8 } },
+      enamel: { color: 0x5a6142, wear: { color: 0x8a9070, amount: 1.1, dust: 0.20 } },
+      polymer: { color: 0x8a8560, wear: { color: 0xb0ab86, dust: 0.24 } },
+      anodized: { color: 0x2f3a2a, wear: { color: 0x6a7a60 } },
+      phosphate: { color: 0x3a3228, wear: { color: 0x7a6e56, dust: 0.18 } },
+      steel: { color: 0x9aa085, wear: { color: 0xd0d6bc } },
     },
   },
   gold: {
@@ -176,6 +134,53 @@ const SHAPE_LOOK = {
       phosphate: { color: 0x0c0f13, wear: { color: 0x3a5866 } },
       // 地金だけ青緑へ寄せる。光の色と地金が繋がって、発光が銃から出て見える
       steel: { color: 0x4e6e78, wear: { color: 0x9ac4cc } },
+    },
+  },
+
+  /* ---- 各武器の2つ目。2026-08-11 ----
+     **1つ目と色の系統を変えている。** 同じ武器に似た色を2つ並べても選択にならない */
+  scrap: {
+    note: '錆びた鉄板と布テープ、赤い塗り文字。拾って継ぎ足した銃',
+    swatch: '#6a4a34',
+    /* ウエスタン（焦茶＋真鍮）に対して、こちらは**錆と煤。**
+       金属を赤茶へ寄せて、擦れの色も明るい地金ではなく錆にする
+       （普通の金属と逆。使い込むほど錆が濃くなる物なので） */
+    over: {
+      enamel: { color: 0x40352c, wear: { color: 0x8a5a34, amount: 1.4, dust: 0.30 } },
+      polymer: { color: 0x3a322a, wear: { color: 0x6a4e38, amount: 1.2, dust: 0.32 } },
+      anodized: { color: 0x4a3a2c, wear: { color: 0x9a6a3e, amount: 1.3, dust: 0.26 } },
+      phosphate: { color: 0x352c24, wear: { color: 0x7a5230, amount: 1.4, dust: 0.30 } },
+      // 地金だけは擦れて出る。**触る所は錆が落ちる**ので、ここが唯一明るい
+      steel: { color: 0x7a6e60, wear: { color: 0xc4b8a4 } },
+    },
+  },
+  venom: {
+    note: '黄緑の鱗と牙、垂れる毒。蛇に飲まれた狙撃銃',
+    swatch: '#5a6a1e',
+    /* アイス（白と薄氷の青）に対して、こちらは**黄緑と黒。**
+       地を黒く沈めるのが大事で、明るいと鱗と光る毒がどちらも埋もれる */
+    over: {
+      enamel: { color: 0x1e2418, wear: { color: 0x6a7a30, amount: 1.0 } },
+      polymer: { color: 0x232a1c, wear: { color: 0x5a6a28 } },
+      polymerTan: { color: 0x2e3820, wear: { color: 0x7a8c38 } },
+      anodized: { color: 0x2a3420, wear: { color: 0x8a9a40 } },
+      phosphate: { color: 0x1a1f14, wear: { color: 0x5e6c28 } },
+      steel: { color: 0x6a7a48, wear: { color: 0xaebc78 } },
+    },
+  },
+  bone: {
+    note: '髑髏の握把、肋骨、銃口の牙。骨に憑かれた拳銃',
+    swatch: '#c9bfa6',
+    /* サイバー（黒と青緑の光）に対して、こちらは**黒と骨の白。**
+       光らせないので、白い骨と黒い地の**明暗差だけ**で読ませる。
+       地を一番黒くしてあるのはそのため */
+    over: {
+      enamel: { color: 0x14120f, wear: { color: 0x6a6254, amount: 0.8 } },
+      anodized: { color: 0x1a1814, wear: { color: 0x7a7264 } },
+      polymer: { color: 0x121110, wear: { color: 0x5a5348 } },
+      phosphate: { color: 0x100e0c, wear: { color: 0x6e6658 } },
+      // 地金を骨寄りの色へ。骨の飾りと地金が繋がって、銃が骨から生えて見える
+      steel: { color: 0xa89e88, wear: { color: 0xe0d8c4 } },
     },
   },
 
