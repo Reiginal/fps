@@ -6,7 +6,7 @@
 
 ## 遊ぶ
 
-**https://blackout-fps.fly.dev**
+**https://blackoutfps.com**
 
 開くと1人で遊ぶか対戦かを選ぶ画面が出る。画面をクリックするとマウスが固定されて始まる。抜けるときはESC、もう一度クリックすれば戻る。
 

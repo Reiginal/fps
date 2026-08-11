@@ -16,12 +16,17 @@
 // これが無いと、届いても迷惑メール扱いになる。
 
 const KEY = process.env.RESEND_API_KEY || '';
-/* 差出人。**ドメインを取ったら、そのドメインのアドレスに変える。**
+/* 差出人。本番は noreply@blackoutfps.com（Flyの秘密に入れてある）。
    検証していないドメインから出そうとすると、Resendが403で断る */
 const FROM = process.env.MAIL_FROM || 'BLACKOUT <noreply@blackout-fps.example>';
-/* リンクの行き先の頭。本番は https://blackout-fps.fly.dev（か独自ドメイン）。
+/* リンクの行き先の頭。本番は https://blackoutfps.com。
    **ここが違うと、届いたリンクを踏んでも別の場所へ飛ぶ。**
-   入っていなければ手元とみなす */
+   入っていなければ手元とみなす。
+
+   **差出人のドメインとリンクのドメインは揃えること。**
+   noreply@blackoutfps.com から出た手紙の中のリンクが別の場所を指していると、
+   受け取る側から見ると偽の手紙と同じ形になり、迷惑メール扱いされやすくなる
+   （2026-08-11にドメインを取るまでは、差出人が.comでリンクがfly.devだった） */
 export const appOrigin = () => process.env.APP_ORIGIN || 'http://localhost:8080';
 
 /** 実際に飛ぶ状態か。falseならコンソールへ出すだけ */
