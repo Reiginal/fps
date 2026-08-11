@@ -395,6 +395,8 @@ console.log('\n[4.7] 形スキンの銃声が、見た目の通りに鳴って�
      ここでは「同じ武器の1つ目と、測って別方向へ動いていること」を見る */
   {
     const pairs = [
+      ['装甲', 'armor', 'ドラゴン', 'dragon', 'rifle'],
+      ['桜', 'sakura', 'キャンディ', 'cute', 'rifle'],
       ['サメ', 'shark', 'ウエスタン', 'western', 'shotgun'],
       ['ヴェノム', 'venom', 'アイス', 'ice', 'sniper'],
       ['クローム', 'chrome', 'サイバー', 'cyber', 'pistol'],
@@ -421,10 +423,27 @@ console.log('\n[4.7] 形スキンの銃声が、見た目の通りに鳴って�
         || Math.abs(mA.lowPct - plainM.lowPct) > 8,
       `${nA}は元の${weapon}と違う（重心 ${plainM.centroid.toFixed(0)}→${mA.centroid.toFixed(0)}Hz`
         + ` / 低音 ${plainM.lowPct.toFixed(1)}→${mA.lowPct.toFixed(1)}%）`);
-      /* 重心が200Hz以上離れていること。**同じ帯で鳴っていたら同じ音に聞こえる。**
-         200Hzは、並べて鳴らした時に「高い方／低い方」が言える差 */
-      ok(Math.abs(mA.centroid - mB.centroid) > 200,
-        `${nA}と${nB}は別の音（重心 ${mA.centroid.toFixed(0)}Hz と ${mB.centroid.toFixed(0)}Hz）`);
+      /* **3つの軸のどれかで離れていれば別の音。**
+
+         最初は重心だけで200Hzを線にしていたが、
+         **ライフルの形違いが4つになった時に窓が足りなくなった**
+         （ドラゴン1919・キャンディ3224・桜2706・元2224が並ぶと、
+           装甲を置ける帯が80Hzしか残らない）。
+
+         重心が近くても、**尾の長さが5倍違えば耳には別の音**として届く
+         （鉄の箱を叩いた音と鐘の音は、高さが同じでも余韻で分かれる）。
+         低音の取り分も同じで、腹に来る量が違えば別の音になる。
+
+         200Hz / 8% / 1.5倍 は、どれも「並べて鳴らした時に言える差」の線 */
+      const tailA = gunTune(a, base).tailDecay;
+      const tailB = gunTune(b, base).tailDecay;
+      const apart = Math.abs(mA.centroid - mB.centroid) > 200
+        || Math.abs(mA.lowPct - mB.lowPct) > 8
+        || Math.max(tailA, tailB) / Math.min(tailA, tailB) > 1.5;
+      ok(apart,
+        `${nA}と${nB}は別の音（重心 ${mA.centroid.toFixed(0)}/${mB.centroid.toFixed(0)}Hz`
+        + ` 低音 ${mA.lowPct.toFixed(1)}/${mB.lowPct.toFixed(1)}%`
+        + ` 尾 ${tailA}/${tailB}秒）`);
       ok(mA.peak < 0.95, `${nA}が割れていない（${mA.peak.toFixed(2)}）`);
     }
 
@@ -450,6 +469,42 @@ console.log('\n[4.7] 形スキンの銃声が、見た目の通りに鳴って�
        同じ系統の音になって、拳銃の2つが区別できなくなる */
     ok(SHAPE_GUN.chrome.thumpTo < SHAPE_GUN.chrome.thumpFrom,
       'クロームは音程を上げない（上がるのはサイバーだけ）');
+  }
+
+  /* ---- 同じ武器の形が3つ以上になったので、**全部の組を突き合わせる。**
+
+     上の判定は「兄弟の1組」しか見ていない。ライフルは形違いが4つあるので、
+     組は6つある。**装甲(重心2658)と桜(2706)は48Hzしか離れていない**が、
+     尾が0.22対1.10で5倍違うので別の音として通る。
+     そこを見ていない判定だと、次に足した物が既にある物と丸かぶりでも通ってしまう。
+
+     ここは**音を焼かずに、書いてある数字だけで見る。**
+     焼くと1つ2〜3秒かかって、組の数だけ増えるとCIが伸びる
+     （このrepoはCI30秒を画質の網羅より優先している）。
+     破裂の帯と尾の長さは鳴り方をほぼ決めるので、この2つで足りる */
+  {
+    const { SHAPE_LIST } = await import('../src/net/protocol.js');
+    const byWeapon = new Map();
+    for (const sh of SHAPE_LIST) {
+      if (!SHAPE_GUN[sh.id]) continue;   // 近接は銃声を持たない
+      if (!byWeapon.has(sh.weapon)) byWeapon.set(sh.weapon, []);
+      byWeapon.get(sh.weapon).push(sh);
+    }
+    for (const [weapon, list] of byWeapon) {
+      const base = GUNS.find((g) => g.id === weapon).sound;
+      for (let i = 0; i < list.length; i++) {
+        for (let j = i + 1; j < list.length; j++) {
+          const a = gunTune(list[i].id, base);
+          const b = gunTune(list[j].id, base);
+          const crackApart = Math.abs(a.crackFreq - b.crackFreq) > 500;
+          const tailApart = Math.max(a.tailDecay, b.tailDecay)
+            / Math.min(a.tailDecay, b.tailDecay) > 1.5;
+          ok(crackApart || tailApart,
+            `${weapon}: ${list[i].name}と${list[j].name}が離れている`
+            + `（破裂 ${a.crackFreq}/${b.crackFreq}Hz 尾 ${a.tailDecay}/${b.tailDecay}秒）`);
+        }
+      }
+    }
   }
 
   /* **形が全部そろっているか。** 見た目を足して音を書き忘れると、

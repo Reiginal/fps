@@ -256,5 +256,50 @@ console.log('\n[3] レティクルの太さ（画素）');
   relax();
 }
 
+console.log('\n[4] ライフルの形違いが赤ドットの窓を狭めていないか');
+{
+  /* 2026-08-11に足した。**ライフルの形違いが4つになった**
+     （ドラゴン・キャンディ・装甲・桜）。どれも飾りを機関部や先台へ足すので、
+     **1つでも赤ドットの視界へ入ると覗いた時に狙点が読めなくなる。**
+
+     addOpticの不変条件は「接眼リムを頂点にした円錐の内側に置いてよいのは
+     筒の内壁とレンズとドットだけ」で、円錐は前へ行くほど太くなるので
+     「y=0.052より上は禁止」のような固定の高さでは守れない。
+     **だから測る。**
+
+     素のままの窓（6.6度）と同じであることを見る。
+     1つずつ着せて覗き切らせるので少し時間がかかるが、
+     ここを目で確かめる方法が無い（ブラウザを開かないと見えない層）。
+
+     **この節は一番後ろに置くこと。** 中で refreshSkins() を呼んで武器を組み直すので、
+     前に置くと [3] が捕まえていた模型が古くなって、
+     レティクルの太さが5.0画素から1.3画素へ化ける（実際にそうなった。
+     [3]は前の節が掴んだ模型をそのまま測る作りなので、組み直すと壊れる）*/
+  const { setAccount } = await import('../src/player/skins.js');
+  const base = (() => {
+    const w = aim('rifle');
+    const v = windowOf(w.model);
+    relax();
+    return v;
+  })();
+  ok(base > 6.0, `素のままの窓は ${base.toFixed(1)}度`);
+
+  for (const [name, id] of [
+    ['ドラゴン', 'dragon'], ['キャンディ', 'cute'], ['装甲', 'armor'], ['桜', 'sakura'],
+  ]) {
+    setAccount({ owned: [`rifle:${id}`], equipped: { rifle: id } });
+    ws.refreshSkins();
+    const w = aim('rifle');
+    const got = windowOf(w.model);
+    relax();
+    /* **狭くなっていないこと。** 0.2度は測る刻みそのものなので、
+       そのぶんだけ許す（刻みより細かい差は測れない） */
+    ok(got >= base - 0.2,
+      `${name} … 窓が狭まっていない（${got.toFixed(1)}度 / 素のまま${base.toFixed(1)}度）`);
+  }
+  setAccount({ owned: [], equipped: {} });
+  ws.refreshSkins();
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);

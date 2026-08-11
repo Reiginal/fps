@@ -94,6 +94,37 @@ const SHAPE_LOOK = {
       steel: { color: 0x6b4a2a, wear: { color: 0xe8c88a } },
     },
   },
+  armor: {
+    note: '鉄板とボルト、角張った制退器。輪郭そのものを角にする',
+    swatch: '#3a4248',
+    /* ドラゴン（暗い赤銅と金）に対して、こちらは**無彩色の鉄。**
+       色で主張しない代わりに形で主張する商品なので、
+       塗りは「重い鉄」であることだけを出す。彩度を上げると玩具に寄る */
+    over: {
+      enamel: { color: 0x2a3036, wear: { color: 0x7a848c, amount: 1.2, dust: 0.16 } },
+      anodized: { color: 0x3a4248, wear: { color: 0x8e9aa2, amount: 1.1 } },
+      polymer: { color: 0x24282c, wear: { color: 0x5e666c } },
+      phosphate: { color: 0x22262a, wear: { color: 0x76808a, amount: 1.2 } },
+      steel: { color: 0x7a848c, wear: { color: 0xb8c2ca } },
+    },
+  },
+  sakura: {
+    note: '漆の黒に金の桜、朱の紐と房、螺鈿の白帯',
+    swatch: '#14100e',
+    /* **地は漆の黒。** 金の桜と螺鈿の白を置く物なので、
+       地が明るいとどちらも埋もれる（サイバーで光を乗せた時と同じ理屈）。
+       粗さを落として「塗り物」の照りを出すのがここの要点で、
+       他の商品のような擦れは入れない（漆器は使い込んで剥げた物ではない） */
+    over: {
+      enamel: { color: 0x14100e, metalness: 0.25, roughness: 0.18, wear: { amount: 0.2, color: 0x4a3c30, rough: 0.14 } },
+      anodized: { color: 0x1a1512, metalness: 0.3, roughness: 0.16, wear: { amount: 0.2, color: 0x5a4838 } },
+      polymer: { color: 0x100d0b, roughness: 0.30, wear: { amount: 0.15, color: 0x3a3028 } },
+      phosphate: { color: 0x0e0b09, metalness: 0.25, roughness: 0.20, wear: { amount: 0.2, color: 0x463828 } },
+      // 地金は金へ寄せる。桜の金と地金が繋がって、飾りが後付けに見えない
+      steel: { color: 0x9a7c42, wear: { color: 0xd8bc7a } },
+    },
+  },
+
   /* ---- 2026-08-11に足した3つ。武器ごとに別のテーマ ---- */
   western: {
     note: '胡桃の銃床と先台、真鍮の口金、機関部の彫金',
