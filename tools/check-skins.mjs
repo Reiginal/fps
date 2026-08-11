@@ -392,6 +392,51 @@ console.log('\n[11] 形違いのスキン');
   ok(da < kn, `ダガーはナイフより短い（${kn.toFixed(3)} → ${da.toFixed(3)}）`);
 }
 
+console.log('\n[ストアの動線] 押す物と買う物が分かれているか');
+{
+  /* 2026-08-11に足した。同じ日に言われた2つ:
+
+       「購入が2回クリックなのが嫌だわ。なんかpopoverじゃないけど、なんか出してみて」
+       「買ったやつは購入済みってなるようにしてよ。ストア、いなくなるの寂しい」
+
+     前は**同じボタンを2回押す**形だった（1回目が試着・2回目で購入）。
+     押す回数そのものより、**2回目が何をするか分からない**のが問題だったので、
+     買う操作を専用の札へ移した。
+
+     **一番怖いのは「商品を押した瞬間に買う」形へ戻ること。**
+     押し間違えでコインが減るのは取り返しがつかない（返金の手順を毎回書くことになる）*/
+  const look = readFileSync(new URL('../src/ui/look.js', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+
+  // 並んだ商品を押しても買わない。押したら試着(_pick)へ行く
+  ok(/this\.store \? this\._pick\(s\) : this\._wear\(s\.id\)/.test(look),
+    '**商品を押しても買わない**（試着だけ）');
+  ok(/_pick\(s\)\s*\{[\s\S]{0,400}?this\.preview = s\.id/.test(look),
+    '押すと試着になる');
+  // 買うのは札の「買う」から1回だけ。呼び出し口が2つ以上あったら押し間違えの道が増える
+  const buyCalls = (look.match(/this\._buy\(/g) || []).length;
+  ok(buyCalls === 1, `_buyの呼び出し口は1箇所だけ（${buyCalls}箇所）`);
+  ok(/this\.el\.buyGo\.onclick/.test(look), '買う札のボタンから呼んでいる');
+
+  // 買った物を棚から消していないこと。**haveでcontinueしていたのが元の形**
+  ok(!/this\.store && \(have \|\| s\.id === DEFAULT_SKIN\)/.test(look),
+    '**買った物をストアから消していない**（「いなくなるの寂しい」）');
+  ok(/if \(this\.store && have\) b\.classList\.add\('own'\)/.test(look),
+    '買った物に印を付けている');
+  ok(/\.lkitem\.own::after/.test(html) && /購入済み/.test(html),
+    '印は「購入済み」と読める（CSSが文字を出す）');
+
+  /* 足りない時は押す前に分かること。**押してから断られるより早い。**
+     サーバー側でも断るが（server/store.js）、あれは守りでこちらは親切 */
+  ok(/コイン足りません/.test(look), '足りない額を先に出す');
+  ok(/el\.buyGo\.disabled = true/.test(look), '足りない時はボタンを押せなくする');
+
+  // 買う札の器が画面に在ること。[9]が全部のidを突き合わせるが、ここは名指しで見る
+  for (const id of ['lkBuy', 'lkBuyName', 'lkBuyPrice', 'lkBuyGo', 'lkBuyNote']) {
+    ok(html.includes(`id="${id}"`), `${id} が画面に在る`);
+  }
+}
+
 console.log('\n[変化の大きさ] 売る色スキンが、見て分かるほど変わっているか');
 {
   /* 2026-08-11に足した。**「地味すぎる」で作り直した後、二度と戻せないようにする。**
