@@ -28,7 +28,7 @@ export const FALLBACK_WEAPONS = [
     range: 120, falloffStart: 42, falloffEnd: 95, falloffMin: 0.5,
   },
   {
-    id: 'shotgun', name: 'M870 ショットガン', damage: 13, rpm: 78, pellets: 9,
+    id: 'shotgun', name: 'M870 ショットガン', damage: 13, rpm: 105, pellets: 9,
     mag: 7, reloadTime: 2.9, adsTime: 0.2,
     range: 40, falloffStart: 8, falloffEnd: 26, falloffMin: 0.18,
   },

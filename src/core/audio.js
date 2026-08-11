@@ -383,10 +383,19 @@ export const SHAPE_GUN = {
      透ける樹脂の枠なので、金属の硬さを抜いて**胴を薄く・尾を一番長く**取る
      （軽い箱は薄く長く鳴る。金属は硬く短い） */
   skeleton: {
-    volume: 0.60, bodyFreq: 980, crackFreq: 3400,
-    bodyDecay: 0.06, tailDecay: 0.70, tailVol: 0.34, crackVol: 0.62,
-    thumpFrom: 220, thumpTo: 100, thumpTime: 0.05,
-    subVol: 0.06, subTime: 0.07,
+    /* **2026-08-11に作り直した。**「音も微妙」と言われた。
+       前は 胴980・破裂3400・尾0.70 で、
+       **元の拳銃(胴420・破裂3900)の間に収まっていた**ので特徴が無かった。
+       検査は通っていた（尾で離れていたので）が、
+       「離れている」と「気持ちがいい」は別だった。
+
+       中で機械が動いて光っている物にしたので、音も**機械寄り**へ振る。
+       胴を一番低くして重い動作音を出し、破裂を落として金属の鋭さを抜き、
+       尾を一番長く残す（駆動音が鳴り続ける感じ）*/
+    volume: 0.72, bodyFreq: 220, crackFreq: 2200,
+    bodyDecay: 0.20, tailDecay: 0.86, tailVol: 0.46, crackVol: 0.44,
+    thumpFrom: 160, thumpTo: 58, thumpTime: 0.14,
+    subVol: 0.34, subTime: 0.18, subDelay: 0.01,
   },
 
   /* 星（狙撃銃）。**遠くまで届く澄んだ音。**
