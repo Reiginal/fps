@@ -188,6 +188,46 @@ console.log('\n[2] 望遠照準（狙撃銃）');
   }
 }
 
+console.log('\n[2.6] ショットガンの照準線が飾りで塞がれていないか');
+{
+  /* 2026-08-11に足した。**サメを作った時に実際に塞いだ。**
+
+     背鰭を `cylG(0, 0.024, 0.011, 3)` に `rz=π/2` を付けて置いたら、
+     円錐が横に倒れて**半径0.024がYへ効き、頂点が0.068まで伸びた。**
+     照準線は0.054(SY)なので、覗くと銃口のビードが鰭に隠れる。
+     回転を外して「上を向いた三角錐」にすると高さがhに収まる。
+
+     拳銃([2.5])と同じ考え方で、ゴーストリング(z=0.100)から
+     銃口のビード(z=-0.548)へ1本の線を通して数える。
+     **この銃は素のままで0個**なので、1個でも増えたら落とす */
+  const { SHAPE_BUILDS, matNameOf } = await import('../src/player/weapons.js');
+  const def = WEAPONS.find((w) => w.id === 'shotgun');
+  const line = new THREE.Raycaster();
+  line.far = 1.2;
+  const SY = 0.054;   // buildShotgunの照準線の高さ
+  const from = new THREE.Vector3(0, SY, 0.140);
+  const to = new THREE.Vector3(0, SY, -0.548);
+  const dir = to.clone().sub(from).normalize();
+  const blockers = (build) => {
+    const g = build(def.view);
+    g.updateMatrixWorld(true);
+    line.set(from, dir);
+    return line.intersectObject(g, true)
+      .filter((h) => h.object.material && !h.object.material.transparent)
+      // ビードそのものは終点なので数えない
+      .filter((h) => h.distance < from.distanceTo(to) - 0.004)
+      .map((h) => matNameOf(h.object.material) || '?');
+  };
+  const plain = blockers(def.build);
+  ok(plain.length === 0, `素のままで線を塞ぐ物は無い（${plain.length}個）`);
+  for (const [name, id] of [['ウエスタン', 'western'], ['サメ', 'shark']]) {
+    const got = blockers(SHAPE_BUILDS[id]);
+    ok(got.length === 0,
+      `${name} … 線を塞いでいない（${got.length}個`
+      + `${got.length ? ` ← ${[...new Set(got)].join('、')}` : ''}）`);
+  }
+}
+
 console.log('\n[3] レティクルの太さ（画素）');
   /* 線の太さは模型の寸法ではなく**画面の画素**で決まる。
      覗くと画角が14.4度まで絞られて1度が50画素になるので、
