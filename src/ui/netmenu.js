@@ -37,7 +37,8 @@ export class NetMenu {
       root: $('netmenu'),
       name: $('nmName'),
       status: $('nmStatus'), solo: $('nmSolo'), join: $('nmJoin'),
-      tutorial: $('nmTutorial'), range: $('nmRange'), look: $('nmLook'),
+      tutorial: $('nmTutorial'), range: $('nmRange'),
+      look: $('nmLook'), store: $('nmStore'),
       settings: $('nmSettings'), quit: $('nmQuit'),
     };
 
@@ -50,7 +51,9 @@ export class NetMenu {
     this.onRange = () => {};
     // 設定を開く口。画面そのものは src/ui/settings.js が持っている
     this.onSettings = () => {};
-    // 見た目（武器のスキン）を開く口。画面は src/ui/look.js
+    /* スキン変更・ストアを開く口。画面は src/ui/look.js（1枚を2つの面で使う）。
+       **入口を2つに分けてあるのは、やることが違うから。**
+       着け替えに来た人が買い物の画面を経由する形にしない */
     this.onLook = () => {};
     // 戦績を開く口はここにあったが、画面ごと消した（「誰も見ない」）
     /* 終了する口。**ブラウザのゲームには「閉じる」が無い。**
@@ -61,7 +64,8 @@ export class NetMenu {
 
     this.el.name.value = load(SAVE.name, '');
     this.el.settings.onclick = () => this.onSettings();
-    this.el.look.onclick = () => this.onLook();
+    this.el.look.onclick = () => this.onLook(false);
+    this.el.store.onclick = () => this.onLook(true);
     this.el.quit.onclick = () => this.onQuit();
 
     // addEventListenerではなく代入で持つ。DOMはindex.html側に1組しかないので、

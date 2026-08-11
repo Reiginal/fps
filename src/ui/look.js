@@ -1,4 +1,4 @@
-// 見た目の画面。武器ごとにスキンを装備する所と、買う所。
+// スキン変更とストアの画面。武器ごとにスキンを着ける所と、買う所。
 //
 // **選んだ物が見えないと選べない。** 色の名前を並べるだけでは
 // 「デザート」がどんな色なのか分からないので、実物の銃を3Dで出して回す。
@@ -6,9 +6,11 @@
 // あちらの「描くのは開いている間だけ」も踏襲する
 // （閉じた後も描き続けると、ホームに居るだけでパソコンが熱くなる）。
 //
-// 装備とストアを**1枚の画面の2つの面**にしてある。分けると
-// 「買った物がどう見えるか」を見に行くのに画面を行き来することになるし、
+// **入口はホームに2つ（スキン変更・ストア）、画面と3Dの場面は1つ。**
+// やることが違うので入口は分けるが、見せる物が「持っている物」か
+// 「売り物」かの違いしかないので、画面まで2枚にすると
 // 3Dの場面を2つ持つことになる（そのぶん重い）。
+// 開く時にどちらの面かを渡して、開いた後は行き来しない。
 //
 // **持っていない物は着けられない。** 画面でも押せなくしてあるが、
 // あれは親切であって守りではない（守るのはサーバー側のserver/store.js）。
@@ -44,7 +46,7 @@ export class LookMenu {
     this.el = {
       root: $('look'),
       canvas: $('lkView'),
-      tabEquip: $('lkTabEquip'), tabStore: $('lkTabStore'),
+      title: $('lkTitle'), sub: $('lkSub'),
       guns: $('lkGuns'),
       list: $('lkList'),
       name: $('lkName'), note: $('lkNote'),
@@ -63,8 +65,6 @@ export class LookMenu {
 
     this._buildGuns();
     this.el.close.onclick = () => this.hide();
-    this.el.tabEquip.onclick = () => this._setTab(false);
-    this.el.tabStore.onclick = () => this._setTab(true);
   }
 
   /** 会員証の状態が変わったら呼ばれる（main.jsが繋ぐ） */
@@ -169,9 +169,13 @@ export class LookMenu {
     this._paint();
   }
 
+  /* どちらの面で開くか。**入口はホームに2つあり、開いた後は行き来しない。**
+     着け替えに来た人を買い物の画面へ通さない（逆も同じ） */
   _setTab(store) {
     this.store = !!store;
     this.preview = null;
+    this.el.title.textContent = this.store ? 'ストア' : 'スキン変更';
+    this.el.sub.textContent = this.store ? 'コインで武器のスキンを買う' : '武器の見た目を選ぶ';
     if (this.ready) this._showGun();
     this._say('');
     this._paint();
@@ -180,13 +184,13 @@ export class LookMenu {
   /* 画面を全部描き直す。**ここだけが「今どうなっているか」を描く。**
      押した時に個別に書き換える形にすると、必ずどこかで食い違う */
   _paint() {
-    const { tabEquip, tabStore, list, coins } = this.el;
-    tabEquip.classList.toggle('on', !this.store);
-    tabStore.classList.toggle('on', this.store);
+    const { list, coins } = this.el;
     this.gunBtns.forEach((b, i) => b.classList.toggle('on', SKINNABLE[i] === this.weapon));
-    coins.textContent = this.user
-      ? `コイン ${Number(this.user.coins ?? 0).toLocaleString()}枚`
-      : 'ログインすると買えます';
+    // 残高はストアの時だけ。着け替えるだけの時に見せる意味が無い
+    coins.textContent = !this.store ? ''
+      : (this.user
+        ? `コイン ${Number(this.user.coins ?? 0).toLocaleString()}枚`
+        : 'ログインすると買えます');
 
     list.innerHTML = '';
     const shown = this._shown();
@@ -220,7 +224,8 @@ export class LookMenu {
       p.className = 'lkempty';
       p.textContent = this.store
         ? 'この武器のスキンは全部持っています'
-        : '持っているスキンがありません。ストアで買えます';
+        // 行き先を書いておく。入口が分かれているので、ここから飛べない
+        : '持っているスキンがありません。ホームのストアで買えます';
       list.appendChild(p);
     }
 
@@ -283,20 +288,22 @@ export class LookMenu {
     wearSkin(this.weapon, s.id);
     this._showGun();
     this.onChange();
-    this._say(`${s.name} を買いました`);
-    // 買い終わったら装備の面へ戻す（ストアからはその商品が消えるので）
-    this.store = false;
+    /* **買ったらそのまま着ける。**ストアからはその商品が消えるので、
+       着けたことをここで言わないと「買ったのに何も起きていない」に見える。
+       面は切り替えない（入口が分かれているので、勝手に別の画面へ移らない） */
+    this._say(`${s.name} を買って、そのまま装備しました`);
     this._paint();
     try { await api('/api/equip', { weapon: this.weapon, skin: s.id }); } catch { /* 手元は変わっている */ }
   }
 
   get isOpen() { return !this.el.root.classList.contains('hidden'); }
 
-  show() {
+  /** storeがtrueならストアの面で開く。ホームのボタン2つがそれぞれ渡す */
+  show(store = false) {
     this._init();
     this.preview = null;
     this._say('');
-    this._setTab(false);
+    this._setTab(store);
     this.el.root.classList.remove('hidden');
     this.running = true;
   }

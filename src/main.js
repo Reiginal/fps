@@ -1108,7 +1108,8 @@ class Game {
        「効いていない」と読まれる（実際そう見える） */
     this.look = new LookMenu();
     this.look.onChange = () => this.weapons?.refreshSkins?.();
-    menu.onLook = () => this.look.show();
+    // ホームの入口は2つ（スキン変更・ストア）。画面は1枚を2つの面で使う
+    menu.onLook = (store) => this.look.show(store);
 
     /* 会員証。**台帳を持たないサーバーでは、この行ごと画面に出ない。**
        持ち物と装備もここから届くので、届いたら銃へ掛け直す

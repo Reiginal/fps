@@ -617,17 +617,10 @@
   .lkitem .pr { color: var(--accent); }
   .lkitem .pr::after { content: 'コイン'; color: var(--dim); font-size: 9px; margin-left: 2px; }
 
-  /* 装備とストアの切り替え */
+  /* 残高の行。**買う画面でいくら持っているかが見えないと選べない。**
+     ストアの時だけ中身が入る（空の時に隙間だけ残らないよう、空なら畳む） */
   .lktabs { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-  .lktab {
-    padding: 8px 18px;
-    font-family: var(--mono); font-size: 12px; letter-spacing: .18em;
-    color: var(--dim); background: transparent;
-    border: 1px solid rgba(255,255,255,.18); cursor: pointer;
-  }
-  .lktab:hover { color: var(--hud); }
-  .lktab.on { color: var(--accent); border-color: var(--accent); background: rgba(99,210,255,.1); }
-  /* 残高は右端。**買う画面でいくら持っているかが見えないと選べない** */
+  .lktabs:empty, .lktabs:has(.lkcoins:empty) { margin-bottom: 0; }
   .lkcoins { margin-left: auto; font-size: 10px; letter-spacing: .12em; color: var(--dim); }
 
   /* どの武器を触っているか。数が6つあるので折り返す */
@@ -1268,7 +1261,11 @@
     <div class="netbtns tutrow">
       <button id="nmTutorial" class="netbtn" type="button">チュートリアル</button>
       <button id="nmRange" class="netbtn" type="button">射撃訓練場</button>
-      <button id="nmLook" class="netbtn" type="button">見た目</button>
+      <!-- スキン変更とストアは別の入口。**やることが違う**ので、
+           1つのボタンの中で切り替えさせない（着け替えに来た人が
+           買い物の画面を経由する形になる） -->
+      <button id="nmLook" class="netbtn" type="button">スキン変更</button>
+      <button id="nmStore" class="netbtn" type="button">ストア</button>
     </div>
     <div class="netbtns">
       <button id="nmQuit" class="netbtn" type="button">終了</button>
@@ -1285,17 +1282,20 @@
 <!-- 会員証。ログインと新規登録を1枚で兼ねる。
      2枚に分けると、打ち間違えて行き来するたびに入力が消えるので1枚にしてある。
      中身の出し入れは src/ui/account.js -->
-<!-- 見た目。今は武器のスキンだけ。中身は src/ui/look.js が並べる。
-     **選んだ物が見えないと選べない**ので、実物の銃を3Dで出して回す -->
+<!-- スキン変更とストア。中身は src/ui/look.js が並べる。
+     **選んだ物が見えないと選べない**ので、実物の銃を3Dで出して回す。
+
+     ホームからの入口は2つ（スキンとストア）だが、**画面のDOMと3Dの場面は1つ。**
+     見せる物が「持っている物」か「売り物」かの違いしかないので、
+     2枚に分けると3Dの場面を2つ持つことになる（そのぶん重い）。
+     入口だけ分けて、開く時にどちらの面かを渡す -->
 <div id="look" class="hidden">
   <div class="lkpanel">
-    <div class="title">見た目</div>
-    <div class="subtitle">武器のスキン</div>
+    <div class="title" id="lkTitle">スキン変更</div>
+    <div class="subtitle" id="lkSub">武器の見た目を選ぶ</div>
 
-    <!-- 装備とストアは1枚の画面の2つの面。分けると3Dの場面を2つ持つことになる -->
+    <!-- 残高。ストアの時だけ出す（着け替えるだけの時に見せる意味が無い） -->
     <div class="lktabs">
-      <button id="lkTabEquip" class="lktab on" type="button">装備</button>
-      <button id="lkTabStore" class="lktab" type="button">ストア</button>
       <div class="lkcoins" id="lkCoins"></div>
     </div>
 

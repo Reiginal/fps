@@ -217,7 +217,17 @@ console.log("\n[9] 画面の器");
   const rule = html.match(/#look \{[^}]*\}/);
   ok(!!rule && /position:\s*fixed/.test(rule[0]), '#look が画面いっぱいに出る指定を持っている');
   ok(/#look\.hidden \{[^}]*display:\s*none/.test(html), '#look.hidden で隠せる');
-  ok(html.includes('id="nmLook"'), 'ホームに入口のボタンがある');
+  /* **入口はホームに2つ、画面は1枚。**
+     やることが違うので入口は分けるが、見せる物が「持っている物」か
+     「売り物」かの違いしかないので、画面まで2枚にすると3Dの場面を2つ持つ */
+  ok(html.includes('id="nmLook"') && html.includes('id="nmStore"'),
+    'ホームに入口が2つある（スキン変更・ストア）');
+  ok((html.match(/id="lkView"/g) || []).length === 1, '3Dの場面は1つのまま');
+  ok(!/id="lkTab/.test(html), '画面の中の切り替えタブは消えている（入口で分かれた）');
+  const menu = readFileSync(new URL('../src/ui/netmenu.js', import.meta.url), 'utf8');
+  ok(/onLook\(false\)/.test(menu) && /onLook\(true\)/.test(menu),
+    'どちらの面で開くかをボタンが渡している');
+  ok(/show\(store = false\)/.test(js), '開く時に受け取っている');
 }
 
 console.log("\n[10] 素材ファイルを増やしていない");
