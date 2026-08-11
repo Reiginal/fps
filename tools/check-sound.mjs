@@ -270,6 +270,63 @@ console.log('\n[4.5] 狙撃銃が一番重い1発になっているか');
     `立ち上がりは鈍っていない（狙撃${sniper.attackMs.toFixed(1)}ms / ライフル${rifle.attackMs.toFixed(1)}ms）`);
 }
 
+console.log('\n[4.7] 形スキンの銃声が、見た目の通りに鳴っているか');
+/* 「ドラゴンは低く鈍く、キャンディは可愛くポップに」と言われた所。
+   **言われた言葉は測れないが、言われた中身は測れる。**
+
+     低く鈍い … 低音の取り分が多く、重心が低く、高い所が少ない
+     可愛くポップ … 低音がほとんど無く、短く、高い所が主役
+
+   [4.5]と同じで、2挺に同じ乱数を配ってから比べる（揺らぎに埋もれるため） */
+{
+  const { gunTune, SHAPE_GUN } = await import('../src/core/audio.js');
+  const base = GUNS.find((g) => g.id === 'rifle').sound;
+  const keep = _seed;
+  /* **窓の長さを揃える。**ここを長く取ると比べ物にならない。
+     ドラゴンは尾が長い(1.05秒)ので、3秒で測ると尾ばかりが数字に乗り、
+     尾の帯(700〜1250Hz)は低音ではないので**低くしたはずが「低音29%・重心2507Hz」**
+     と出た（同じ音を2秒で測ると40.8%・2016Hz）。
+     短い方（元の銃）の長さに合わせて、重なっている所だけを比べる。
+     長さそのものは下で表を見る */
+  const one = async (shape) => {
+    _seed = 20260811;
+    return capture((a) => a.gunshot(gunTune(shape, base), null, null));
+  };
+  const plain = await one(null);
+  const dragon = await one('dragon');
+  const cute = await one('cute');
+  _seed = keep;
+  const high = (m) => m.bands[4].pct + m.bands[5].pct;
+
+  ok(dragon.lowPct > plain.lowPct + 8,
+    `ドラゴンは低音が多い（${plain.lowPct.toFixed(1)}% → ${dragon.lowPct.toFixed(1)}%）`);
+  ok(dragon.centroid < plain.centroid,
+    `ドラゴンは重心が低い（${plain.centroid.toFixed(0)} → ${dragon.centroid.toFixed(0)}Hz）`);
+  // 鈍いというのは「高い所が無い」こと。ここが動かないと低いだけの音になる
+  ok(high(dragon) < high(plain),
+    `ドラゴンは高い所が減っている（${high(plain).toFixed(1)}% → ${high(dragon).toFixed(1)}%）`);
+  ok(SHAPE_GUN.dragon.tailDecay > base.tailDecay,
+    `ドラゴンは尾が長い（${base.tailDecay} → ${SHAPE_GUN.dragon.tailDecay}秒）`);
+
+  ok(cute.lowPct < 6, `キャンディは低音がほとんど無い（${cute.lowPct.toFixed(1)}%）`);
+  ok(cute.centroid > plain.centroid,
+    `キャンディは明るい（${plain.centroid.toFixed(0)} → ${cute.centroid.toFixed(0)}Hz）`);
+  ok(high(cute) > high(plain) * 1.4,
+    `キャンディは高い所が主役（${high(plain).toFixed(1)}% → ${high(cute).toFixed(1)}%）`);
+  ok(SHAPE_GUN.cute.tailDecay < base.tailDecay && SHAPE_GUN.cute.bodyDecay < base.bodyDecay,
+    `キャンディは短い（尾${base.tailDecay}→${SHAPE_GUN.cute.tailDecay}秒）`);
+  /* **音程のある層はここだけ。**thumpは本来「腹に来る低音」だが、
+     高い所から滑らせると玩具の発射音になる。可愛い音はここでしか作れない */
+  ok(SHAPE_GUN.cute.thumpFrom > 800 && SHAPE_GUN.cute.thumpTo < SHAPE_GUN.cute.thumpFrom,
+    `音程が上から下へ滑る（${SHAPE_GUN.cute.thumpFrom}→${SHAPE_GUN.cute.thumpTo}Hz）`);
+
+  // 山は潰さない。可愛い音は小さくてよいので、大きくして割るのが一番もったいない
+  ok(cute.peak < 0.9 && dragon.peak < 0.9,
+    `割れていない（キャンディ${cute.peak.toFixed(2)} / ドラゴン${dragon.peak.toFixed(2)}）`);
+  // 書いていない形は元の音のまま。形を足して音を書き忘れても黙って壊れない
+  ok(gunTune('katana', base) === base, '書いていない形は元の銃の音のまま');
+}
+
 console.log('\n[5] 振り切れていないか');
 // 山が1.0に届くと波の頭が平らに潰れて、迫力ではなく割れた音になる。
 //

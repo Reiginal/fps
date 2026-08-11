@@ -231,11 +231,26 @@ console.log('\n[7] 振り方が形ごと・左右ごとに違う');
     `刀の左は**横へ払う**（左右${swept(kl, 'y').toFixed(2)} 対 上下${swept(kl, 'p').toFixed(2)}）`);
   ok(Math.abs(kl.back.r) > 0.8, `刃を寝かせている（捻り${kl.back.r}）`);
 
-  /* **刀の右は縦に落とす。**横へ振らない（横薙ぎと見間違えない） */
+  /* **刀の右は突く。**左が横に払う動きなので、右も縦に振ると
+     「大きい横薙ぎと小さい横薙ぎ」に見えて差が出にくい。払う／突くで分ける */
   const kh = SWINGS['katana.heavy'];
-  ok(swept(kh, 'p') > swept(kh, 'y') * 3,
-    `刀の右は**縦に落とす**（上下${swept(kh, 'p').toFixed(2)} 対 左右${swept(kh, 'y').toFixed(2)}）`);
-  ok(kh.back.p < -0.8, `真上まで振りかぶる（${kh.back.p}）`);
+  ok(swept(kh, 'z') > swept(kh, 'p'),
+    `刀の右は**突く**（前後${swept(kh, 'z').toFixed(2)} 対 上下${swept(kh, 'p').toFixed(2)}）`);
+  ok(kh.thru.z < kh.back.z, '引いてから前へ出している');
+
+  /* **pの向きを取り違えていないこと。**
+     pはプラスで切っ先が上（反動のkickPitchと同じ向き）。
+     ここを逆に覚えていたせいで、「真上から落とす」と書いた刀の右クリックが
+     **下からえぐる動き**になっていて「ダサい」と言われた。
+     突きと払いは切っ先を持ち上げながら入る物ではないので、
+     振り抜きで切っ先が大きく上がる動きが残っていないかを見る */
+  let scoop = null;
+  for (const [k, s] of Object.entries(SWINGS)) {
+    if (k === 'nade.throw' || k.endsWith('.light')) continue;   // 投げと払いは別
+    if (s.thru.p - s.back.p > 0.9) scoop = k;
+  }
+  ok(!scoop, scoop ? `${scoop} が下からえぐっている（pが+${(SWINGS[scoop].thru.p - SWINGS[scoop].back.p).toFixed(2)}）`
+    : '右クリックに下からえぐる動きが無い');
 
   // ナイフの右は突き。前へ出す量が、振る量より大きい
   const nh = SWINGS['knife.heavy'];
@@ -268,6 +283,25 @@ console.log('\n[7] 振り方が形ごと・左右ごとに違う');
   ok(!/const SWING_TIME/.test(w), '固定の振り時間はもう無い');
   ok(/swingH - healDrop/.test(w),
     '上下は振りのhを使う（前後の流用だと「前へ出すだけ」が作れない）');
+}
+
+console.log('\n[7.5] 走りながら振れる');
+{
+  /* ナイフは**持っているだけで足が速くなる**物なので（moveMul 1.35）、
+     走っている間に振れないと道具として噛み合わない。
+     実際に「走ってると振れない」と言われた。銃だけ止める */
+  ok(knife.moveMul > 1, `ナイフを持つと速い（${knife.moveMul}倍）`);
+  const w = src('src/player/weapons.js');
+  ok(/const sprintBlock = player\.sprinting && !\(d\.melee && !d\.thrown\);/.test(w),
+    '**止まるのは銃だけ**（刃は走りながら振れる）');
+  ok(!/this\.fireTimer <= 0 && !player\.sprinting/.test(w),
+    '発射の条件から素の「走っていない」が消えている');
+  // 手榴弾は今まで通り。「押して狙って離す」なので走りながらの投げは別の話
+  ok(/!\(d\.melee && !d\.thrown\)/.test(w), '手榴弾は今まで通り走ると構えが解ける');
+  /* サーバーは元から走りを見ていない（見ているのは発射権だけ）。
+     つまりこれは手元の遊び方の決まりで、緩めても穴は開かない */
+  const room = src('server/room.js');
+  ok(!/sprint/i.test(room), 'サーバーは走りを見ていない（緩めても穴が開かない）');
 }
 
 console.log('\n[8] 形スキンで強くならない');
@@ -319,8 +353,12 @@ console.log('\n[9] 振る音が形と強さで分かれている');
   ok(swingTune('dragon', false) === SWING_TUNE, '知らない形はナイフの音になる');
 
   const w = src('src/player/weapons.js');
-  ok(/swing\?\.\(swingTune\(shapeIdOf\(d\.id\), this\.heavy\)\)/.test(w),
+  ok(/swing\?\.\(swingTune\(w\.shapeId, this\.heavy\)\)/.test(w),
     '振った時に形と強さで鳴り分ける');
+  /* 形は**構えた時に1回引いて覚えておく。**撃つたびに引き直していた頃、
+     skinFor が中で品揃えの配列を毎回作っていた（毎秒12発ぶんのごみ） */
+  ok(/this\.shapeId = shapeIdOf\(def\.id\)/.test(w), '形は組み立てた時に1回だけ引く');
+  ok(/w\.shapeId = shapeIdOf\(w\.def\.id\)/.test(w), '着け替えた時に引き直している');
 }
 
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);
