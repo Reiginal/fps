@@ -15,9 +15,10 @@
 //   node tools/check-melee.mjs
 import { readFileSync } from 'node:fs';
 import '../server/dom-stub.js';
+import * as THREE from 'three';
 import { MELEE_HEAVY, MELEE_SWEEP, HITBOX, HP } from '../src/net/protocol.js';
 import { WEAPONS as SIM_WEAPONS, heavyDef, hitPose } from '../server/sim.js';
-import { WEAPONS, SWINGS, swingOf } from '../src/player/weapons.js';
+import { WEAPONS, SWINGS, swingOf, WeaponSystem } from '../src/player/weapons.js';
 import { setAccount } from '../src/player/skins.js';
 import { SWING_TUNE, SWING_HEAVY_TUNE, swingTune } from '../src/core/audio.js';
 
@@ -359,6 +360,102 @@ console.log('\n[9] 振る音が形と強さで分かれている');
      skinFor が中で品揃えの配列を毎回作っていた（毎秒12発ぶんのごみ） */
   ok(/this\.shapeId = shapeIdOf\(def\.id\)/.test(w), '形は組み立てた時に1回だけ引く');
   ok(/w\.shapeId = shapeIdOf\(w\.def\.id\)/.test(w), '着け替えた時に引き直している');
+}
+
+console.log('\n[当たるタイミング] 刃が届いてから判定が出ているか');
+{
+  /* 2026-08-11に足した。**「押した瞬間にダメージが入っている」と言われて、本当だった。**
+
+     振りは2段（振りかぶり → 振り抜き）で、刃が一番遠くへ届くのは
+     wind + (1/speed)*(1-wind) の所。判定はそこで出す（weapons.jsの_strikeDelay）。
+     直す前は全部0秒に出ていて、刀の右クリックは**0.40秒も先走っていた。**
+
+     **通っている時点では何も見えない類の不具合。** 当たるし、倒れるし、
+     エラーも出ない。ただ「突き出す前に倒れている」だけなので、
+     画面を見ないと分からない。だから数字で残す */
+  /* **本文を読む形では駄目だった。** 最初は
+       「_startSwing('heavy') の次の行が _fire でないこと」を正規表現で見ていたが、
+     直したコードを元へ戻して確かめたら**素通りした。**
+     間にコメントが1行挟まるだけで並びが変わるので、当たっていなかった。
+
+     なので実際に振らせて、判定が飛んだ時刻を測る。
+     見たいのは「押してすぐ出ていないこと」なので、そこを直接数える方が短い */
+  const shots = [];
+  const ws = new WeaponSystem(new THREE.Scene(),
+    new THREE.PerspectiveCamera(75, 1.6, 0.05, 900),
+    new THREE.PerspectiveCamera(55, 1.6, 0.002, 12), new THREE.Scene());
+  ws.carry = ws.weapons.map((_, i) => i);
+  ws.onShot = () => shots.push(now);
+  const knifeIndex = WEAPONS.findIndex((x) => x.id === 'knife');
+  ws.switchTo(knifeIndex);
+  ws.switching = 0; ws.index = knifeIndex; ws._pendingIndex = null;
+
+  const player = {
+    alive: true, sprinting: false, crouching: false, onFloor: true, horizontalSpeed: 0,
+    adsFactor: 0, moveMul: 1, roll: 0, healing: 0, bandages: 2, yaw: 0, pitch: 0,
+    bobAmount: 0, bobPhase: 0, addRecoil: () => {}, cancelHeal: () => {},
+    startHeal: () => false, collider: { start: new THREE.Vector3() },
+  };
+  /* 右クリックを1回だけ押す入力。
+     **押しっぱなしにしない。** 右クリックは clicked(2)（押した瞬間だけtrue）で
+     読まれるので、毎フレームtrueを返すと連打になって何回も振る */
+  let clickedOnce = false;
+  const tap = {
+    down: () => false,
+    pressed: () => false,
+    clicked: (b) => {
+      if (b === 2 && !clickedOnce) { clickedOnce = true; return true; }
+      return false;
+    },
+    buttons: [false, false, false],
+  };
+  const DT = 1 / 240;
+  let now = 0;
+  // 0.7秒ぶん回す。一番遅い刀の右(0.40秒)より充分長い
+  for (let i = 0; i < 168; i++) { ws.update(DT, tap, player, {}); now += DT; }
+
+  ok(shots.length >= 1, `振ったら判定が出る（${shots.length}回）`);
+  /* **ここが本題。** 押した最初のフレームで出ていたら元の不具合。
+     ナイフの右は0.36秒後に届くので、0.2秒より手前で出たらおかしい */
+  ok(shots.length >= 1 && shots[0] > 0.2,
+    `最初の判定が ${(shots[0] ?? 0).toFixed(3)}秒後（0.2秒より後）`);
+  // 表から出した狙いの時刻と合っているか。1フレームぶんの誤差は許す
+  const want = (() => { const s = swingOf('knife', 'heavy', null); return (s.wind + (1 / s.speed) * (1 - s.wind)) * s.time; })();
+  ok(shots.length >= 1 && Math.abs(shots[0] - want) < 0.02,
+    `狙いの ${want.toFixed(3)}秒 と合っている（ずれ ${Math.abs((shots[0] ?? 0) - want).toFixed(3)}秒）`);
+
+  const w = src('src/player/weapons.js');
+  // 銃は待たせないこと。待たせると撃ち味が丸ごと変わる
+  ok(/if \(d\.melee && !d\.thrown\) this\.strikeIn = this\._strikeDelay\(\);/.test(w),
+    '**銃と手榴弾は待たせていない**（弾は引金を引いた瞬間に出る物）');
+  // 持ち替えと死亡で捨てること。捨てないと銃を構えた状態で刃の判定が飛ぶ
+  ok((w.match(/this\.strikeIn = 0;/g) || []).length >= 3,
+    '待っている判定を、持ち替えと片付けで捨てている');
+
+  /* 実際の秒数。**表から計算して出す。**
+     ここに数字を書き写すと、SWINGSを触った時に片方だけ古くなる */
+  const delayOf = (s) => (s.wind + (1 / s.speed) * (1 - s.wind)) * s.time;
+  const rows = [
+    ['ナイフ', 'knife'], ['刀', 'katana'], ['ダガー', 'dagger'],
+  ];
+  for (const [name, shape] of rows) {
+    for (const kind of ['light', 'heavy']) {
+      const s = swingOf('knife', kind, shape === 'knife' ? null : shape);
+      const d = delayOf(s);
+      /* 下限: 0.08秒。ここを割ると「押した瞬間」と区別が付かない。
+         上限: 0.45秒。**待たせすぎると当たらない武器になる**
+         （相手は毎秒6m動くので、0.5秒待つと3m逃げられる。間合いは1.9〜2.5m） */
+      ok(d > 0.08 && d < 0.45,
+        `${name}${kind === 'heavy' ? '右' : '左'} … 刃が届くのは ${d.toFixed(2)}秒後（0.08〜0.45）`);
+    }
+  }
+  /* **右は左より遅いこと。** 右は「遅いが重い一撃」なので、
+     振りかぶりが相手から見えていないと避ける手が無い（MELEE_HEAVYの説明の通り） */
+  for (const [name, shape] of rows) {
+    const l = delayOf(swingOf('knife', 'light', shape === 'knife' ? null : shape));
+    const h = delayOf(swingOf('knife', 'heavy', shape === 'knife' ? null : shape));
+    ok(h > l, `${name} … 右(${h.toFixed(2)}秒)の方が左(${l.toFixed(2)}秒)より遅く届く`);
+  }
 }
 
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);
