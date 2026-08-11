@@ -76,7 +76,10 @@ export class LookMenu {
        並んだ商品を押しても買わないので、押し間違えで買うことが起きない */
     this.el.buyGo.onclick = () => {
       const id = this.preview;
-      const item = id ? itemsFor(this.weapon).find((it) => it.id === id) : null;
+      if (!id) return;
+      // 着け替えの面では装備する。ストアでは買う
+      if (!this.store) { this._wear(id); return; }
+      const item = itemsFor(this.weapon).find((it) => it.id === id);
       if (item) this._buy({ ...skinAt(id), ...item });
     };
   }
@@ -178,7 +181,11 @@ export class LookMenu {
   selectWeapon(id) {
     if (!SKINNABLE.includes(id)) return;
     this.weapon = id;
-    this.preview = null;
+    /* **着け替えの面では、今着けている物を選んだ状態で開く。**
+       nullにすると札が畳まれて、「今どれを着けているか」が
+       押すまで分からない（そこが「装備してるかどうかがわかりづらい」の中身）。
+       ストアは「買う」場所なので、何も選んでいない状態から始める */
+    this.preview = this.store ? null : skinFor(id);
     if (this.ready) this._showGun();
     this._paint();
   }
@@ -187,7 +194,8 @@ export class LookMenu {
      着け替えに来た人を買い物の画面へ通さない（逆も同じ） */
   _setTab(store) {
     this.store = !!store;
-    this.preview = null;
+    // 着け替えの面は今着けている物から始める（selectWeaponと同じ理由）
+    this.preview = store ? null : skinFor(this.weapon);
     this.el.title.textContent = this.store ? 'ストア' : 'スキン変更';
     this.el.sub.textContent = this.store ? 'コインで武器のスキンを買う' : '武器の見た目を選ぶ';
     if (this.ready) this._showGun();
@@ -230,6 +238,11 @@ export class LookMenu {
       if (s.id === shown) b.classList.add('on');
       // 買った物の印。値段の代わりに「購入済み」が出る（CSSが付ける）
       if (this.store && have) b.classList.add('own');
+      /* **今着けている物の印。** 2026-08-11「装備してるかどうかがわかりづらい」。
+         それまで .on（選んでいる印）だけで、見ているだけなのか着けているのかが
+         区別できなかった。着け替えの面だけに出す
+         （ストアは「買う」場所なので、着けているかは主題ではない）*/
+      if (!this.store && s.id === skinFor(this.weapon)) b.classList.add('wearing');
       /* 見本の色と名前と値段だけ。**「形」「色」の区別は出さない。**
          遊ぶ人にとってはどれも同じ「スキン」で、
          作り手から見た「これは形が変わる方」は、選ぶ時に要らない区別だった
@@ -238,9 +251,14 @@ export class LookMenu {
       b.innerHTML = `<span class="sw" style="background:${s.swatch}"></span>`
         + `<span class="nm">${s.name}</span>`
         + (this.store ? `<span class="pr">${(s.price || 0).toLocaleString()}</span>` : '');
-      /* **ストアで押しても買わない。試着だけ。**
-         買うのは下の札の「買う」1回で、押す物と買う物を分けてある */
-      b.onclick = () => (this.store ? this._pick(s) : this._wear(s.id));
+      /* **押しても買わない・着けない。試着だけ。**
+         やるのは下の札のボタン1回で、押す物とやる物を分けてある。
+
+         着け替えの面も同じ形にしたのは2026-08-11。
+         「装備するボタンも欲しい」と言われた所で、それまでは
+         **押した瞬間に着いていた**（それ自体は速いが、
+         着いたことが画面のどこにも出ないので分からなかった）*/
+      b.onclick = () => this._pick(s);
       list.appendChild(b);
     }
 
@@ -277,10 +295,13 @@ export class LookMenu {
   async _wear(id) {
     if (this.busy) return;
     if (!wearSkin(this.weapon, id)) { this._say('持っていません', true); return; }
-    this.preview = null;
+    /* **試着は解かない。** 着けた物をそのまま出し続ける
+       （解くと3Dが同じ見た目のまま札だけ畳まれて、着いたのか分からない）。
+       札は「装備中」へ変わり、並んだ物にも「装備中」の印が付く */
     this._showGun();
     this._paint();
     this.onChange();
+    this._say(`${skinAt(id).name} を装備しました`);
     // ログインしていれば台帳にも覚えさせる。していなければこの端末だけ
     if (!this.user) return;
     try { await api('/api/equip', { weapon: this.weapon, skin: id }); } catch { /* 手元は変わっている */ }
@@ -303,12 +324,41 @@ export class LookMenu {
     this._say('');
   }
 
-  /** 買う札の中身を差し替える。選んでいなければ畳む */
+  /**
+   * 札の中身を差し替える。選んでいなければ畳む。
+   *
+   * **ストアでは「買う」、スキン変更では「装備する」。**
+   * 器を2つに分けないのは、やることが違っても
+   * 「選んだ物に対して1つ押す」は同じなので、同じ位置に同じ形で出る方が読みやすいから。
+   */
   _paintBuy() {
     const el = this.el;
     const id = this.preview;
+
+    /* ---- 着け替えの面。**装備するボタンを出す。**
+       2026-08-11まで押した瞬間に着いていて、
+       着いたことが画面のどこにも出なかった（「装備してるかどうかがわかりづらい」）*/
+    if (!this.store) {
+      if (!id || !hasSkin(this.weapon, id)) { el.buy.classList.add('hidden'); return; }
+      el.buy.classList.remove('hidden');
+      const now = skinFor(this.weapon);
+      el.buyName.textContent = skinAt(id).name;
+      // 値段はここでは意味が無い（もう持っている物なので）
+      el.buyPrice.textContent = '';
+      if (id === now) {
+        el.buyGo.disabled = true;
+        el.buyGo.textContent = '装備中';
+        el.buyNote.textContent = 'これを着けています';
+      } else {
+        el.buyGo.disabled = false;
+        el.buyGo.textContent = '装備する';
+        el.buyNote.textContent = `今は ${skinAt(now).name} を着けています`;
+      }
+      return;
+    }
+
     const item = id ? itemsFor(this.weapon).find((it) => it.id === id) : null;
-    if (!this.store || !item) { el.buy.classList.add('hidden'); return; }
+    if (!item) { el.buy.classList.add('hidden'); return; }
     el.buy.classList.remove('hidden');
 
     const s = skinAt(id);
