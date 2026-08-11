@@ -162,6 +162,45 @@ export const swingTune = (shape, heavy) =>
   SWING_TUNES[shape]?.[heavy ? 'heavy' : 'light']
   || (heavy ? SWING_HEAVY_TUNE : SWING_TUNE);
 
+/**
+ * 形ごとの銃声。**着けた見た目の通りに鳴らないと、着けた気がしない。**
+ *
+ * 元の武器の音に**上書きで被せる**（全部を書き直さない）ので、
+ * 書かなかった層は元の銃のまま鳴る。どの数字が何に効くかは gunshot() の頭。
+ */
+export const SHAPE_GUN = {
+  /* ドラゴン。**低く鈍く。**
+     破裂の帯(crackFreq)を半分以下まで下げて、そのぶん胴と尾を伸ばす。
+     鈍いというのは「高い所が無い」ことなので、
+     クラックの量(crackVol)を落とすのが一番効く。
+     腹に来る低音は長く垂らす（唸りではなく、押される感じになる所まで） */
+  dragon: {
+    volume: 0.88, bodyFreq: 150, crackFreq: 1500,
+    bodyDecay: 0.36, tailDecay: 1.05, tailVol: 0.56, crackVol: 0.20,
+    thumpFrom: 150, thumpTo: 24, thumpTime: 0.30,
+    subVol: 0.70, subTime: 0.34, subDelay: 0.03,
+  },
+  /* キャンディ。**軽くて高い「ピュン」。**
+     銃声の低い層を全部抜いて、代わりに**低音の層を音程として使う。**
+     thumpFrom→thumpTo は本来「腹に来る低音」だが、
+     1150Hzから320Hzへ0.05秒で滑らせると玩具の発射音になる
+     （ここだけが唯一の音程のある層なので、可愛い音はここでしか作れない）。
+     機関部の音(mech)も切る。金属がぶつかる音が入ると玩具に聞こえない */
+  cute: {
+    // 音量は0.52から下げた。**音程のある層は音程の無いノイズより山が高い**ので、
+    // 同じ音量の数字でも山が0.91まで来ていた（1.0で割れる）
+    volume: 0.42, bodyFreq: 1500, crackFreq: 5600,
+    bodyDecay: 0.05, tailDecay: 0.14, tailVol: 0.12, crackVol: 0.20,
+    thumpFrom: 1150, thumpTo: 320, thumpTime: 0.055,
+    subVol: 0.02, subTime: 0.05,
+    mech: false,
+  },
+};
+
+/** その形の銃声。形が無ければ元の武器の音をそのまま返す */
+export const gunTune = (shape, base) =>
+  (SHAPE_GUN[shape] ? { ...base, ...SHAPE_GUN[shape] } : base);
+
 export class AudioEngine {
   constructor() {
     this.ctx = null;

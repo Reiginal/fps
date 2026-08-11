@@ -8,7 +8,7 @@
 import { mkdirSync } from 'node:fs';
 import { capture, BANDS } from './sound-measure.mjs';
 import '../server/dom-stub.js';
-import { SWING_HEAVY_TUNE, swingTune } from '../src/core/audio.js';
+import { SWING_HEAVY_TUNE, swingTune, gunTune } from '../src/core/audio.js';
 
 const OUT = 'sounds';
 mkdirSync(OUT, { recursive: true });
@@ -52,6 +52,17 @@ targets.push({
   name: 'swing-heavy', label: '強い一撃', seconds: 0.9,
   play: (a) => a.swing(SWING_HEAVY_TUNE),
 });
+/* 形ごとの銃声。**ドラゴンは低く鈍く、キャンディは軽くて高い。**
+   元の銃と並べて測らないと「低くした」が本当かどうか分からないので、
+   ライフルの音のすぐ後ろに並ぶ名前にしてある */
+const rifle = WEAPONS.find((w) => w.id === 'rifle');
+for (const shape of ['dragon', 'cute']) {
+  targets.push({
+    name: `gun-rifle-${shape}`, label: `銃声(ライフル/${shape})`,
+    seconds: Math.max(2.0, (gunTune(shape, rifle.sound).tailDecay || 0.4) * 1.6 + 0.8),
+    play: (a) => a.gunshot(gunTune(shape, rifle.sound), null, null),
+  });
+}
 // 形ごとの振る音。**刀は長く澄んで、ダガーは短く高い。**
 // 見た目だけ変えて音が同じだと、持ち替えた実感が出ない
 for (const shape of ['katana', 'dagger']) {
