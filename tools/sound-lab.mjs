@@ -61,7 +61,8 @@ targets.push({
 const SHAPE_ON = [
   ['dragon', 'rifle'], ['cute', 'rifle'],
   ['western', 'shotgun'], ['ice', 'sniper'], ['cyber', 'pistol'],
-  ['armor', 'rifle'], ['sakura', 'rifle'], ['shark', 'shotgun'], ['venom', 'sniper'], ['chrome', 'pistol'],
+  ['armor', 'rifle'], ['sakura', 'rifle'], ['shark', 'shotgun'],
+  ['skeleton', 'pistol'], ['astro', 'sniper'], ['bamboo', 'sniper'], ['venom', 'sniper'], ['chrome', 'pistol'],
 ];
 for (const [shape, weaponId] of SHAPE_ON) {
   const gun = WEAPONS.find((w) => w.id === weaponId);

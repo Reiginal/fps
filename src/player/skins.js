@@ -59,6 +59,25 @@ const PAINT = {
       steel: { color: 0x9aa085, wear: { color: 0xd0d6bc } },
     },
   },
+  /* ジャングル迷彩（拳銃だけ）。ライフルの迷彩と**柄を分ける。**
+     あちらは緑褐色の4色（砂と枯草の土地）、こちらは深緑と黒（濡れた森）。
+     同じ「迷彩」でも、明るいか暗いかで別の物に見える */
+  jungle: {
+    note: '深緑と黒の斑、泥の汚れ。拳銃だけの迷彩',
+    swatch: '#2c3a24',
+    /* 一度全部を暗い緑で塗って**変化64しか出ず落ちた。**
+       アーバン（元は変化30で作り直した）と同じ罠で、
+       **暗い地に暗い色を塗っても何も変わらない。**
+       迷彩は明暗が散っていることが柄の条件なので、
+       樹脂を明るい枯草色まで上げて4段に散らす */
+    over: {
+      enamel: { color: 0x4e6236, wear: { color: 0x8a9a64, amount: 1.1, dust: 0.28, dustColor: 0x6a5c3e } },
+      polymer: { color: 0x8a9660, wear: { color: 0xb4bc8c, dust: 0.32, dustColor: 0x6a5c3e } },
+      anodized: { color: 0x1e2a18, wear: { color: 0x4a5c38 } },
+      phosphate: { color: 0x30401f, wear: { color: 0x62744a, dust: 0.26 } },
+      steel: { color: 0x9aa478, wear: { color: 0xccd4a8 } },
+    },
+  },
   gold: {
     note: '派手枠。一番高い',
     swatch: '#a8811f',
@@ -208,6 +227,51 @@ const SHAPE_LOOK = {
       steel: { color: 0x6a7a48, wear: { color: 0xaebc78 } },
     },
   },
+  skeleton: {
+    note: '透ける樹脂の枠と、中に見える発条と真鍮の弾',
+    swatch: '#d8e4ea',
+    /* **地は明るくしない。** 透ける枠の中に元の部品が見える作りなので、
+       中身が暗い方が枠の透明感が出る。
+       地金だけ明るくして、発条と縁の金属が繋がるようにしてある */
+    over: {
+      enamel: { color: 0x30363c, wear: { color: 0x7e8a94, amount: 0.6 } },
+      anodized: { color: 0x3a4248, wear: { color: 0x8e9aa4 } },
+      polymer: { color: 0x282e34, wear: { color: 0x66727c } },
+      phosphate: { color: 0x2a3036, wear: { color: 0x76828c } },
+      steel: { color: 0xb4c0c8, wear: { color: 0xe8f0f6 } },
+    },
+  },
+  astro: {
+    note: '紺紫の地に星の粒、対物側に光る環。望遠鏡に見立てる',
+    swatch: '#2a2448',
+    /* **地は紺紫。** 星を置く物なので、夜空の暗さが要る。
+       アイス（明るい白）と正面から逆で、ヴェノム（黄緑）とも色相が離れている */
+    over: {
+      enamel: { color: 0x201c3a, wear: { color: 0x6a64a0, amount: 0.8 } },
+      polymer: { color: 0x262046, wear: { color: 0x5e589a } },
+      polymerTan: { color: 0x2a2448, wear: { color: 0x7068ac } },
+      anodized: { color: 0x18142c, wear: { color: 0x58508a } },
+      phosphate: { color: 0x141024, wear: { color: 0x4e4880 } },
+      // 地金は銀へ。光る環と地金が繋がって、飾りが後付けに見えない
+      steel: { color: 0xa8b0c8, wear: { color: 0xdce2f0 } },
+    },
+  },
+  bamboo: {
+    note: '節が並ぶ竹の銃身、麻紐の巻き。若竹の緑と生成りの白',
+    swatch: '#a8b060',
+    /* **竹そのものは飾り側(bambooDeco)が持っている。**
+       ここが塗るのは金属の側で、竹に合う生成りへ寄せる役。
+       金属を黒く残すと、竹だけ後から被せたように浮く（ウエスタンと同じ理屈） */
+    over: {
+      enamel: { color: 0x4a4632, wear: { color: 0x9a9468, amount: 1.0, dust: 0.16 } },
+      polymer: { color: 0x585240, wear: { color: 0xa8a078 } },
+      polymerTan: { color: 0x7a7452, wear: { color: 0xc0b888 } },
+      anodized: { color: 0x3e3a2a, wear: { color: 0x8a8460 } },
+      phosphate: { color: 0x363224, wear: { color: 0x7e785a } },
+      steel: { color: 0x8e8a6e, wear: { color: 0xc8c4a2 } },
+    },
+  },
+
   chrome: {
     note: '磨いた銀と象牙の握把、真鍮の撃鉄。品揃えで唯一の明るい拳銃',
     swatch: '#c8d0d8',
