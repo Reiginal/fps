@@ -279,6 +279,36 @@ export const STEPS = [
       DELETE FROM owned_skins    WHERE sku LIKE 'nade:%';
       DELETE FROM equipped_skins WHERE weapon_id = 'nade'`,
   },
+  {
+    n: 13,
+    name: '1色で塗る安いスキンを棚から下げる',
+    /* 2026-08-11。デザート・アーバン・歴戦を消す。
+
+       **一度「塗り直す」で派手にしたが、それでも要らないと言われた。**
+       消した理由は色の派手さではなく形で、3つとも「銃全体を1つの色で塗る」商品だった。
+       代わりに入れた迷彩(800)は材質ごとに違う色を置くので、同じ問題が起きない。
+
+       12番と同じやり方で**払った額をそのまま返す**（owned_skins の price を使う）。
+       返してから消す。順番を逆にすると返す額が計算できない。
+
+       装備の行も消す。残すと台帳に「実在しない商品を着けている」行が残って、
+       後から読む人が「なぜ画面に出ないのか」を追うことになる。
+       消えた人は次に画面を開いた時に標準へ落ちる（着けていない扱い）。
+
+       **9番と11番には触らない。** あちらは形と色を分けて戻した手順で、
+       流れ終わった手順を書き換えると本番と新しい手元で出来上がる形が変わる */
+    sql: `UPDATE wallets w
+             SET coins = w.coins + r.back, updated_at = now()
+            FROM (SELECT user_id, SUM(price) AS back
+                    FROM owned_skins
+                   WHERE sku LIKE '%:desert' OR sku LIKE '%:urban' OR sku LIKE '%:veteran'
+                GROUP BY user_id) r
+           WHERE w.user_id = r.user_id;
+      DELETE FROM owned_skins
+            WHERE sku LIKE '%:desert' OR sku LIKE '%:urban' OR sku LIKE '%:veteran';
+      DELETE FROM equipped_skins
+            WHERE skin_id IN ('desert', 'urban', 'veteran')`,
+  },
   // 現金を入れる時の明細(ledger)はここへ足す。上の11には二度と触らない
 ];
 

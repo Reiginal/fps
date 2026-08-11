@@ -74,7 +74,7 @@ console.log('\n[4] 被せる・戻せる');
   gun.traverse((o) => { if (o.isMesh) before.push(o.material); });
   ok(before.length > 20, `面が ${before.length} 個ある`);
 
-  applySkin(gun, 'desert');
+  applySkin(gun, 'camo');
   const after = [];
   gun.traverse((o) => { if (o.isMesh) after.push(o.material); });
   const diff = after.filter((m, i) => m !== before[i]).length;
@@ -87,8 +87,8 @@ console.log('\n[4] 被せる・戻せる');
   ok(back.every((m, i) => m === before[i]), '**標準へ戻すと元の材質へ完全に戻る**');
 
   // 行ったり来たりしても壊れない（2回目に「前のスキン」を元だと思い込まないか）
-  applySkin(gun, 'urban');
-  applySkin(gun, 'veteran');
+  applySkin(gun, 'camo');
+  applySkin(gun, 'gold');
   applySkin(gun, 'stock');
   const back2 = [];
   gun.traverse((o) => { if (o.isMesh) back2.push(o.material); });
@@ -124,11 +124,20 @@ console.log('\n[5] 色が実際に変わっている（測る）');
     ok(d > 20, `${s.name} … 標準から ${d.toFixed(0)} 離れている (${got.map((v) => v.toFixed(0)).join(', ')})`);
   }
 
-  // 「歴戦」は色を変えずに擦れだけ変えるスキン。**色は近いままで、地図は違う**
-  const vet = SKINS.find((s) => s.id === 'veteran');
-  const worn = recolor(MATS.enamel, vet.over.enamel);
-  const wd = dist(base, avg(worn));
-  ok(wd > 3, `歴戦 … 色を指定していないのに地図は変わる（${wd.toFixed(0)}）`);
+  /* **迷彩は材質ごとに違う色を置く。** そこが「1色で塗る商品」との違いで、
+     2026-08-11にデザート・アーバン・歴戦を消して迷彩を入れた理由そのもの。
+     ここが崩れて全材質が同じ色になったら、消した3つと同じ物に戻っている */
+  const camo = SKINS.find((s) => s.id === 'camo');
+  const tones = ['enamel', 'polymer', 'anodized', 'phosphate', 'steel']
+    .map((k) => camo.over[k]?.color)
+    .filter((c) => c != null);
+  ok(tones.length >= 4, `迷彩は4つ以上の材質に色を置いている（${tones.length}個）`);
+  ok(new Set(tones).size === tones.length, '迷彩の色は材質ごとに全部違う（1色で塗っていない）');
+  // 明暗が散っていること。**同じ明るさの色を並べても迷彩には見えない**
+  const lum = (h) => 0.2126 * ((h >> 16) & 255) + 0.7152 * ((h >> 8) & 255) + 0.0722 * (h & 255);
+  const ls = tones.map(lum);
+  ok(Math.max(...ls) - Math.min(...ls) > 60,
+    `迷彩の明暗が散っている（一番明るい所と暗い所の差 ${(Math.max(...ls) - Math.min(...ls)).toFixed(0)}）`);
 }
 
 console.log('\n[6] 焼くのは1回だけ');
@@ -138,8 +147,8 @@ console.log('\n[6] 焼くのは1回だけ');
   const def = WEAPONS.find((w) => w.id === 'rifle');
   const a = def.build(def.view);
   const b = def.build(def.view);
-  applySkin(a, 'desert');
-  applySkin(b, 'desert');
+  applySkin(a, 'camo');
+  applySkin(b, 'camo');
   const ma = [];
   a.traverse((o) => { if (o.isMesh) ma.push(o.material); });
   const mb = [];
@@ -159,13 +168,13 @@ console.log("\n[7] 武器ごとに別のスキンを着ける");
   ok(wearSkin('rifle', DEFAULT_SKIN), '標準はいつでも着けられる（買う物ではない）');
 
   // 買ってある状態にする
-  setAccount({ owned: [skuOf('rifle', 'gold'), skuOf('pistol', 'desert')], equipped: {} });
+  setAccount({ owned: [skuOf('rifle', 'gold'), skuOf('pistol', 'camo')], equipped: {} });
   ok(hasSkin('rifle', 'gold'), 'ライフルのゴールドを持っている');
   ok(!hasSkin('pistol', 'gold'), '**ピストルのゴールドは別の商品**（持っていない）');
   ok(wearSkin('rifle', 'gold'), '持っている物は着けられる');
   ok(skinFor('rifle') === 'gold' && skinFor('pistol') === DEFAULT_SKIN,
     '**武器ごとに別々**（ライフルはゴールド、ピストルは標準）');
-  ok(wearSkin('pistol', 'desert') && skinFor('rifle') === 'gold',
+  ok(wearSkin('pistol', 'camo') && skinFor('rifle') === 'gold',
     'ピストルを変えてもライフルは変わらない');
 
   // 台帳側で持ち物を消された時。着せたままにしない
