@@ -367,5 +367,44 @@ console.log('\n[計測窓] ?debugの数字窓が、測る側なのに重さを�
   ok(writes === 2, `数字が動いたら書く（${writes}回）`);
 }
 
+console.log('\n[Eの札] 訓練場のショットガンが画面に出るか');
+{
+  /* 2026-08-11に足した。**「Eっていうのは画面の右下のあそこに出てないじゃん。出してよ」**
+     と言われた所。持てるようにしただけで札を出していなかったので、
+     訓練場の上の一行を読まないと**知る方法が無かった。**
+
+     Qの札(quickSlot)と同じ作りにしてある。
+     **数字の札の続きに並べない**のは、番号の続きに置くと「5」に見えるのに
+     5では出ない、という嘘になるため（index.htmlの注意書きの通り）*/
+  const h = new HUD();
+  ok(typeof h.rangeSlot === 'function', 'Eの札を出す口がある');
+
+  const el = h.el.slotRange;
+  ok(!!el, '画面にEの札の器がある');
+
+  // 訓練場の外では畳まれていること
+  h.rangeSlot(null, false);
+  ok(el.classList.contains('hide'), '持っていない時は畳まれている');
+
+  // 出す時は「E ショットガン」と読めること
+  h.rangeSlot('ショットガン', false);
+  ok(!el.classList.contains('hide'), '持っている時は出る');
+  ok(/^E /.test(el.textContent), `どのキーで出るかが書いてある（${el.textContent}）`);
+  ok(el.textContent.includes('ショットガン'), '武器の名前が書いてある');
+
+  // 握っている時は印が付くこと（Qと同じ）
+  h.rangeSlot('ショットガン', true);
+  ok(el.classList.contains('on'), '握っている時は印が付く');
+
+  /* **同じ値で呼び直した時に触らないこと。** 毎フレーム呼ばれるので、
+     ここで毎回DOMを触ると[軽さ]の節で見張っている物と同じ無駄が出る */
+  /* **同じ値で呼び直した時に触らないこと。** 偽DOMのclassListはSetなので、
+     印を1つ足しておいて、消されないことで確かめる */
+  el.classList.add('ためし');
+  h.rangeSlot('ショットガン', true);
+  ok(el.classList.contains('ためし'), '同じ値なら2度目は何も触らない');
+  el.classList.remove('ためし');
+}
+
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);
 process.exit(bad === 0 ? 0 : 1);
