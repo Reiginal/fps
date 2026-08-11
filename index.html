@@ -631,6 +631,40 @@
   /* 値段。ストアの面だけ出る */
   .lkitem .pr { color: var(--accent); }
   .lkitem .pr::after { content: 'コイン'; color: var(--dim); font-size: 9px; margin-left: 2px; }
+  /* 買った物。**ストアから消さずに残す**（2026-08-11「いなくなるの寂しい」）。
+     値段の代わりに「済」を出して、押しても買わない物だと分かるようにする */
+  .lkitem.own { border-color: rgba(120,220,150,.35); cursor: pointer; }
+  .lkitem.own .nm { color: var(--hud); }
+  .lkitem.own .pr { display: none; }
+  .lkitem.own::after {
+    content: '購入済み'; font-size: 9px; letter-spacing: .06em;
+    color: var(--bg); background: var(--ok); padding: 1px 4px;
+  }
+
+  /* 買う札。選んだ時だけ出る。**買う操作をここ1箇所に集める** */
+  .lkbuy {
+    margin: 4px auto 8px; padding: 10px 14px; max-width: 320px;
+    border: 1px solid var(--accent); background: rgba(99,210,255,.07);
+  }
+  .lkbuy.hidden { display: none; }
+  .lkbuyname {
+    font-size: 11px; letter-spacing: .14em; color: var(--hud); margin-bottom: 8px;
+  }
+  .lkbuyrow { display: flex; align-items: center; justify-content: center; gap: 12px; }
+  .lkbuyprice {
+    font-family: var(--mono); font-size: 14px; letter-spacing: .1em; color: var(--accent);
+  }
+  .lkbuyprice::after { content: 'コイン'; color: var(--dim); font-size: 9px; margin-left: 3px; }
+  .lkbuygo {
+    padding: 7px 18px; font-family: var(--mono); font-size: 11px; letter-spacing: .16em;
+    color: var(--bg); background: var(--accent); border: none; cursor: pointer;
+  }
+  .lkbuygo:hover { filter: brightness(1.15); }
+  /* 足りない時。**押せないことが色で分かる**（押してから断られるより早い） */
+  .lkbuygo:disabled { background: rgba(255,255,255,.16); color: var(--dim); cursor: not-allowed; }
+  .lkbuynote {
+    font-size: 9px; letter-spacing: .08em; color: var(--dim); margin-top: 6px; min-height: 12px;
+  }
 
   /* 残高の行。**買う画面でいくら持っているかが見えないと選べない。**
      ストアの時だけ中身が入る（空の時に隙間だけ残らないよう、空なら畳む） */
@@ -1329,6 +1363,19 @@
     <div class="lklist" id="lkList"></div>
     <!-- 並んだ物に付いている印の読み方。中身はlook.jsが入れる -->
     <div class="lkhelp" id="lkHelp"></div>
+
+    <!-- 買う札。**選んだ時だけ出る。**
+         2026-08-11まで「同じボタンを2回押す」形（1回目が試着・2回目で購入）で、
+         「購入が2回クリックなのが嫌だわ。なんかpopoverじゃないけど、なんか出してみて」
+         と言われた所。押す物と買う物を分けて、買うのはここの1回だけにした -->
+    <div class="lkbuy hidden" id="lkBuy">
+      <div class="lkbuyname" id="lkBuyName"></div>
+      <div class="lkbuyrow">
+        <span class="lkbuyprice" id="lkBuyPrice"></span>
+        <button id="lkBuyGo" class="lkbuygo" type="button">買う</button>
+      </div>
+      <div class="lkbuynote" id="lkBuyNote"></div>
+    </div>
 
     <div id="lkStatus"></div>
 

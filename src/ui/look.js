@@ -52,6 +52,10 @@ export class LookMenu {
       name: $('lkName'), note: $('lkNote'), help: $('lkHelp'),
       status: $('lkStatus'), coins: $('lkCoins'),
       close: $('lkClose'),
+      /* 買う札。**選んだ時だけ出す。**
+         2026-08-11まで「同じボタンを2回押す」形だったのを分けた */
+      buy: $('lkBuy'), buyName: $('lkBuyName'), buyPrice: $('lkBuyPrice'),
+      buyGo: $('lkBuyGo'), buyNote: $('lkBuyNote'),
     };
     this.ready = false;
     this.running = false;
@@ -68,6 +72,13 @@ export class LookMenu {
 
     this._buildGuns();
     this.el.close.onclick = () => this.hide();
+    /* 買う札の「買う」。**買う操作はここ1箇所だけ。**
+       並んだ商品を押しても買わないので、押し間違えで買うことが起きない */
+    this.el.buyGo.onclick = () => {
+      const id = this.preview;
+      const item = id ? itemsFor(this.weapon).find((it) => it.id === id) : null;
+      if (item) this._buy({ ...skinAt(id), ...item });
+    };
   }
 
   /** 会員証の状態が変わったら呼ばれる（main.jsが繋ぐ） */
@@ -204,8 +215,12 @@ export class LookMenu {
     const all = [skinAt(DEFAULT_SKIN), ...sell];
     for (const s of all) {
       const have = hasSkin(this.weapon, s.id);
-      // ストアの面には、持っていない物と標準以外を並べる
-      if (this.store && (have || s.id === DEFAULT_SKIN)) continue;
+      /* ストアの面には標準以外を全部並べる。**買った物も消さない。**
+         2026-08-11まで買った瞬間に棚から消していて、
+         「買ったやつは購入済みってなるようにしてよ。いなくなるの寂しい」と言われた所。
+         消すと、買った物を見に来る場所がストアから無くなる
+         （着け替えの面はあるが、そちらは値段も並びも別） */
+      if (this.store && s.id === DEFAULT_SKIN) continue;
       // 装備の面には、持っている物だけ
       if (!this.store && !have) continue;
 
@@ -213,6 +228,8 @@ export class LookMenu {
       b.type = 'button';
       b.className = 'lkitem';
       if (s.id === shown) b.classList.add('on');
+      // 買った物の印。値段の代わりに「購入済み」が出る（CSSが付ける）
+      if (this.store && have) b.classList.add('own');
       /* 見本の色と名前と値段だけ。**「形」「色」の区別は出さない。**
          遊ぶ人にとってはどれも同じ「スキン」で、
          作り手から見た「これは形が変わる方」は、選ぶ時に要らない区別だった
@@ -221,7 +238,9 @@ export class LookMenu {
       b.innerHTML = `<span class="sw" style="background:${s.swatch}"></span>`
         + `<span class="nm">${s.name}</span>`
         + (this.store ? `<span class="pr">${(s.price || 0).toLocaleString()}</span>` : '');
-      b.onclick = () => (this.store ? this._buy(s) : this._wear(s.id));
+      /* **ストアで押しても買わない。試着だけ。**
+         買うのは下の札の「買う」1回で、押す物と買う物を分けてある */
+      b.onclick = () => (this.store ? this._pick(s) : this._wear(s.id));
       list.appendChild(b);
     }
 
@@ -245,6 +264,8 @@ export class LookMenu {
     const s = SKINS.find((x) => x.id === shown) || SKINS[0];
     this.el.name.textContent = s.name;
     this.el.note.textContent = s.note;
+    // 買う札も一緒に塗り直す。**別々に呼ぶと片方が古いまま残る**
+    this._paintBuy();
   }
 
   _say(text, bad = false) {
@@ -265,19 +286,65 @@ export class LookMenu {
     try { await api('/api/equip', { weapon: this.weapon, skin: id }); } catch { /* 手元は変わっている */ }
   }
 
+  /**
+   * ストアで1つ選ぶ。**試着して、買う札を出すだけ。ここでは買わない。**
+   *
+   * 2026-08-11まで「同じボタンを2回押す」形だった（1回目が試着・2回目で購入）。
+   * 「購入が2回クリックなのが嫌だわ。なんかpopoverじゃないけど、なんか出してみて」
+   * と言われて分けた。押す回数は変わっていないが、
+   * **2回目が何をするか分からない**のが問題だったので、
+   * 買う操作を専用の札へ移して「買う」と書いてある物を1回押す形にした。
+   */
+  _pick(s) {
+    if (this.busy) return;
+    this.preview = s.id;
+    this._showGun();
+    this._paint();
+    this._say('');
+  }
+
+  /** 買う札の中身を差し替える。選んでいなければ畳む */
+  _paintBuy() {
+    const el = this.el;
+    const id = this.preview;
+    const item = id ? itemsFor(this.weapon).find((it) => it.id === id) : null;
+    if (!this.store || !item) { el.buy.classList.add('hidden'); return; }
+    el.buy.classList.remove('hidden');
+
+    const s = skinAt(id);
+    const have = hasSkin(this.weapon, id);
+    const coins = Number(this.user?.coins ?? 0);
+    el.buyName.textContent = s.name;
+    el.buyPrice.textContent = item.price.toLocaleString();
+
+    if (have) {
+      el.buyGo.disabled = true;
+      el.buyGo.textContent = '購入済み';
+      el.buyNote.textContent = 'ホームのスキン変更で着けられます';
+      return;
+    }
+    el.buyGo.textContent = '買う';
+    if (!this.user) {
+      el.buyGo.disabled = true;
+      el.buyNote.textContent = 'ログインすると買えます';
+      return;
+    }
+    /* 足りない時は**押す前に分かるようにする。**
+       押してからサーバーに断られるより、いくら足りないかが先に見えた方が早い */
+    if (coins < item.price) {
+      el.buyGo.disabled = true;
+      el.buyNote.textContent = `${(item.price - coins).toLocaleString()}コイン足りません`;
+      return;
+    }
+    el.buyGo.disabled = false;
+    el.buyNote.textContent = `買うと残り ${(coins - item.price).toLocaleString()}コイン`;
+  }
+
+  /** 買う。**札の「買う」から1回で呼ばれる。**試着はもう済んでいる */
   async _buy(s) {
     if (this.busy) return;
     if (!this.user) { this._say('買うにはログインしてください', true); return; }
-
-    /* 1回目は試着。**押した瞬間に買わない。**
-       値段だけ見て押した人が、確かめる間もなく買わされるのは避ける */
-    if (this.preview !== s.id) {
-      this.preview = s.id;
-      this._showGun();
-      this._paint();
-      this._say(`${s.name} … もう一度押すと${s.price.toLocaleString()}コインで買います`);
-      return;
-    }
+    if (hasSkin(this.weapon, s.id)) { this._say('もう持っています'); return; }
 
     this.busy = true;
     this._say('買っています…');
@@ -296,17 +363,19 @@ export class LookMenu {
 
     setOwned(r.owned);
     /* 買えた合図。**文字が変わるだけでは手応えが無い。**
-       ストアからはその商品が消えるので、押した所の見た目も一緒に変わってしまい、
-       「買えたのか、押し間違えて何か消えたのか」が読めない */
+       今は買っても棚から消えないので、押した所は「購入済み」の印に変わるだけ。
+       印だけだと手応えが薄いので、音は残してある（硬貨が落ちる音） */
     this.onBought(s);
     if (this.user) this.user.coins = r.coins;
-    this.preview = null;
+    /* **試着を解かない。** 買った物をそのまま着けるので、
+       ここでpreviewを消すと3Dが元の見た目へ戻って「買ったのに何も起きていない」に見える */
     // 買ったらそのまま着ける。買った直後にもう一度押させる理由が無い
     wearSkin(this.weapon, s.id);
     this._showGun();
     this.onChange();
-    /* **買ったらそのまま着ける。**ストアからはその商品が消えるので、
-       着けたことをここで言わないと「買ったのに何も起きていない」に見える。
+    /* 買ったらそのまま着ける。**棚から消えなくなったので、
+       「買った」と「着けた」を両方言う必要がある**
+       （前は商品が消えることが「買えた」の合図を兼ねていた）。
        面は切り替えない（入口が分かれているので、勝手に別の画面へ移らない） */
     this._say(`${s.name} を買って、そのまま装備しました`);
     this._paint();
