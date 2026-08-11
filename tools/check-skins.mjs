@@ -228,6 +228,43 @@ console.log("\n[9] 画面の器");
   ok(/onLook\(false\)/.test(menu) && /onLook\(true\)/.test(menu),
     'どちらの面で開くかをボタンが渡している');
   ok(/show\(store = false\)/.test(js), '開く時に受け取っている');
+
+  /* **印の読み方が画面に出ているか。** 色見本と「形」の札を並べていたが、
+     どちらも意味を書いていなかったので「左右のマークがなんなのか謎」と言われた。
+     印だけ置いても、初見の人には読めない */
+  ok(/lkhelp/.test(html) && /this\.el\.help/.test(js), '印の読み方を出す場所がある');
+  ok(/形も変わる/.test(js), '「形」の札の意味が書いてある');
+  ok(/title="この色になる"/.test(js), '色見本に説明が付いている');
+  // 9pxでは字が潰れて緑の四角にしか見えなかった。読める大きさを保つ
+  const kd = html.match(/\.lkitem \.kd \{[^}]*\}/);
+  const kdSize = Number(kd?.[0].match(/font-size:\s*(\d+)px/)?.[1] || 0);
+  ok(kdSize >= 10, `「形」の札が読める大きさ (${kdSize}px / 10px以上)`);
+}
+
+console.log('\n[9.5] 買えた合図の音');
+{
+  /* **買った後に何も鳴らないと、効いたのかが分からない**（そう言われた）。
+     ストアからはその商品が消えるので、押した所の見た目も一緒に変わってしまい、
+     「買えたのか、押し間違えて何か消えたのか」が文字だけでは読めない */
+  const js = readFileSync(new URL('../src/ui/look.js', import.meta.url), 'utf8');
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  const audio = readFileSync(new URL('../src/core/audio.js', import.meta.url), 'utf8');
+  ok(/purchase\(\)\s*\{/.test(audio), 'audio.jsに買えた音がある');
+  ok(/this\.onBought\(/.test(js), '買えた時に呼んでいる');
+  // **失敗した時に鳴らさない。** 返事を見る前に鳴らすと、残高不足でも鳴る
+  const buyBody = js.slice(js.indexOf('async _buy('), js.indexOf('get isOpen'));
+  ok(buyBody.indexOf('this.onBought(') > buyBody.indexOf('if (!r.ok)'),
+    '**サーバーがokと言ってから鳴らす**（残高不足では鳴らない）');
+  ok(/this\.look\.onBought = /.test(main), 'main.jsが音へ繋いでいる');
+  /* ホームから直でストアへ来た人は、まだ音が起きていない。
+     WebAudioは操作を起点にしないと走らない */
+  ok(/onBought = \(\) => \{ this\._wakeAudio\(\);/.test(main),
+    '鳴らす前に音を起こしている（ホームから直で来ても鳴る）');
+  /* この画面に音の一式を持たせない。持たせるとスキンの画面だけで音が要る。
+     **コメントを外してから見る。**「音を知らない」の理由コメントに
+     AudioEngineの名前が出ているので、生のまま見ると自分の説明で落ちる */
+  const bare = js.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  ok(!/audio/i.test(bare), 'スキンの画面はAudioEngineを知らない');
 }
 
 console.log("\n[10] 素材ファイルを増やしていない");

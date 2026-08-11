@@ -49,7 +49,7 @@ export class LookMenu {
       title: $('lkTitle'), sub: $('lkSub'),
       guns: $('lkGuns'),
       list: $('lkList'),
-      name: $('lkName'), note: $('lkNote'),
+      name: $('lkName'), note: $('lkNote'), help: $('lkHelp'),
       status: $('lkStatus'), coins: $('lkCoins'),
       close: $('lkClose'),
     };
@@ -62,6 +62,9 @@ export class LookMenu {
     this.user = null;
     /** 装備を変えた時に呼ぶ。今持っている銃へ掛け直すのは呼ぶ側の仕事 */
     this.onChange = () => {};
+    /* 買えた時に呼ぶ。**この画面は音を知らない。**
+       AudioEngineを直に持たせると、スキンの画面を出すだけで音の一式が要る */
+    this.onBought = () => {};
 
     this._buildGuns();
     this.el.close.onclick = () => this.hide();
@@ -210,10 +213,11 @@ export class LookMenu {
       b.type = 'button';
       b.className = 'lkitem';
       if (s.id === shown) b.classList.add('on');
-      // 形違いは色違いと値打ちが違うので、一目で分かる印を付ける
-      b.innerHTML = `<span class="sw" style="background:${s.swatch}"></span>`
+      /* 形違いは色違いと値打ちが違うので、一目で分かる印を付ける。
+         印の意味は下の1行(lkHelp)で説明する。**印だけでは伝わらない** */
+      b.innerHTML = `<span class="sw" style="background:${s.swatch}" title="この色になる"></span>`
         + `<span class="nm">${s.name}</span>`
-        + (s.kind === 'shape' ? '<span class="kd">形</span>' : '')
+        + (s.kind === 'shape' ? '<span class="kd" title="形そのものが変わる">形</span>' : '')
         + (this.store ? `<span class="pr">${(s.price || 0).toLocaleString()}</span>` : '');
       b.onclick = () => (this.store ? this._buy(s) : this._wear(s.id));
       list.appendChild(b);
@@ -228,6 +232,15 @@ export class LookMenu {
         : '持っているスキンがありません。ホームのストアで買えます';
       list.appendChild(p);
     }
+
+    /* 印の読み方。**印だけ置いても意味は伝わらない**
+       （遊んで「左右のマークがなんなのか謎」と言われた）。
+       形違いが1つも並んでいない時に「形」の説明を出しても邪魔なので、
+       並んでいる物に合わせて出し分ける */
+    const hasShape = [...list.children].some((c) => c.querySelector?.('.kd'));
+    this.el.help.innerHTML = !list.querySelector('.lkitem') ? ''
+      : '<span class="sw"></span> その武器がこの色になる'
+        + (hasShape ? '　／　<b>形</b> 色だけでなく形も変わる' : '');
 
     const s = SKINS.find((x) => x.id === shown) || SKINS[0];
     this.el.name.textContent = s.name;
@@ -282,6 +295,10 @@ export class LookMenu {
     if (!r.ok) { this._say(r.error || 'うまくいきませんでした', true); return; }
 
     setOwned(r.owned);
+    /* 買えた合図。**文字が変わるだけでは手応えが無い。**
+       ストアからはその商品が消えるので、押した所の見た目も一緒に変わってしまい、
+       「買えたのか、押し間違えて何か消えたのか」が読めない */
+    this.onBought(s);
     if (this.user) this.user.coins = r.coins;
     this.preview = null;
     // 買ったらそのまま着ける。買った直後にもう一度押させる理由が無い

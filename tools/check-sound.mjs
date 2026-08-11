@@ -441,5 +441,26 @@ console.log('\n[7] 滑り込みが「シュー」に聞こえるか');
   );
 }
 
+console.log('\n[8] 買えた合図が、ロビー入室と混ざらないか');
+/* 画面を見ていない人に気づかせる音は、今この2つだけ。
+   どちらも「短い・高い・上がる」なので、作りが近いと**同じ音に聞こえる。**
+   買った後に「誰か入ってきた」と思われたら合図として失敗している。
+   耳で分かる違いは尾の長さと金属の当たる音なので、そこに線を引く */
+{
+  const buy = await capture((a) => a.purchase(), { seconds: 0.9 });
+  const join = await capture((a) => a.lobbyJoin(), { seconds: 0.8 });
+  ok(buy.lenMs > join.lenMs * 1.3,
+    `尾が残る (買えた${buy.lenMs.toFixed(0)}ms / 入室${join.lenMs.toFixed(0)}ms の1.3倍より上)`);
+  // 硬貨の当たる音。ここが薄いと、ただの高い和音になって電子音に戻る
+  ok(buy.bands[4].pct > join.bands[4].pct * 2,
+    `金属の帯(2.5-7kHz)が乗っている (買えた${buy.bands[4].pct.toFixed(1)}% / 入室${join.bands[4].pct.toFixed(1)}%)`);
+  /* 場所を持たない合図なので、戦闘中の音より大きくしない。
+     滑り込みで踏んだのと同じ形（山が低くても生の信号が全開を超えると
+     出口のリミッターを潰して、その間ほかの音が引っ込む） */
+  ok(buy.peak < 0.5, `振り切れていない (山${buy.peak.toFixed(2)} / 0.5未満)`);
+  // 低音は要らない。ここが太ると、遠くの爆発と紛らわしくなる
+  ok(buy.lowPct < 5, `低い所で鳴っていない (${buy.lowPct.toFixed(1)}% / 5%未満)`);
+}
+
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);
 process.exit(bad === 0 ? 0 : 1);

@@ -97,6 +97,9 @@ for (const sf of ['dirt', 'gravel', 'asphalt', 'concrete', 'metal', 'wood']) {
   });
 }
 targets.push({ name: 'reload', label: 'リロード', play: (a) => a.reload(2), seconds: 2.6 });
+// ロビー入室と買えた合図。並べて聴いて、混ざらないか耳で確かめるために両方出す
+targets.push({ name: 'lobby-join', label: 'ロビー入室', play: (a) => a.lobbyJoin(), seconds: 0.8 });
+targets.push({ name: 'purchase', label: '買えた', play: (a) => a.purchase(), seconds: 0.9 });
 
 const filter = process.argv[2] || '';
 const rows = [];
