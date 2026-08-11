@@ -616,5 +616,55 @@ console.log('\n[会員証の返し] 3つの口が同じ物を返すか');
   ok(/if \(!user\) return user;/.test(body), 'ログインしていない時はそのまま返す');
 }
 
+/* ------------------------------------------ 名前が出るまでの間 */
+
+console.log('\n[名前が出るまで] 先に聞き始めているか');
+{
+  /* **ホームが出てから一拍おいて名前が入る、を戻さないための見張り。**
+
+     account.js の refresh() が動き出すのは main.js の _bindMenu、つまり
+     three.jsを読んで地形を組んでシェーダーを通し終わった後（読み込み画面が
+     消える直前）。そこから /api/me を投げると、往復ぶんまるごとが
+     「ホームは出ているのに名前欄が空」の時間になる。
+     本番(東京)で70ms前後、遅い回線ならもっと。
+
+     直し方は「早く投げる」1本で、index.htmlの頭で先に投げてある。
+     読み込みの数秒の裏で往復が済むので、ホームの1枚目から名前が入る */
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const js = readFileSync(new URL('../src/ui/account.js', import.meta.url), 'utf8');
+
+  const head = html.slice(0, html.indexOf('<style'));
+  ok(/window\.__me\s*=\s*fetch\('\/api\/me'/.test(head),
+    '**index.htmlの頭で /api/me を先に投げている**（<style>より前）');
+  ok(/window\.__me[\s\S]{0,220}credentials:\s*'same-origin'/.test(head),
+    'Cookieを付けて投げている（付け忘れると誰でもない扱いで返る）');
+  ok(/window\.__me[\s\S]{0,260}AbortSignal\.timeout/.test(head),
+    '返らないサーバーで待ち続けない');
+  /* 受け取り手が付くのは数秒後なので、失敗をそのままにすると
+     「拾われなかった失敗」として画面のエラーに数えられ /logs に出る */
+  ok(/window\.__me[\s\S]{0,300}\.catch\(/.test(head),
+    '**繋がらなかった時をここで握っている**（/logs に偽のエラーを出さない）');
+
+  /* type="module" にすると下のimportmapより先に読み込みが始まり、
+     「モジュールを読み始めた後のimportmapは受け付けない」ブラウザで
+     ゲーム本体ごと動かなくなる。素のscriptであること */
+  const tag = head.match(/<script[^>]*>\s*window\.__me/);
+  ok(!!tag && !/type=/.test(tag[0]), '素のscriptで書いてある（importmapより前にモジュールを読ませない）');
+
+  ok(/window\.__me/.test(js), 'account.js が先に投げた分を受け取りにいく');
+  /* **1回使ったら捨てること。** ログイン・ログアウトの後にも同じ返事を
+     使い回すと、変わる前の状態がそのまま画面に出る */
+  ok(/window\.__me = null/.test(js), '**1回受け取ったら捨てる**（2回目からは自分で聞く）');
+  // index.html側の1行を消しても、遅くなるだけで壊れない形であること
+  ok(/if \(!p\) return null/.test(js) && /if \(!r\) r = await api\('\/api\/me'\)/.test(js),
+    '先に投げた分が無ければ自分で聞く（index.html側を消しても壊れない）');
+
+  /* 返事の読み方が2箇所に増えていないこと。
+     404の扱いを書き写すと、必ず片方だけが古くなる */
+  ok((js.match(/status === 404/g) || []).length === 1,
+    '**404の扱いは1箇所だけ**（index.html側へ書き写していない）');
+  ok(!/status === 404/.test(html), 'index.htmlは返事を読まない（Responseをそのまま渡す）');
+}
+
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);
 process.exit(bad === 0 ? 0 : 1);
