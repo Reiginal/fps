@@ -390,6 +390,34 @@ console.log('\n[4.7] 形スキンの銃声が、見た目の通りに鳴って�
     ok(after.peak < 0.95, `サイバーが割れていない（${after.peak.toFixed(2)}）`);
   }
 
+  /* ---- 各武器2つ目の音。**1つ目と分かれていること**が本題。
+     見た目が2種類あって音が同じだと、着け替えた実感が半分になる。
+     ここでは「同じ武器の1つ目と、測って別方向へ動いていること」を見る */
+  {
+    const pairs = [
+      ['廃品', 'scrap', 'ウエスタン', 'western', 'shotgun'],
+      ['ヴェノム', 'venom', 'アイス', 'ice', 'sniper'],
+      ['ボーン', 'bone', 'サイバー', 'cyber', 'pistol'],
+    ];
+    for (const [nA, a, nB, b, weapon] of pairs) {
+      const base = GUNS.find((g) => g.id === weapon).sound;
+      _seed = 20260811;
+      const mA = await capture((x) => x.gunshot(gunTune(a, base), null, null));
+      _seed = 20260811;
+      const mB = await capture((x) => x.gunshot(gunTune(b, base), null, null));
+      /* 重心が200Hz以上離れていること。**同じ帯で鳴っていたら同じ音に聞こえる。**
+         200Hzは、並べて鳴らした時に「高い方／低い方」が言える差 */
+      ok(Math.abs(mA.centroid - mB.centroid) > 200,
+        `${nA}と${nB}は別の音（重心 ${mA.centroid.toFixed(0)}Hz と ${mB.centroid.toFixed(0)}Hz）`);
+      ok(mA.peak < 0.95, `${nA}が割れていない（${mA.peak.toFixed(2)}）`);
+    }
+    /* **サイバーとボーンだけは機関部の音でも分かれている。**
+       あちらは真鍮が跳ねる音を切って電子銃にしてあるので、
+       こちらは残す（同じ拳銃で2種類あることが音でも読める）*/
+    ok(SHAPE_GUN.cyber.mech === false && SHAPE_GUN.bone.mech !== false,
+      'サイバーは機関部の音を切って、ボーンは残している');
+  }
+
   /* **形が全部そろっているか。** 見た目を足して音を書き忘れると、
      「ドラゴンだけ音が違って、他は同じ」という中途半端な状態になる。
      形違いの一覧(SHAPE_LIST)を持ってきて、全部に音があることを見る */
