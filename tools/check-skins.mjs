@@ -408,9 +408,15 @@ console.log('\n[ストアの動線] 押す物と買う物が分かれている�
   const look = readFileSync(new URL('../src/ui/look.js', import.meta.url), 'utf8');
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 
-  // 並んだ商品を押しても買わない。押したら試着(_pick)へ行く
-  ok(/this\.store \? this\._pick\(s\) : this\._wear\(s\.id\)/.test(look),
-    '**商品を押しても買わない**（試着だけ）');
+  /* 並んだ商品を押しても買わない。押したら試着(_pick)へ行く。
+
+     **2026-08-11に「着け替えの面も同じ形」へ揃えたので、条件が消えた。**
+     前は `this.store ? this._pick(s) : this._wear(s.id)` で、
+     ストアだけ試着・着け替えは即実行だった。
+     今はどちらも試着だけなので、条件無しの `this._pick(s)` になっている
+     （元より強い形。ストアだけでなく着け替えでも押し間違いで確定しない）*/
+  ok(/b\.onclick = \(\) => this\._pick\(s\)/.test(look),
+    '**商品を押しても買わない・着けない**（どちらの面でも試着だけ）');
   ok(/_pick\(s\)\s*\{[\s\S]{0,400}?this\.preview = s\.id/.test(look),
     '押すと試着になる');
   // 買うのは札の「買う」から1回だけ。呼び出し口が2つ以上あったら押し間違えの道が増える
@@ -435,6 +441,47 @@ console.log('\n[ストアの動線] 押す物と買う物が分かれている�
   for (const id of ['lkBuy', 'lkBuyName', 'lkBuyPrice', 'lkBuyGo', 'lkBuyNote']) {
     ok(html.includes(`id="${id}"`), `${id} が画面に在る`);
   }
+}
+
+console.log('\n[装備の分かりやすさ] 着けているかが読めて、装備ボタンがあるか');
+{
+  /* 2026-08-11に足した。**「装備してるかどうかがわかりづらい。装備するボタンも欲しい」。**
+
+     それまで着け替えの面は
+       ・着けている物の印が「選んでいる」の印(.on)と同じ見た目
+       ・押した瞬間に着く（速いが、着いたことが画面のどこにも出ない）
+     の2つで、**着けているのか見ているだけなのかが読めなかった。**
+
+     ストアの札（購入）と同じ形に揃えた。押すのは試着だけで、
+     やるのは札のボタン1回。器も同じ物を使い回している
+     （やることが違っても「選んだ物に対して1つ押す」は同じなので、
+       同じ位置に同じ形で出る方が読みやすい）*/
+  const look = readFileSync(new URL('../src/ui/look.js', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+
+  // 着けている物に印が付くこと。**ストアには出さない**（あちらは買う場所）
+  ok(/if \(!this\.store && s\.id === skinFor\(this\.weapon\)\) b\.classList\.add\('wearing'\)/.test(look),
+    '着けている物に印を付けている（着け替えの面だけ）');
+  ok(/\.lkitem\.wearing::after/.test(html) && /装備中/.test(html),
+    '印は「装備中」と読める（CSSが文字を出す）');
+  /* **「選んでいる」の印と見た目が違うこと。**
+     同じだと区別が付かない（それが元の不具合）*/
+  ok(/\.lkitem\.on \{/.test(html) && /\.lkitem\.wearing \{/.test(html),
+    '「選んでいる」と「装備中」で別の見た目を持っている');
+
+  // 押した瞬間に着けないこと。押すのは試着だけ
+  ok(/b\.onclick = \(\) => this\._pick\(s\)/.test(look),
+    '**押した瞬間に着けない**（試着だけ）');
+  ok(/_wear\(id\); return;/.test(look), '装備は札のボタンから呼んでいる');
+  ok(/装備する/.test(look) && /装備中/.test(look),
+    '札に「装備する」と「装備中」の両方が出る');
+
+  /* 開いた時点で今着けている物が選ばれていること。
+     nullで開くと札が畳まれて、押すまで「今どれを着けているか」が分からない */
+  ok(/this\.preview = this\.store \? null : skinFor\(id\)/.test(look),
+    '武器を選ぶと、その武器で今着けている物が選ばれる');
+  ok(/this\.preview = store \? null : skinFor\(this\.weapon\)/.test(look),
+    '着け替えの面を開いた時も今着けている物から始まる');
 }
 
 console.log('\n[変化の大きさ] 売る色スキンが、見て分かるほど変わっているか');

@@ -33,6 +33,36 @@
 <meta property="og:image:alt" content="BLACKOUT">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#05070a">
+
+<!-- ログイン状態を、ここでいちばん先に聞き始める。**画面を組むより前に。**
+
+     答えを使うのは src/ui/account.js だが、あちらが動き出すのは
+     three.jsを全部読み込んで地形を組んでシェーダーを通し終わった後
+     （main.jsの_bindMenu、読み込み画面が消える直前）。
+     そこから聞き始めると、ホームが出た後に往復ぶん遅れて名前が入るので、
+     **一拍おいてから名前欄と「〜でログイン中」が差し変わる**形になっていた。
+     往復は本番(東京)で70ms前後、遅い回線ならもっと。
+
+     ここで投げておけば、読み込みの裏（数秒ある）で往復が済む。
+     ホームが出る頃には答えが手元にあるので、最初の1枚目から名前が入っている。
+
+     type="module" ではなく素のscriptにしてあるのは、モジュールにすると
+     下のimportmapより先に読み込みが始まってしまい、
+     「モジュールを読み始めた後のimportmapは受け付けない」ブラウザで
+     ゲーム本体ごと動かなくなるため。ここは外部ファイルを要らない1行で済む。
+
+     返事の読み方（404の扱い・中身が無い返事）は account.js に1つだけ置いてある。
+     ここで書き写すと必ず片方が古くなるので、Responseをそのまま渡して読ませる。
+     繋がらなかった時はnullを渡す。ここで握らずに投げっぱなしにすると、
+     受け取り手が付くまでの数秒の間に「拾われなかった失敗」として
+     画面のエラーに数えられ、/logs に出てしまう -->
+<script>
+  window.__me = fetch('/api/me', {
+    credentials: 'same-origin',
+    signal: AbortSignal.timeout(15000),
+  }).catch(() => null);
+</script>
+
 <style>
   :root {
     --hud: #e8f0f4;
@@ -638,6 +668,16 @@
   .lkitem.own .pr { display: none; }
   .lkitem.own::after {
     content: '購入済み'; font-size: 9px; letter-spacing: .06em;
+    color: var(--bg); background: var(--ok); padding: 1px 4px;
+  }
+  /* 今着けている物。**2026-08-11「装備してるかどうかがわかりづらい」。**
+     それまで「選んでいる」の印(.on)と同じ見た目だったので、
+     見ているだけなのか着けているのかが読めなかった。
+     .on は枠の色だけ、こちらは**札を出す**ので、並べても区別が付く */
+  .lkitem.wearing { border-color: var(--ok); }
+  .lkitem.wearing .nm { color: var(--ok); }
+  .lkitem.wearing::after {
+    content: '装備中'; font-size: 9px; letter-spacing: .06em;
     color: var(--bg); background: var(--ok); padding: 1px 4px;
   }
 
@@ -1368,7 +1408,10 @@
     <!-- 並んだ物に付いている印の読み方。中身はlook.jsが入れる -->
     <div class="lkhelp" id="lkHelp"></div>
 
-    <!-- 買う札。**選んだ時だけ出る。**
+    <!-- 買う札／装備する札。**選んだ時だけ出る。**
+         ストアでは「買う」、スキン変更では「装備する」になる。
+         器を2つに分けないのは、**同じ位置に同じ形で出る方が読みやすい**から
+         （やることが違っても「選んだ物に対して1つ押す」は同じ）。
          2026-08-11まで「同じボタンを2回押す」形（1回目が試着・2回目で購入）で、
          「購入が2回クリックなのが嫌だわ。なんかpopoverじゃないけど、なんか出してみて」
          と言われた所。押す物と買う物を分けて、買うのはここの1回だけにした -->
