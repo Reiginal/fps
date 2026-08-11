@@ -805,6 +805,14 @@ export const SKINNABLE = ['rifle', 'shotgun', 'pistol', 'sniper', 'knife'];
 export const SHAPE_LIST = [
   { weapon: 'knife', id: 'katana', name: '刀', price: 1200 },
   { weapon: 'knife', id: 'dagger', name: 'ダガー', price: 900 },
+  /* 2026-08-11に3つ足した。「ナイフ種類増やしたいなぁ。レイピア？おの？パンチグローブ？」
+     **強さは3つとも今まで通り全部同じ。** 差は見た目・振り方・音の3つだけ。
+
+     値段は「作った物の量」ではなく**見た目の主張の強さ**で並べてある。
+     グローブが一番安いのは、刃が無くて部品が一番少ないから */
+  { weapon: 'knife', id: 'rapier', name: 'レイピア', price: 1400 },
+  { weapon: 'knife', id: 'axe', name: '斧', price: 1500 },
+  { weapon: 'knife', id: 'glove', name: 'パンチグローブ', price: 1100 },
   // ライフルは一番見る武器なので高い。飾りの量も多い
   { weapon: 'rifle', id: 'dragon', name: 'ドラゴン', price: 2000 },
   { weapon: 'rifle', id: 'cute', name: 'キャンディ', price: 1600 },
