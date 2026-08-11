@@ -290,6 +290,32 @@ async function routeApi(url, req, res) {
   const secure = isHttps(req);
   const token = auth.readCookie(req.headers.cookie);
 
+  /* 会員に残高・持ち物・装備を足す。**3箇所(me/login/register)が同じ物を返すため。**
+
+     2026-08-11に足した。それまで /api/me だけがこれを付けていて、
+     **ログインと入会の口は名前とメールしか返していなかった。**
+     画面は返ってきた user をそのまま信じるので、ログインした直後だけ
+     「コイン0枚・持ち物なし」に見えていた（読み込み直すと直る）。
+
+     （余談だが、この注意書きを最初 `**` と `/api/login` を続けて書いていて、
+       `**​/` がコメントを途中で閉じてサーバーが構文エラーで落ちた。
+       ブロックコメントの中でパスを書く時はこの並びを作らない）
+
+     独自ドメインを繋いだ日に見つかったのは偶然ではない。
+     Cookieはホスト限定なので blackout-fps.fly.dev の札は blackoutfps.com では効かず、
+     **新しいドメインでは全員が1回ログインし直す**ことになる。
+     その「ログイン直後の画面」を今まで誰もまともに見ていなかった
+     （一度ログインしたら、次からは /api/me が答えるので）。
+
+     往復を増やさないのは /api/me のコメントと同じ理由（Neonが寝ていると全部待つ）*/
+  const withWallet = async (user) => {
+    if (!user) return user;
+    user.coins = await getCoins(db.query, user.id);
+    user.owned = await ownedOf(db.query, user.id);
+    user.equipped = await equippedOf(db.query, user.id);
+    return user;
+  };
+
   if (url === '/api/me') {
     if (req.method !== 'GET') { res.writeHead(405).end('get only'); return; }
     /* 台帳を置いていない置き場。**エラーではなく「無い」と答える。**
@@ -300,11 +326,7 @@ async function routeApi(url, req, res) {
     /* 残高・持ち物・装備も一緒に返す。**別の口に分けない。**
        分けると画面を開くたびに往復が4回になり、
        Neonが寝ている時はその全部が起きるのを待つことになる */
-    if (me) {
-      me.coins = await getCoins(db.query, me.id);
-      me.owned = await ownedOf(db.query, me.id);
-      me.equipped = await equippedOf(db.query, me.id);
-    }
+    await withWallet(me);
     sendJson(res, 200, { ok: true, accounts: true, user: me });
     return;
   }
@@ -360,7 +382,9 @@ async function routeApi(url, req, res) {
     // メアドとパスワードを打たせる理由が無い
     const s = await auth.login(db.query, { email: body.email, password: body.password });
     logs.add('auth', { message: '入会した', name: r.user.name });
-    sendJson(res, 200, { ok: true, user: r.user },
+    /* こちらも同じ物を返す。**入会祝いを配った直後なので、
+       ここで残高を付けないと「900枚もらった」が画面に出ない** */
+    sendJson(res, 200, { ok: true, user: await withWallet(r.user) },
       s.ok ? { 'set-cookie': auth.cookieHeader(s.token, { secure }) } : undefined);
     return;
   }
@@ -482,7 +506,10 @@ async function routeApi(url, req, res) {
     // 401は「合っていない」。中身は言い分けない（auth.jsの説明の通り）
     if (!r.ok) { sendJson(res, 401, r); return; }
     logs.add('auth', { message: 'ログインした', name: r.user.name });
-    sendJson(res, 200, { ok: true, user: r.user }, { 'set-cookie': auth.cookieHeader(r.token, { secure }) });
+    /* **会員証の口と同じ物を返す。** 名前だけ返していた頃は、
+       ログインした直後だけコインが0枚・持ち物なしに見えていた */
+    sendJson(res, 200, { ok: true, user: await withWallet(r.user) },
+      { 'set-cookie': auth.cookieHeader(r.token, { secure }) });
     return;
   }
 
