@@ -1833,16 +1833,32 @@ export class AudioEngine {
   }
 
   /**
-   * 買えた合図。「チャリン」。
+   * 買えた合図。**硬貨が数枚、硬い所へ落ちて跳ねる音。**
    *
-   * **ロビー入室(lobbyJoin)と混ざらないようにする。** あちらも上がる2音なので、
-   * 音程を並べただけでは「誰か入ってきた」と区別が付かない。
-   * 買い物の音は、電子音ではなく**硬貨が当たる音**に寄せる:
+   * 2026-08-11に作り直した。前は三角波と正弦波の分散和音（ドミソを上がる形）で、
+   * 「古すぎる」と言われた。**言われた通りで、正体は「ノイズが1粒も無いこと」だった。**
    *
-   * - 3音の和音を短くばらして鳴らす（分散和音）。1音より「めでたい」感じになる
-   * - 上に金属の当たる音を薄く1枚重ねる。倍音が整数比から外れている音を
-   *   帯域で切って出すと、硬貨や鈴の当たる音に聞こえる
-   * - **尾を短く切る。** 残ると「まだ処理中」に聞こえる。買い物は一瞬で終わる
+   * 純粋な発振器だけで組むと、どう並べても8ビットの効果音になる。
+   * 本物の硬貨の音は、
+   *
+   *   1. **当たった瞬間の広い帯のノイズ**（「チッ」の部分）… ここが無いと物に聞こえない
+   *   2. 整数比から外れた金属の余韻（円盤が鳴る）
+   *   3. 落ちた面の胴（「トッ」）
+   *
+   * の3つで出来ていて、前の音には1と3が丸ごと無かった。
+   * ドミソの上がる分散和音そのものも、レトロゲームの硬貨の型そのままだった。
+   *
+   * **1枚ではなく4枚落とす。** 和音を1回鳴らすと「合図」になるが、
+   * 少しずつずれた間隔で複数当てると「お金」になる。
+   * 間隔を等間隔にしないのが効く（等間隔だと機械が刻んでいるように聞こえる）。
+   *
+   * 守っている線（tools/check-sound.mjsの[8]が測る）:
+   *
+   * - **ロビー入室(lobbyJoin)と混ざらないこと。** 画面を見ていない人に気づかせる音は
+   *   この2つだけなので、買った後に「誰か入ってきた」と思われたら失敗
+   * - 山は0.5未満。場所を持たない合図なので、戦闘中の音より大きくしない
+   * - **低音(30〜250Hz)は5%未満。** 太らせると遠くの爆発と紛らわしくなる。
+   *   胴は250〜800Hzに置くので、この線には当たらない
    *
    * 場所を持たない音なので、距離減衰も残響も通さない（lobbyJoinと同じ扱い）
    */
@@ -1851,37 +1867,65 @@ export class AudioEngine {
     const ctx = this.ctx;
     const t = ctx.currentTime;
 
-    // 分散和音。C6→E6→G6。上がる形にして「増えた」に寄せる
-    const tone = (at, freq, vol, len) => {
-      const o = ctx.createOscillator();
-      o.type = 'triangle';
-      o.frequency.setValueAtTime(freq, at);
-      const g = ctx.createGain();
-      o.connect(g); g.connect(this.postBus);
-      this._env(g, at, vol, 0.003, len);
-      this._reap([g], len + 0.4);
-      o.start(at); o.stop(at + len + 0.05);
-    };
-    /* 3音の間隔は75ms。重なったまま鳴るので、測ると打点は1つ（1回の「チャリン」）。
-       ここを150msまで離すと3つに分かれて聞こえるが、そうすると
-       「チャ・リ・ン」と間延びして、レジではなく着信音になる */
-    tone(t, 1047, 0.17, 0.09);
-    tone(t + 0.075, 1319, 0.16, 0.11);
-    tone(t + 0.150, 1568, 0.15, 0.30);
+    /* 硬貨1枚ぶん。当たる瞬間のノイズと、金属の余韻を組で鳴らす。
+       @param at 鳴らす時刻 @param base 余韻の基音 @param vol 音量 @param ring 余韻の長さ */
+    const coin = (at, base, vol, ring) => {
+      /* (1) 当たった瞬間。**ノイズを帯域で切って10msだけ出す。**
+         ここが「物が当たった」の全部。発振器では代わりが作れない */
+      const n = this._noiseSource(1.0);
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(base * 1.35, at);
+      // Qを上げると金属寄り、下げると砂利寄り。硬貨はこのくらい
+      bp.Q.setValueAtTime(1.6, at);
+      const ng = ctx.createGain();
+      n.connect(bp); bp.connect(ng); ng.connect(this.postBus);
+      this._env(ng, at, vol * 0.55, 0.0004, 0.012);
+      this._reap([ng, bp], 0.6);
+      n.start(at); n.stop(at + 0.05);
 
-    /* 硬貨の当たる音。**整数比から外した2つの高い音**を短く重ねる。
-       ここを整数比にすると、ただの高い和音になって金属に聞こえない */
-    for (const [at, f, v] of [[t + 0.005, 3140, 0.10], [t + 0.012, 4730, 0.075],
-      [t + 0.152, 3970, 0.055]]) {
-      const o = ctx.createOscillator();
-      o.type = 'sine';
-      o.frequency.setValueAtTime(f, at);
-      const g = ctx.createGain();
-      o.connect(g); g.connect(this.postBus);
-      this._env(g, at, v, 0.001, 0.09);
-      this._reap([g], 0.5);
-      o.start(at); o.stop(at + 0.15);
-    }
+      /* (2) 金属の余韻。**整数比から外した2本。**
+         1 : 1.593 は円盤を叩いた時の並びに近い比で、
+         ここを1:2にすると「ポーン」という笛の音になって硬貨から離れる */
+      for (const [mul, mv] of [[1, 1], [1.593, 0.62]]) {
+        const o = ctx.createOscillator();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(base * mul, at);
+        const g = ctx.createGain();
+        o.connect(g); g.connect(this.postBus);
+        this._env(g, at, vol * mv * 0.5, 0.001, ring);
+        this._reap([g], ring + 0.4);
+        o.start(at); o.stop(at + ring + 0.1);
+      }
+    };
+
+    /* 4枚。**間隔を等間隔にしない**（48→53→67ms）。
+       等間隔にすると機械が刻んでいるように聞こえて、落ちた物に聞こえない。
+       音程も1枚ずつ変えてある（同じ硬貨が4回鳴ると連射に聞こえる）。
+       最後の1枚だけ余韻を長く取って、「終わった」を出す。
+
+       **測ると打点は1発と出るが、それで合っている。**
+       打点の数え方は「一度20%まで下がってから、また45%を超えた所」を数えるので、
+       余韻が100ms残っている硬貨を50ms間隔で落とすと谷がそこまで下がらない。
+       耳には4枚に聞こえる（50ms間隔は毎秒20回で、人には別々の粒として届く） */
+    coin(t, 1960, 0.30, 0.10);
+    coin(t + 0.048, 2470, 0.26, 0.09);
+    coin(t + 0.101, 1720, 0.22, 0.13);
+    coin(t + 0.168, 2930, 0.24, 0.34);
+
+    /* 落ちた面の胴（「トッ」）。**250〜800Hzに置く。**
+       ここが無いと、硬貨が空中で鳴っているように聞こえる。
+       低音の判定は30〜250Hzしか見ていないので、この帯なら太らせても線に当たらない */
+    const body = this._noiseSource(0.5);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'bandpass';
+    lp.frequency.setValueAtTime(420, t);
+    lp.Q.setValueAtTime(1.1, t);
+    const bg = ctx.createGain();
+    body.connect(lp); lp.connect(bg); bg.connect(this.postBus);
+    this._env(bg, t, 0.16, 0.001, 0.055);
+    this._reap([bg, lp], 0.6);
+    body.start(t); body.stop(t + 0.2);
   }
 
   /**
