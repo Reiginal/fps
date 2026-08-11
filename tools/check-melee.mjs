@@ -253,6 +253,19 @@ console.log('\n[7] 振り方が形ごと・左右ごとに違う');
   ok(!scoop, scoop ? `${scoop} が下からえぐっている（pが+${(SWINGS[scoop].thru.p - SWINGS[scoop].back.p).toFixed(2)}）`
     : '右クリックに下からえぐる動きが無い');
 
+  /* **斧の左は振り下ろす。** 上のえぐり判定は`.light`を飛ばすので
+     （払いは切っ先が上がって正しい）、縦に落とす物だけ名指しで見る。
+
+     2026-08-11に足した。斧を作った時、`-0.95 → +1.05`と書いて
+     **下からえぐり上げる動きにしていた**（刀の右クリックで
+     「真上から落とす」と書きながら同じ間違いをしたのと同じ形）。
+     pはプラスで切っ先が上なので、落とすなら thru < back になる */
+  const al = SWINGS['axe.light'];
+  ok(al.thru.p < al.back.p,
+    `斧の左は振り下ろす（切っ先が ${al.back.p} → ${al.thru.p}。下がっている）`);
+  ok(swept(al, 'p') > swept(al, 'y'),
+    `斧の左は**縦の軌道**（上下${swept(al, 'p').toFixed(2)} 対 左右${swept(al, 'y').toFixed(2)}）`);
+
   // ナイフの右は突き。前へ出す量が、振る量より大きい
   const nh = SWINGS['knife.heavy'];
   ok(swept(nh, 'z') > swept(nh, 'y'),
