@@ -563,5 +563,58 @@ console.log('\n[20] 再設定の画面');
   ok(/心当たりが無い場合は/.test(mail), '身に覚えの無い人向けの1行がある');
 }
 
+console.log('\n[会員証の返し] 3つの口が同じ物を返すか');
+{
+  /* 2026-08-11に足した。**「blackoutfps.comで入り直したらコイン0になってた」**
+     と言われた所。台帳には25040枚あったのに、画面が0枚を出していた。
+
+     正体は「/api/me だけが残高・持ち物・装備を付けていて、
+     ログインと入会の口は名前とメールしか返していなかった」こと。
+     画面は返ってきた user をそのまま信じるので、
+     **ログインした直後だけコイン0枚・持ち物なしに見えていた**（読み込み直すと直る）。
+
+     独自ドメインを繋いだ日に出たのは偶然ではない。
+     Cookieはホスト限定なので、新しいドメインでは全員が1回ログインし直す。
+     その「ログイン直後の画面」を今まで誰も見ていなかった
+     （一度ログインすれば、次からは会員証の口が答えるので）。
+
+     **見るのは「3つの口が同じ物を返すこと」。** どれか1つだけを直すと、
+     また同じ形の食い違いが別の口で起きる */
+  const idx = readFileSync(new URL('../server/index.js', import.meta.url), 'utf8');
+
+  // 足す処理が1箇所にまとまっていること。3箇所へ書き写すとまたずれる
+  ok(/const withWallet = async \(user\)/.test(idx),
+    '残高・持ち物・装備を足す処理が1箇所にまとまっている');
+  /* 呼び出しが3つあること（定義は `withWallet = async` なのでここには数えない）*/
+  const uses = (idx.match(/withWallet\(/g) || []).length;
+  ok(uses >= 3, `3つの口が同じ処理を通っている（${uses}箇所で呼んでいる）`);
+
+  /* 口ごとに名指しで見る。**まとめて数えるだけだと、
+     同じ口で2回呼んでいても数が合ってしまう** */
+  /* 入会の口は長い（メールを出して入会祝いを配ってからログインさせる）ので、
+     窓を広く取る。狭いとsendJsonまで届かず、付けているのに落ちる */
+  const around = (marker, span = 2600) => {
+    const at = idx.indexOf(marker);
+    return at < 0 ? '' : idx.slice(at, at + span);
+  };
+  for (const [name, marker] of [
+    ['会員証(/api/me)', "url === '/api/me'"],
+    ['ログイン', "url === '/api/login'"],
+    ['入会', "url === '/api/register'"],
+  ]) {
+    const block = around(marker);
+    ok(block !== '' && /withWallet\(/.test(block), `${name}の口が残高を付けて返す`);
+  }
+
+  /* 中身が3つ揃っていること。1つ落ちると、
+     たとえば持ち物だけ空で返って「買ったスキンが消えた」に見える */
+  const body = around('const withWallet = async (user)', 400);
+  for (const [name, key] of [['残高', 'coins'], ['持ち物', 'owned'], ['装備', 'equipped']]) {
+    ok(new RegExp(`user\\.${key} = await`).test(body), `${name}を付けている`);
+  }
+  // 誰でもない時に落ちないこと（ログインしていない人にも同じ処理を通す道がある）
+  ok(/if \(!user\) return user;/.test(body), 'ログインしていない時はそのまま返す');
+}
+
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);
 process.exit(bad === 0 ? 0 : 1);
