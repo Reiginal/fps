@@ -325,6 +325,83 @@ console.log('\n[4.7] 形スキンの銃声が、見た目の通りに鳴って�
     `割れていない（キャンディ${cute.peak.toFixed(2)} / ドラゴン${dragon.peak.toFixed(2)}）`);
   // 書いていない形は元の音のまま。形を足して音を書き忘れても黙って壊れない
   ok(gunTune('katana', base) === base, '書いていない形は元の銃の音のまま');
+
+  /* ---- 2026-08-11に足した3つ。**元の銃が違うので、比べる相手も銃ごとに変える。**
+     ドラゴンとキャンディはどちらもライフルに着けるので上は1つの基準で足りたが、
+     こちらはショットガン・狙撃銃・拳銃に散っている。
+     ライフルと比べると「元からそういう銃だった」が数字に混ざる */
+  const other = async (shape, weaponId) => {
+    const b = GUNS.find((g) => g.id === weaponId).sound;
+    _seed = 20260811;
+    const before = await capture((a) => a.gunshot(b, null, null));
+    _seed = 20260811;
+    const after = await capture((a) => a.gunshot(gunTune(shape, b), null, null));
+    return { b, before, after };
+  };
+
+  /* ウエスタンは「木が響く」。**低音が増えて重心が下がり、高い所が減る。**
+     ドラゴンと向きは同じだが、量が違う（あちらは鈍く、こちらは響く）ので、
+     ここでは「元より」だけを見て、ドラゴンとの大小は見ない */
+  {
+    const { b, before, after } = await other('western', 'shotgun');
+    ok(after.lowPct > before.lowPct,
+      `ウエスタンは低音が増える（${before.lowPct.toFixed(1)}% → ${after.lowPct.toFixed(1)}%）`);
+    ok(after.centroid < before.centroid,
+      `ウエスタンは重心が下がる（${before.centroid.toFixed(0)} → ${after.centroid.toFixed(0)}Hz）`);
+    ok(high(after) < high(before),
+      `ウエスタンは高い所が減る（${high(before).toFixed(1)}% → ${high(after).toFixed(1)}%）`);
+    ok(SHAPE_GUN.western.tailDecay > b.tailDecay,
+      `ウエスタンは尾が長い（${b.tailDecay} → ${SHAPE_GUN.western.tailDecay}秒）`);
+    ok(after.peak < 0.95, `ウエスタンが割れていない（${after.peak.toFixed(2)}）`);
+  }
+
+  /* アイスは「硬くて澄んでいる」。**元の狙撃銃が低くて大きい**（低音34.6%）ので、
+     ここは減らす向き。キャンディと違って尾は残す
+     （切ると乾いた破裂になって、氷の余韻が消える） */
+  {
+    const { b, before, after } = await other('ice', 'sniper');
+    ok(after.lowPct < before.lowPct,
+      `アイスは低音が減る（${before.lowPct.toFixed(1)}% → ${after.lowPct.toFixed(1)}%）`);
+    ok(after.centroid > before.centroid,
+      `アイスは重心が上がる（${before.centroid.toFixed(0)} → ${after.centroid.toFixed(0)}Hz）`);
+    ok(high(after) > high(before),
+      `アイスは高い所が増える（${high(before).toFixed(1)}% → ${high(after).toFixed(1)}%）`);
+    // **尾を切っていないこと。** ここが0.2を割ると氷ではなく乾いた破裂になる
+    ok(SHAPE_GUN.ice.tailDecay > 0.3 && SHAPE_GUN.ice.tailDecay < b.tailDecay,
+      `アイスは余韻が残る（${b.tailDecay} → ${SHAPE_GUN.ice.tailDecay}秒）`);
+    ok(after.peak < 0.95, `アイスが割れていない（${after.peak.toFixed(2)}）`);
+  }
+
+  /* サイバーは電子音。**キャンディと同じ層を逆向きに使う。**
+     キャンディが1150→320で落とすのに対して、こちらは260→1500で上がる。
+     ここが同じ向きになったら、2つは同じ系統の音になってしまう */
+  {
+    const { before, after } = await other('cyber', 'pistol');
+    ok(SHAPE_GUN.cyber.thumpTo > SHAPE_GUN.cyber.thumpFrom,
+      `サイバーは音程が下から上へ滑る（${SHAPE_GUN.cyber.thumpFrom}→${SHAPE_GUN.cyber.thumpTo}Hz）`);
+    ok(SHAPE_GUN.cute.thumpTo < SHAPE_GUN.cute.thumpFrom,
+      'キャンディとは滑る向きが逆（同じ層を別の音に使い分けている）');
+    ok(after.centroid > before.centroid,
+      `サイバーは明るい（${before.centroid.toFixed(0)} → ${after.centroid.toFixed(0)}Hz）`);
+    ok(high(after) > high(before),
+      `サイバーは高い所が増える（${high(before).toFixed(1)}% → ${high(after).toFixed(1)}%）`);
+    // 真鍮が跳ねる音を切ってあること。入ると電子銃に聞こえない
+    ok(SHAPE_GUN.cyber.mech === false, 'サイバーは機関部の音を切っている');
+    ok(after.peak < 0.95, `サイバーが割れていない（${after.peak.toFixed(2)}）`);
+  }
+
+  /* **形が全部そろっているか。** 見た目を足して音を書き忘れると、
+     「ドラゴンだけ音が違って、他は同じ」という中途半端な状態になる。
+     形違いの一覧(SHAPE_LIST)を持ってきて、全部に音があることを見る */
+  {
+    const { SHAPE_LIST } = await import('../src/net/protocol.js');
+    const missing = SHAPE_LIST.filter((s) => !SHAPE_GUN[s.id])
+      // 近接は銃声を持たない（振る音はSWING_TUNESが受け持つ）
+      .filter((s) => s.weapon !== 'knife')
+      .map((s) => s.name);
+    ok(missing.length === 0,
+      `形違いの銃は全部専用の銃声を持っている${missing.length ? ` ← ${missing.join('、')}が無い` : ''}`);
+  }
 }
 
 console.log('\n[5] 振り切れていないか');
