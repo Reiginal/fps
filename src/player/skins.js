@@ -128,19 +128,24 @@ const SHAPE_LOOK = {
     },
   },
   sakura: {
-    note: '漆の黒に金の桜、朱の紐と房、螺鈿の白帯',
-    swatch: '#14100e',
-    /* **地は漆の黒。** 金の桜と螺鈿の白を置く物なので、
-       地が明るいとどちらも埋もれる（サイバーで光を乗せた時と同じ理屈）。
-       粗さを落として「塗り物」の照りを出すのがここの要点で、
-       他の商品のような擦れは入れない（漆器は使い込んで剥げた物ではない） */
+    note: '白い地に桜色の花、銃口が開いた花弁。花吹雪と朱の房',
+    swatch: '#f0e8e4',
+    /* **2026-08-11に作り直した。** 最初は漆の黒に金の桜という和の器に寄せたが、
+       「桜なんだから、もっと白とピンクをベースにしてほしい」と言われた。
+       **「和」ではなく「桜」を作る**のが要件だった。
+
+       地を白にする。**明るい地は他にアイス（狙撃銃）しか無い**ので、
+       ライフルではこれが唯一の明るい銃になる。
+       擦れの色も暗くしない（塗り物ではなく、白く塗った銃なので）。
+
+       機関部だけ桜色を薄く入れて、白一色の塊にならないようにしてある */
     over: {
-      enamel: { color: 0x14100e, metalness: 0.25, roughness: 0.18, wear: { amount: 0.2, color: 0x4a3c30, rough: 0.14 } },
-      anodized: { color: 0x1a1512, metalness: 0.3, roughness: 0.16, wear: { amount: 0.2, color: 0x5a4838 } },
-      polymer: { color: 0x100d0b, roughness: 0.30, wear: { amount: 0.15, color: 0x3a3028 } },
-      phosphate: { color: 0x0e0b09, metalness: 0.25, roughness: 0.20, wear: { amount: 0.2, color: 0x463828 } },
-      // 地金は金へ寄せる。桜の金と地金が繋がって、飾りが後付けに見えない
-      steel: { color: 0x9a7c42, wear: { color: 0xd8bc7a } },
+      enamel: { color: 0xeee6e2, metalness: 0.1, roughness: 0.34, wear: { amount: 0.3, color: 0xfdf8f6, rough: 0.28 } },
+      anodized: { color: 0xe4d2d6, metalness: 0.2, roughness: 0.30, wear: { amount: 0.3, color: 0xf6ecee } },
+      polymer: { color: 0xe8dcd8, roughness: 0.42, wear: { amount: 0.25, color: 0xf8f2ee } },
+      phosphate: { color: 0xd8c4c8, metalness: 0.2, roughness: 0.36, wear: { amount: 0.3, color: 0xefe0e2 } },
+      // 地金は淡い金へ。花の芯と螺鈿の白が繋がる
+      steel: { color: 0xc8b898, wear: { color: 0xeee0c8 } },
     },
   },
 
