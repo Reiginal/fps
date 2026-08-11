@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { Player } from '../src/player/player.js';
 import {
   K, S, TICK_DT, TICK_HZ, HISTORY_MS, MAX_REWIND_MS, INTERP_DELAY_MS,
-  HITBOX, HP, PART, PART_MUL, loadoutOf,
+  HITBOX, HP, PART, PART_MUL, loadoutOf, MELEE_HEAVY,
 } from '../src/net/protocol.js';
 
 /* ------------------------------------------------------------ 武器の表 */
@@ -38,7 +38,10 @@ export const FALLBACK_WEAPONS = [
     range: 70, falloffStart: 18, falloffEnd: 46, falloffMin: 0.42,
   },
   {
-    id: 'knife', name: 'ナイフ', damage: 70, rpm: 95, pellets: 1,
+    /* meleeは**強い一撃(右クリック)を許すかどうか**にだけ使う。
+       退避の表にも書いておかないと、退避へ落ちた日だけ
+       右クリックが黙って効かなくなる（誰も気づけない形の食い違い） */
+    id: 'knife', name: 'ナイフ', damage: 70, rpm: 95, pellets: 1, melee: true,
     mag: 9999, reloadTime: 0, adsTime: 0.16,
     range: 1.8, falloffStart: 1.8, falloffEnd: 1.8, falloffMin: 1.0,
   },
@@ -70,6 +73,20 @@ try {
   console.warn(`[sim] weapons.jsを読めなかったので内蔵の表を使う: ${e.message}`);
 }
 export { WEAPONS, weaponsSource };
+
+/* 強い一撃ぶんの武器の表。**威力だけ差し替えた写しを1つ作って使い回す。**
+   撃つたびに作ると、近接の撃ち合いのあいだ毎回ごみが1つ増える。
+   射程も減衰もそのままなのは、伸ばすと「遠くから強く当たる」になって
+   間合いを詰める道具という形が崩れるため */
+const _heavy = new WeakMap();
+export function heavyDef(def) {
+  let h = _heavy.get(def);
+  if (!h) {
+    h = { ...def, damage: (def.damage || 0) * MELEE_HEAVY.MULT };
+    _heavy.set(def, h);
+  }
+  return h;
+}
 
 export const weaponDef = (i) => WEAPONS[(i | 0) >= 0 && (i | 0) < WEAPONS.length ? (i | 0) : 0];
 

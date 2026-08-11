@@ -708,7 +708,9 @@ function onShot(conn, m) {
   _d.divideScalar(len);
 
   const seq = isNum(m.s) ? Math.round(m.s) : -1;
-  conn.room.shot(slot, seq, _o, _d);
+  // 強い一撃の印。**威力は受け取らない**（数を送らせると好きな値を書ける）。
+  // 偽られても間隔がMELEE_HEAVY.COST倍に伸びるだけで、撃ち放題にはならない
+  conn.room.shot(slot, seq, _o, _d, m.h === 1);
 }
 
 // 投擲。撃つのと同じで、受け取るのは向きだけ。位置はサーバーが本人の目から作る

@@ -42,7 +42,7 @@ import { RemotePlayers } from './net/remote.js';
 import { preloadCharModel, SOLO_MODEL } from './ai/glbchar.js';
 import { FarShadowGate } from './world/shadowgate.js';
 import {
-  K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, HP, blastDamage,
+  K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, HP, blastDamage, MELEE_HEAVY,
   outsideZone, CHARACTERS,
   TEAM_NAMES, soloUnlocksAt,
 } from './net/protocol.js';
@@ -2519,7 +2519,7 @@ class Game {
 
   _resolveShot(shot) {
     if (this.mode === 'versus') return this._resolveShotVersus(shot);
-    const { origin, dir, muzzle, def, pellet } = shot;
+    const { origin, dir, muzzle, def, pellet, heavy } = shot;
     if (pellet === 0) { this.shotsFired++; this._tally('shots'); }
 
     // 地形はoctreeで見る。散弾は1発でこれが9回呼ばれるので、
@@ -2541,7 +2541,11 @@ class Game {
     if (enemyHit && (!worldHit || enemyHit.distance < worldHit.distance)) {
       const d = enemyHit.distance;
       const t = clamp((d - def.falloffStart) / (def.falloffEnd - def.falloffStart), 0, 1);
-      let dmg = def.damage * THREE.MathUtils.lerp(1, def.falloffMin, t);
+      /* 強い一撃は威力だけ上げる。**射程も減衰もそのまま。**
+         伸ばすと「遠くから強く当たる」になって、間合いを詰める道具でなくなる。
+         対戦は同じ計算をサーバーがやる（server/sim.jsのheavyDef） */
+      let dmg = def.damage * (heavy ? MELEE_HEAVY.MULT : 1)
+        * THREE.MathUtils.lerp(1, def.falloffMin, t);
       const head = enemyHit.part === 'head';
       if (head) dmg *= def.headMult;
       else if (enemyHit.part === 'legs') dmg *= 0.82;
@@ -2591,10 +2595,11 @@ class Game {
      撃った手応えが遅れて別のゲームになる。だから壁への着弾は手元で描いて、
      サーバーから返る自分ぶんのIMPACTは捨てる（二重に火花が出る） */
   _resolveShotVersus(shot) {
-    const { origin, dir, muzzle, def, pellet } = shot;
+    const { origin, dir, muzzle, def, pellet, heavy } = shot;
     if (pellet === 0) { this.shotsFired++; this._tally('shots'); }
 
-    this.net.sendShot(origin, dir);
+    // 強い一撃は印だけ送る。**威力は送らない**（送ると好きな数を書ける）
+    this.net.sendShot(origin, dir, heavy);
 
     // 近接は弾を飛ばさないので曳光弾も出さない（刃を振るたびに弾が飛んで見えていた）
     const drawTracer = !def.melee && pellet % 3 === 0;
