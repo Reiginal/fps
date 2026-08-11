@@ -8,7 +8,7 @@
 import { mkdirSync } from 'node:fs';
 import { capture, BANDS } from './sound-measure.mjs';
 import '../server/dom-stub.js';
-import { SWING_HEAVY_TUNE } from '../src/core/audio.js';
+import { SWING_HEAVY_TUNE, swingTune } from '../src/core/audio.js';
 
 const OUT = 'sounds';
 mkdirSync(OUT, { recursive: true });
@@ -52,6 +52,18 @@ targets.push({
   name: 'swing-heavy', label: '強い一撃', seconds: 0.9,
   play: (a) => a.swing(SWING_HEAVY_TUNE),
 });
+// 形ごとの振る音。**刀は長く澄んで、ダガーは短く高い。**
+// 見た目だけ変えて音が同じだと、持ち替えた実感が出ない
+for (const shape of ['katana', 'dagger']) {
+  for (const heavy of [false, true]) {
+    targets.push({
+      name: `swing-${shape}${heavy ? '-heavy' : ''}`,
+      label: `振る(${shape}${heavy ? '/右' : ''})`,
+      seconds: heavy ? 0.9 : 0.6,
+      play: (a) => a.swing(swingTune(shape, heavy)),
+    });
+  }
+}
 // 刃が当たった音は材質で分かれる。金属だけ「カンッ」と長く残るのが狙いなので、
 // 4つとも書き出して長さと重心を並べて見る
 for (const k of ['flesh', 'metal', 'wood', 'concrete']) {

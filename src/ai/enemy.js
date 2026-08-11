@@ -1681,17 +1681,25 @@ export class Enemy {
     p.hips.getWorldPosition(this._legB);
   }
 
-  /** 弾のレイと交差するか。近い順に部位を判定して倍率を返す */
-  intersect(origin, dir) {
+  /**
+   * 弾のレイと交差するか。近い順に部位を判定して倍率を返す。
+   *
+   * padは近接だけが渡す「刃の太さ」（protocol.jsのMELEE_SWEEP）。
+   * **体格では割らない。**刃の幅は振る人の道具の話で、
+   * 相手が大柄かどうかで変わる物ではない
+   */
+  intersect(origin, dir, pad = 0) {
     if (!this.alive) return null;
     const s = this.bodyScale;
     /* 太さは対戦と同じ（HITBOX）。**体格の個体差ぶんだけ掛ける。**
        兵士は0.90〜1.08倍に伸び縮みするので、掛けないと大柄な相手だけ
        見た目より判定が細くなる（対戦は見た目を1.74mへ揃えているのでその掛け算が要らない）。
        中心は骨から取っているので、上体を捻っても仰け反っても画に付いてくる */
+    // 頭にpadを足さないのは server/sim.js の hitPose と同じ理由。
+    // 足すと頭の球が体を飲み込んで、どこを斬っても頭に当たったことになる
     const th = raySphere(origin, dir, this._headPos, HITBOX.HEAD_R * s);
-    const tc = rayCapsule(origin, dir, this._chestA, this._chestB, HITBOX.CHEST_R * s);
-    const tl = rayCapsule(origin, dir, this._legA, this._legB, HITBOX.LEG_R * s);
+    const tc = rayCapsule(origin, dir, this._chestA, this._chestB, HITBOX.CHEST_R * s + pad);
+    const tl = rayCapsule(origin, dir, this._legA, this._legB, HITBOX.LEG_R * s + pad);
 
     /* **頭は手前の部位より少し後ろでも優先する。** server/sim.js の hitPose と同じ決まり。
 

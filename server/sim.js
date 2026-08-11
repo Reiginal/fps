@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { Player } from '../src/player/player.js';
 import {
   K, S, TICK_DT, TICK_HZ, HISTORY_MS, MAX_REWIND_MS, INTERP_DELAY_MS,
-  HITBOX, HP, PART, PART_MUL, loadoutOf, MELEE_HEAVY,
+  HITBOX, HP, PART, PART_MUL, loadoutOf, MELEE_HEAVY, MELEE_SWEEP,
 } from '../src/net/protocol.js';
 
 /* ------------------------------------------------------------ 武器の表 */
@@ -43,7 +43,8 @@ export const FALLBACK_WEAPONS = [
        右クリックが黙って効かなくなる（誰も気づけない形の食い違い） */
     id: 'knife', name: 'ナイフ', damage: 70, rpm: 95, pellets: 1, melee: true,
     mag: 9999, reloadTime: 0, adsTime: 0.16,
-    range: 1.8, falloffStart: 1.8, falloffEnd: 1.8, falloffMin: 1.0,
+    range: MELEE_SWEEP.LIGHT.reach,
+    falloffStart: MELEE_SWEEP.LIGHT.reach, falloffEnd: MELEE_SWEEP.LIGHT.reach, falloffMin: 1.0,
   },
   {
     // 手榴弾は撃たないので、当たり判定の値は使われない。
@@ -74,15 +75,19 @@ try {
 }
 export { WEAPONS, weaponsSource };
 
-/* 強い一撃ぶんの武器の表。**威力だけ差し替えた写しを1つ作って使い回す。**
+/* 強い一撃ぶんの武器の表。**威力と間合いだけ差し替えた写しを1つ作って使い回す。**
    撃つたびに作ると、近接の撃ち合いのあいだ毎回ごみが1つ増える。
-   射程も減衰もそのままなのは、伸ばすと「遠くから強く当たる」になって
-   間合いを詰める道具という形が崩れるため */
+
+   間合いを差し替えるのは、右クリックが「突く／振り下ろす」動きだから
+   （protocol.jsのMELEE_SWEEP）。**遠いかわりに狭い。**
+   広いまま遠くしたら、間合いを詰める道具という形が崩れる。
+   減衰はそのまま（近接は falloffStart=falloffEnd なので元から効いていない） */
 const _heavy = new WeakMap();
 export function heavyDef(def) {
   let h = _heavy.get(def);
   if (!h) {
     h = { ...def, damage: (def.damage || 0) * MELEE_HEAVY.MULT };
+    if (def.melee) h.range = MELEE_SWEEP.HEAVY.reach;
     _heavy.set(def, h);
   }
   return h;
@@ -211,23 +216,28 @@ const HEAD_SPAN = HITBOX.CHEST_R * 2;
 // 頭の球(1.416〜1.716)は胴カプセルの上端の球(1.202〜1.722)に完全に埋まっていて、
 // 正面から水平に撃つと必ず胴の面の方が手前に来る＝頭に永久に当たらなくなる。
 // だから頭に触れているならまず頭とみなし、明らかに体を貫いた後の場合だけ手前の部位に譲る
-export function hitPose(pose, origin, dir) {
+// padは近接だけが渡す「刃の太さ」。当たり所を太らせるのは、
+// 半径padの球を前へ掃くのと同じ意味になる（protocol.jsのMELEE_SWEEP）
+export function hitPose(pose, origin, dir, pad = 0) {
   const h = pose.h;
   // まず全身を包む球で足切りする。ほとんどの相手はこれで落ちるので、
   // 8人ぶんのカプセル計算を毎発やらずに済む
   _c.x = pose.x; _c.y = pose.y + h * 0.5; _c.z = pose.z;
-  if (raySphere(origin, dir, _c, h * 0.5 + HITBOX.RADIUS) < 0) return null;
+  if (raySphere(origin, dir, _c, h * 0.5 + HITBOX.RADIUS + pad) < 0) return null;
 
+  /* **頭にはpadを足さない。** 足すと頭の球が体を丸ごと飲み込んで、
+     どこを斬っても頭に当たったことになる（下のHEAD_SPANの譲り合いで、
+     太った頭は常に一番手前へ来る）。頭は狙って当てた時だけ */
   _c.x = pose.x; _c.y = pose.y + h * HITBOX.HEAD_AT; _c.z = pose.z;
   const th = raySphere(origin, dir, _c, HITBOX.HEAD_R);
 
   _a.x = pose.x; _a.y = pose.y + h * HITBOX.CHEST_FROM; _a.z = pose.z;
   _b.x = pose.x; _b.y = pose.y + h * HITBOX.CHEST_TO; _b.z = pose.z;
-  const tc = rayCapsule(origin, dir, _a, _b, HITBOX.CHEST_R);
+  const tc = rayCapsule(origin, dir, _a, _b, HITBOX.CHEST_R + pad);
 
   _a.y = pose.y + h * HITBOX.LEG_FROM;
   _b.y = pose.y + h * HITBOX.LEG_TO;
-  const tl = rayCapsule(origin, dir, _a, _b, HITBOX.LEG_R);
+  const tl = rayCapsule(origin, dir, _a, _b, HITBOX.LEG_R + pad);
 
   let best = -1;
   let part = -1;
@@ -553,7 +563,7 @@ function faceNormal(tri, dir, out) {
 
 // 弾1発。壁で止まり、貫通も跳弾もしない。
 // targetsは撃った本人を除いた相手の配列、atMsは「撃った人の画面に映っていた時刻」
-export function resolveShot({ octree, origin, dir, def, targets, atMs, rewind = true }) {
+export function resolveShot({ octree, origin, dir, def, targets, atMs, rewind = true, pad = 0 }) {
   _ray.origin.copy(origin);
   _ray.direction.copy(dir);
 
@@ -564,14 +574,25 @@ export function resolveShot({ octree, origin, dir, def, targets, atMs, rewind = 
   let bestT = Infinity;
   let bestPart = -1;
   let bestTarget = null;
+  let bestPose = null;
 
   for (let i = 0; i < targets.length; i++) {
     const tgt = targets[i];
     const pose = rewind ? tgt.poseAt(atMs) : tgt.pose();
     if (!pose.alive) continue;
-    const h = hitPose(pose, origin, dir);
+    const h = hitPose(pose, origin, dir, pad);
     if (!h) continue;
-    if (h.t < bestT) { bestT = h.t; bestPart = h.part; bestTarget = tgt; }
+    if (h.t < bestT) { bestT = h.t; bestPart = h.part; bestTarget = tgt; bestPose = pose; }
+  }
+
+  /* **太らせた時は、壁の判定を体の中心でやり直す。**
+     padを足すと当たり所が全方位へpadだけはみ出すので、
+     bestT（太った面までの距離）は壁より手前に来ることがある。
+     そのまま通すと、角の裏に隠れた相手を壁越しに斬れてしまう。
+     体の中心が壁の向こうなら外す（originVisibleと同じ考え方） */
+  if (bestTarget && pad > 0 && wall) {
+    _c.x = bestPose.x; _c.y = bestPose.y + bestPose.h * 0.5; _c.z = bestPose.z;
+    if (!originVisible(octree, origin, _c)) bestTarget = null;
   }
 
   // 相手より手前に壁があれば当たらない。これで壁越しの射撃が消える

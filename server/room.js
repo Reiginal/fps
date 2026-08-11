@@ -10,7 +10,7 @@ import { Capsule } from 'three/addons/math/Capsule.js';
 import {
   TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS, MATCH, PHASE, ZONE, NADE, blastDamage, outsideZone,
   Sv, EV, packPlayer, SEATS, SEAT_SPAWN, CHARACTERS, MODE_IDS, LOBBY_ROW, LOBBY_ROW_LEN, DROP,
-  TEAM_OF_SEAT, TEAM_NAMES, MELEE_HEAVY,
+  TEAM_OF_SEAT, TEAM_NAMES, MELEE_HEAVY, MELEE_SWEEP,
 } from '../src/net/protocol.js';
 import { SimPlayer, resolveShot, rewindMs, originVisible, WEAPONS, heavyDef } from './sim.js';
 import { Bot, forwardOf } from './bot.js';
@@ -974,6 +974,12 @@ export class Room {
     if (far || !originVisible(this.world.octree, eye, origin)) {
       origin.copy(eye);
     }
+    /* 刃は目ではなく手から出す。**目玉から刺してはいない。**
+       しゃがんだ相手は、当たり所を太らせても目の高さ(1.58)の下を通ってしまう
+       （しゃがみの一番高い所は1.15で、太らせても1.49）。
+       申告された位置ではなく**ここで下げる**ので、書き換えても効かない。
+       1人用も同じ量だけ下げる（src/main.jsの_resolveShot） */
+    if (sim.def.melee) origin.y -= MELEE_SWEEP.DROP;
 
     this.push({ e: EV.FIRE, id: slot.id, w: sim.weapon });
 
@@ -998,13 +1004,16 @@ export class Room {
       octree: this.world.octree,
       origin,
       dir,
-      /* 強い一撃は威力だけ差し替える。**射程も減衰もそのまま。**
-         射程まで伸ばすと「遠くから強く当たる」になって、
+      /* 強い一撃は威力と間合いを差し替える（heavyDefが持つ）。
+         **遠いかわりに狭い。**広いまま遠くすると、
          間合いを詰める道具という形が崩れる */
       def: strong ? heavyDef(sim.def) : sim.def,
       targets,
       atMs,
       rewind: REWIND_ON,
+      /* 刃には太さがある。**銃には無い**ので、近接の時だけ渡す。
+         左は払うので広く、右は突く／振り下ろすので狭い（MELEE_SWEEP） */
+      pad: sim.def.melee ? (strong ? MELEE_SWEEP.HEAVY.pad : MELEE_SWEEP.LIGHT.pad) : 0,
     });
 
     if (res.kind === 'player') {
