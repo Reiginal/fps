@@ -101,7 +101,17 @@ console.log('\n[1] ステップ機械: 全遷移');
   run(m, 300, { sprinting: true, speed: 7.4 });
   ok(m.step.id === 'slide', '走っているだけでは進まない');
   run(m, 2, { sliding: true });
-  ok(m.step.id === 'jump', '滑れたら進む');
+  ok(m.step.id === 'knife', '滑れたら進む（次はナイフ）');
+
+  /* knife: **滑り込みの直後、助走路の上でやる。** 前は梁の先（持ち替えの後ろ）に
+     あって、そこまで来ると前は射撃線・後ろは梁で8m歩く場所が残っていなかった
+     （「もう歩くスペースないタイミングで言われても」2026-08-12） */
+  run(m, 300, { weaponIndex: 4, speed: 0 });
+  ok(m.step.id === 'knife', 'ナイフを持って立っているだけでは進まない');
+  run(m, 300, { weaponIndex: 0, speed: 6.3 });
+  ok(m.step.id === 'knife', 'ライフルのまま動いても進まない');
+  run(m, 80, { weaponIndex: 4, speed: 6.3 });   // 8.4m
+  ok(m.step.id === 'jump', 'ナイフで8m動いて進む（次はジャンプ）');
 
   // jump: 2つ目の段の奥に立てたか（跳ばないと辿り着けない地形なので位置が証明）
   run(m, 120, { z: -17, onFloor: false });
@@ -115,22 +125,16 @@ console.log('\n[1] ステップ機械: 全遷移');
   run(m, 2, { z: -26 });
   ok(m.step.id === 'switch', '梁をくぐり切って進む（次は持ち替え）');
 
-  /* switch / knife は**梁の先の開けた所**でやる。
-     前はナイフの8m歩きが射撃線（土嚢と的の前）にあった */
-  run(m, 10, { z: -26, weaponIndex: 0 });
-  ok(m.step.id === 'switch', '最初からライフルのままでは進まない');
+  /* switch は**梁の先**で、撃つ課題の直前。ここに置いてあるのは
+     場所の都合ではなく、**1でライフルへ戻って終わる＝ナイフのまま撃つ課題へ
+     入らない**ため（ナイフを持ったまま左クリックしても弾は出ない） */
+  run(m, 10, { z: -26, weaponIndex: 4 });
+  ok(m.step.id === 'switch', 'ナイフを持ったままでは進まない');
   run(m, 5, { z: -26, weaponIndex: 2 });
   ok(m.step.id === 'switch', 'ピストルに替えただけではまだ');
-  run(m, 2, { z: -26, weaponIndex: 0 });
-  ok(m.step.id === 'knife', 'ライフルへ戻して進む（次はナイフ）');
-
-  run(m, 300, { z: -26, weaponIndex: 4, speed: 0 });
-  ok(m.step.id === 'knife', 'ナイフを持って立っているだけでは進まない');
-  run(m, 300, { z: -26, weaponIndex: 0, speed: 6.3 });
-  ok(m.step.id === 'knife', 'ライフルのまま動いても進まない');
   // **この時点で既に100発撃っていた人**を再現（次のshootの基準取りに乗る）
-  run(m, 80, { z: -26, weaponIndex: 4, speed: 6.3, shots: 100 });   // 8.4m
-  ok(m.step.id === 'shoot', 'ナイフで8m動いて進む（次は撃つ）');
+  run(m, 2, { z: -26, weaponIndex: 0, shots: 100 });
+  ok(m.step.id === 'shoot', 'ライフルへ戻して進む（次は撃つ）');
 
   // shoot: 入場時の累積は基準から除外。+5発で進む
   run(m, 10, { shots: 100 });
@@ -364,11 +368,16 @@ console.log('\n[3] 小ステージ: 実際に組んで寸法を測る');
   ok(shown().length === 0 && byId.up.mesh.material.color.getHex() === 0xffa24a,
     '入り直すと的は消えて橙に戻る');
 
-  /* **走りと滑り込みの助走路。** ここが一番の直し所で、前はしゃがみの後ろに
-     滑り込みを置いていて助走が2mしか無かった。
-     境(YARD_FAR)から最初の段(JUMP_A)まで、走り12m＋滑り6mが入る長さが要る */
+  /* **足を使う課題は全部この直線の上でやる。** ここが一番の直し所で、
+     前はしゃがみの後ろに滑り込みを置いていて助走が2mしか無かった。
+     境(YARD_FAR)から最初の段(JUMP_A)まで、
+     走り12m＋滑り6m＋ナイフ歩き8mを続けてやっても入る長さが要る
+     （ナイフを梁の先に置いていた時は、そこに8m歩く場所が残っていなかった） */
   const runway = L.YARD_FAR - L.JUMP_A;
-  ok(runway >= 24, `助走路が${runway}m（走り12m＋滑り6mに足りる）`);
+  const gates = Object.fromEntries(TUTORIAL_STEPS.map((st) => [st.id, st]));
+  const needRun = gates.sprint.goal + 6 + gates.knife.goal;
+  ok(runway >= needRun,
+    `助走路が${runway}m（走り${gates.sprint.goal}m＋滑り6m＋ナイフ${gates.knife.goal}mの${needRun}mが入る）`);
   // 助走路に障害物が無いこと。1mおきに立ってみる
   let blocked = 0;
   for (let z = L.YARD_FAR - 1; z > L.JUMP_A + 1; z -= 1) {
@@ -376,15 +385,20 @@ console.log('\n[3] 小ステージ: 実際に組んで寸法を測る');
   }
   ok(blocked === 0, `助走路がまっすぐ空いている（詰まり${blocked}箇所）`);
 
-  /* ナイフで8m歩く区間。梁の奥から土嚢まで空いていること。
-     前はここが射撃線の中にあって、的に撃たれながら歩く形だった */
-  const knifeLane = L.BEAM - L.SANDBAG;
-  ok(knifeLane >= 10, `ナイフの区間が${knifeLane}m（課題の8mが入る）`);
+  /* **ナイフの8m歩きが助走路の側にあること。** 梁の先へ戻すと、
+     前は射撃線・後ろは低い梁で歩く場所が残らない（今回直した所）。
+     段(JUMP_A)より前の課題だと言い切れれば、上で測った助走路の中に居る */
+  const order = TUTORIAL_STEPS.map((st) => st.id);
+  ok(order.indexOf('knife') > order.indexOf('slide')
+    && order.indexOf('knife') < order.indexOf('jump'),
+    `ナイフは滑り込みの後・ジャンプの前（今: ${order.slice(order.indexOf('sprint'), order.indexOf('jump') + 1).join('→')}）`);
+  // 持ち替えは撃つ課題の直前。ナイフのまま撃つ課題へ入らないための並び
+  ok(order.indexOf('switch') === order.indexOf('shoot') - 1,
+    `持ち替えの直後が撃つ課題（今: ${order[order.indexOf('shoot') - 1]}→shoot）`);
 
   /* 課題の目的地(goalZ)が仕掛けの座標と噛み合っているか。
      表(tutorial.js)と通路(tutorial-level.js)は別ファイルなので、
      片方だけ動かすと「段の手前なのにクリア」「くぐり切ったのにクリアされない」になる */
-  const gates = Object.fromEntries(TUTORIAL_STEPS.map((st) => [st.id, st]));
   ok(gates.jump.goalZ < L.JUMP_B - 0.8 && gates.jump.goalZ > L.BEAM + 0.7,
     `ジャンプの目的地(z=${gates.jump.goalZ})は2つ目の段の奥・梁の手前`);
   ok(gates.crouch.goalZ < L.BEAM - 0.7 && gates.crouch.goalZ > L.SANDBAG + 0.4,
