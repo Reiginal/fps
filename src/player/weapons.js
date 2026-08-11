@@ -6,9 +6,9 @@ import { muzzleFlashTexture, radialTexture, smokeTexture } from '../world/textur
 import { tryModelOverride } from './glbview.js';
 import { applySkin, skinFor, shapeOf } from './skins.js';
 // 持ち物の決まりだけ取り込む。protocol.jsはこちらを読まないので輪にならない
-import { loadoutOf, NADE, MELEE_HEAVY } from '../net/protocol.js';
+import { loadoutOf, NADE, MELEE_HEAVY, MELEE_SWEEP } from '../net/protocol.js';
 // 強い一撃の音。低く長い（重い物を振ると空気の量が増える）
-import { SWING_HEAVY_TUNE } from '../core/audio.js';
+import { swingTune } from '../core/audio.js';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -27,9 +27,110 @@ const BURST_COUNT = 3;
 // 押しっぱなしでもフルオートより明確に遅くする
 const BURST_GAP_S = 0.32;
 
-// 近接の振り1回にかける時間。武器のrpm(95=0.63秒に1回)より短くして、
-// 振り終わってから次が出せるようにする
-const SWING_TIME = 0.42;
+/* --------------------------------------------------------- 近接の振り方
+
+   **振り方は「形 × 左右」で変わる。**
+   刀を短剣と同じ角度で振ると、長さのある物を持っている感じが出ない。
+
+   1回の振りは3つの姿勢でできている:
+     素の構え → back（振りかぶり） → thru（振り抜いた先） → 素の構え
+   arcは途中で膨らむ量で、sinで乗るので**行きも帰りも通る道が同じにならない。**
+   これが無いと、往復するだけの動きになって刃が「通り過ぎた」ように見えない。
+
+   数字の意味（全部ビューモデルの相対値）:
+     p … 前後の傾き（マイナスで切っ先が上）
+     y … 左右の振り（プラスで右）
+     r … 捻り（刃を寝かせるとプラスマイナスが大きくなる）
+     z … 前後の位置（マイナスで前へ突き出す）
+     h … 上下の位置
+
+   **時間は見た目だけで、当たり判定にも間隔にも効かない。**
+   間隔はrpm（左）とMELEE_HEAVY.COST（右）が決めるので、
+   ここを長くしても速く振れるようにはならない。
+   だから形ごとに変えてよい（刀は重いので遅く、ダガーは軽いので速い）。
+
+   **強さは形で変わらない。**威力も間隔も間合いも全部同じ。
+   形スキンはコインで買う物なので、強くなると「強さを買える」ことになる */
+export const SWINGS = {
+  // ナイフ・左: 右上から左下への袈裟斬り。元からある動き
+  'knife.light': {
+    time: 0.42, wind: 0.22, speed: 2.2, fade: 0.55,
+    back: { p: -0.55, y: 0.42, r: -0.50, z: -0.10, h: -0.05 },
+    thru: { p: 1.25, y: -0.73, r: 1.00, z: -0.10, h: -0.05 },
+    arc: { p: -0.25, y: 0, r: 0, z: 0.30, h: 0.15 },
+  },
+  /* ナイフ・右: 突き。**振らずに、引いてまっすぐ前へ出す。**
+     左が「通り過ぎる」動きなのに対して、こちらは1点へ入れる動き。
+     だから当たり判定も狭くて遠い（MELEE_SWEEP.HEAVY）*/
+  'knife.heavy': {
+    // 長さだけprotocol.jsから引く。あちらの説明が「通常より長い」なので、
+    // 数字を写すと片方だけ動かした時に説明が嘘になる
+    time: MELEE_HEAVY.TIME_S, wind: 0.38, speed: 3.0, fade: 0.46,
+    /* 前へ出す量(z)は0.16まで。**構えの位置が-0.52なので、
+       0.34も出すと画面から0.86の所まで離れて刃が6割の大きさに縮む**
+       （遠近で1/zに効く）。突きは「速く出て速く戻る」で見せる */
+    back: { p: -0.22, y: 0.20, r: -0.16, z: 0.14, h: 0.04 },
+    thru: { p: 0.14, y: -0.05, r: 0.06, z: -0.16, h: -0.03 },
+    arc: { p: 0.08, y: 0.04, r: 0, z: -0.05, h: 0.02 },
+  },
+  // 刀・左: 横薙ぎ。**縦に落とさず、水平に払う。**
+  // 捻り(r)を大きく取って刃を寝かせ、振り(y)で右から左へ通す
+  'katana.light': {
+    time: 0.50, wind: 0.26, speed: 2.0, fade: 0.52,
+    back: { p: -0.06, y: 0.78, r: -1.15, z: 0.08, h: 0.05 },
+    thru: { p: 0.14, y: -1.02, r: -0.62, z: -0.05, h: -0.02 },
+    arc: { p: -0.10, y: 0, r: 0.34, z: 0.14, h: 0.04 },
+  },
+  // 刀・右: 唐竹割り。真上へ大きく振りかぶって、まっすぐ縦に落とす。
+  // 左右へは一切振らない(y=0)ので、横薙ぎと見間違えない
+  'katana.heavy': {
+    time: 0.78, wind: 0.42, speed: 2.4, fade: 0.50,
+    back: { p: -1.10, y: 0.06, r: 0.04, z: 0.12, h: 0.18 },
+    thru: { p: 1.34, y: 0.00, r: 0.00, z: -0.16, h: -0.12 },
+    arc: { p: -0.22, y: 0, r: 0, z: 0.14, h: 0.07 },
+  },
+  // ダガー・左: 小さく速い払い。振り幅を半分にして、そのぶん短く終わる
+  'dagger.light': {
+    time: 0.30, wind: 0.18, speed: 2.8, fade: 0.58,
+    back: { p: -0.30, y: 0.26, r: -0.30, z: -0.03, h: -0.02 },
+    thru: { p: 0.72, y: -0.48, r: 0.62, z: -0.06, h: -0.04 },
+    arc: { p: -0.14, y: 0, r: 0, z: 0.16, h: 0.08 },
+  },
+  // ダガー・右: 逆手に持ち替えての突き上げ。下から上へ入れる
+  'dagger.heavy': {
+    time: 0.52, wind: 0.34, speed: 3.2, fade: 0.44,
+    back: { p: 0.40, y: 0.24, r: -0.52, z: 0.16, h: -0.12 },
+    thru: { p: -0.46, y: -0.12, r: -0.18, z: -0.17, h: 0.16 },
+    arc: { p: 0.12, y: 0.05, r: 0.12, z: -0.04, h: 0.05 },
+  },
+  /* 手榴弾を投げる動き。**ナイフの左と同じ数字だが、別に置いてある。**
+     同じ物を指すと、ナイフの振りを調整した時に投げ方まで動く */
+  'nade.throw': {
+    time: 0.42, wind: 0.22, speed: 2.2, fade: 0.55,
+    back: { p: -0.55, y: 0.42, r: -0.50, z: -0.10, h: -0.05 },
+    thru: { p: 1.25, y: -0.73, r: 1.00, z: -0.10, h: -0.05 },
+    arc: { p: -0.25, y: 0, r: 0, z: 0.30, h: 0.15 },
+  },
+};
+
+/**
+ * どの振り方を使うか。**着けているスキンが形違いなら、その形の振り方。**
+ * 色だけのスキンは元の武器と同じ動き（見た目しか変わらない物なので）。
+ * 表に無い組み合わせはナイフの左へ寄せる（形を足して振り方を書き忘れても止まらない）
+ */
+export function swingOf(weaponId, kind) {
+  const shape = shapeIdOf(weaponId) || weaponId;
+  return SWINGS[`${shape}.${kind}`] || SWINGS[`${weaponId}.${kind}`] || SWINGS['knife.light'];
+}
+
+/**
+ * 今その武器に着いている**形違いスキンのid**。色だけのスキンならnull。
+ * 振り方（SWINGS）と振る音（audio.jsのSWING_TUNES）が両方これで引く
+ */
+function shapeIdOf(weaponId) {
+  const skin = skinFor(weaponId);
+  return shapeOf(skin) ? skin : null;
+}
 // 包帯を巻くのにかかる秒数。protocol.jsのHEAL.TIME_Sと同じ値を持つ
 // （weapons.jsはprotocolを読まないので、ここだけ写す。片方を変えたら両方直すこと）
 const HEAL_TIME = 2.4;
@@ -3035,9 +3136,12 @@ export const WEAPONS = [
     // 振りにばらつきは無い。当たるか当たらないかだけ
     spreadHip: 0, spreadAds: 0, spreadPerShot: 0, spreadMax: 0, spreadRecover: 1,
     recoilPitch: 0.012, recoilYaw: 0.004, kick: 0.05, adsFov: 70, adsTime: 0.16,
-    // ここが近接の全て。射程1.8mで、減衰も切る（届く範囲では威力が一定）。
-    // レイは壁で止まるので、壁越しには当たらない
-    range: 1.8, falloffStart: 1.8, falloffEnd: 1.8, falloffMin: 1.0,
+    /* ここが近接の全て。届く範囲では威力が一定（減衰を切ってある）。
+       壁で止まるのは銃と同じ。
+       **間合いはprotocol.jsのMELEE_SWEEPが持つ。**刃の太さと対で決まる値なので、
+       ここに数字を書くと片方だけ動かした時に「広いのに近い」等が起きる */
+    range: MELEE_SWEEP.LIGHT.reach,
+    falloffStart: MELEE_SWEEP.LIGHT.reach, falloffEnd: MELEE_SWEEP.LIGHT.reach, falloffMin: 1.0,
     sound: { volume: 0.30, bodyFreq: 900, crackFreq: 4200, bodyDecay: 0.05, tailDecay: 0.12 },
     casing: false,
     reloadKind: 'mag', holdOpen: false,
@@ -3416,6 +3520,10 @@ export class WeaponSystem {
     this.burstLeft = 0;
     // 近接の振りの残り時間。0で構えに戻っている
     this.swing = 0;
+    // 今どの振り方で動いているか（SWINGSの1つ）。振り始めた時に決まる。
+    // **振っている最中に装備を替えても、始めた時の動きで振り切る**
+    // （途中で別の軌道へ飛ぶより、1回ぶん古い動きの方がまし）
+    this.swingAnim = SWINGS['knife.light'];
     // 手榴弾を長押しで構えている最中か。trueの間に離すと投げる
     this._throwCharging = false;
     /* 投げ物の残り。**弾倉と違って武器ではなく持ち主が持つ物**なので、
@@ -4011,7 +4119,7 @@ export class WeaponSystem {
         this._throwCharging = false;
         if (canFire) {
           player.cancelHeal?.();
-          this.swing = SWING_TIME;
+          this._startSwing(d.id, 'throw');
           this.onThrow?.(false);
           this.fireTimer = 60 / d.rpm;
         }
@@ -4024,7 +4132,7 @@ export class WeaponSystem {
       if (rightEdge && canFire) {
         this._throwCharging = false;
         player.cancelHeal?.();
-        this.swing = SWING_TIME;
+        this._startSwing(d.id, 'throw');
         this.onThrow?.(true);
         this.fireTimer = 60 / d.rpm;
       }
@@ -4037,7 +4145,7 @@ export class WeaponSystem {
          書き換えれば通常の速さで強い一撃が出せることになる */
       player.cancelHeal?.();
       this.heavy = true;
-      this.swing = MELEE_HEAVY.TIME_S;
+      this._startSwing(d.id, 'heavy');
       this._fire(player, ctx);
       this.fireTimer = (60 / d.rpm) * MELEE_HEAVY.COST;
     } else if (wantFire && canFire) {
@@ -4045,7 +4153,7 @@ export class WeaponSystem {
         // 撃ったら包帯を中断する。撃ちながら巻けると遅くする意味が無い
         player.cancelHeal?.();
         // 近接は撃つのではなく振る。刃が通り過ぎる動きを出す
-        if (d.melee) { this.swing = SWING_TIME; this.heavy = false; }
+        if (d.melee) { this.heavy = false; this._startSwing(d.id, 'light'); }
         this._fire(player, ctx);
         this.fireTimer = 60 / d.rpm;
         if (burst) {
@@ -4082,6 +4190,17 @@ export class WeaponSystem {
     this._animate(dt, input, player);
     this._animateParts(dt, w, d);
     this._updateFlash(dt);
+  }
+
+  /**
+   * 振りを始める。**どう振るかはここで1回だけ決めて、振り切るまで変えない。**
+   *
+   * kindは 'light'（左）/ 'heavy'（右）/ 'throw'（手榴弾）。
+   * 形スキンを着けていればその形の振り方になる（swingOf）
+   */
+  _startSwing(weaponId, kind) {
+    this.swingAnim = swingOf(weaponId, kind);
+    this.swing = this.swingAnim.time;
   }
 
   _fire(player, ctx) {
@@ -4197,8 +4316,9 @@ export class WeaponSystem {
       ctx.audio?.gunshot(d.sound, null, null);
 
     } else {
-      // 刃は空気を切る音だけ。強い一撃は低く長い（重い物を振ると空気の量が増える）
-      ctx.audio?.swing?.(this.heavy ? SWING_HEAVY_TUNE : undefined);
+      // 刃は空気を切る音だけ。**形と強さで鳴り分ける**
+      // （刀は長く澄んで、ダガーは短く高い。audio.jsのSWING_TUNES）
+      ctx.audio?.swing?.(swingTune(shapeIdOf(d.id), this.heavy));
     }
 
     if (d.casing) {
@@ -4432,27 +4552,38 @@ export class WeaponSystem {
     }
     const lower = Math.max(reloadT, switchT, this._healBlend);
 
-    // 近接の振り。0→1で「引く→振り下ろす→戻る」の1周期を作る。
-    // 銃と同じ反動(kick)では表せない。反動は「その場で跳ねて戻る」動きで、
-    // 振りは「腕ごと右上から左下へ通り抜ける」動きだから、軌道が別物になる
-    let swingP = 0, swingY = 0, swingR = 0, swingZ = 0;
+    /* 近接の振り。0→1で「引く→振り抜く→戻る」の1周期を作る。
+       銃と同じ反動(kick)では表せない。反動は「その場で跳ねて戻る」動きで、
+       振りは「腕ごと通り抜ける」動きだから、軌道が別物になる。
+
+       **どう通り抜けるかは SWINGS が持つ。**形と左右で違う
+       （刀の左は横へ払い、右は真上から落とす）。
+       ここは表を再生するだけで、角度そのものは1つも持たない */
+    let swingP = 0, swingY = 0, swingR = 0, swingZ = 0, swingH = 0;
     if (this.swing > 0) {
-      const k = 1 - clamp01(this.swing / SWING_TIME);   // 0→1で進む
-      if (k < 0.22) {
+      const s = this.swingAnim;
+      // **割る相手は振り方ごとの長さ。**ここを固定値にしていた頃、
+      // 0.62秒の強い一撃が「最初の0.2秒だけ止まって見える」状態だった
+      // （0.42で割ると1を超えるので、進みが0のまま据え置かれていた）
+      const k = 1 - clamp01(this.swing / s.time);   // 0→1で進む
+      if (k < s.wind) {
         // 振りかぶり。ゆっくり引いて溜める
-        const a = k / 0.22;
-        swingP = -a * 0.55; swingY = a * 0.42; swingR = -a * 0.5; swingZ = -a * 0.10;
+        const a = k / s.wind;
+        swingP = a * s.back.p; swingY = a * s.back.y;
+        swingR = a * s.back.r; swingZ = a * s.back.z; swingH = a * s.back.h;
       } else {
-        // 振り抜き。速く通り過ぎて、行き過ぎた所から戻る
-        const a = (k - 0.22) / 0.78;
+        // 振り抜き。速く通り過ぎて、行き過ぎた所から戻る。
+        // eは途中で膨らむ量で、これが無いと同じ道を往復するだけになる
+        const a = (k - s.wind) / (1 - s.wind);
+        const m = Math.min(1, a * s.speed);
         const e = Math.sin(a * Math.PI);
-        swingP = -0.55 + (0.55 + 1.25) * Math.min(1, a * 2.2) - e * 0.25;
-        swingY = 0.42 - 1.15 * Math.min(1, a * 2.2);
-        swingR = -0.5 + 1.5 * Math.min(1, a * 2.2);
-        swingZ = -0.10 + 0.30 * e;
         // 最後は素の構えへ戻す
-        const back = Math.max(0, (a - 0.55) / 0.45);
-        swingP *= 1 - back; swingY *= 1 - back; swingR *= 1 - back; swingZ *= 1 - back;
+        const back = 1 - Math.max(0, (a - s.fade) / (1 - s.fade));
+        swingP = (s.back.p + (s.thru.p - s.back.p) * m + e * s.arc.p) * back;
+        swingY = (s.back.y + (s.thru.y - s.back.y) * m + e * s.arc.y) * back;
+        swingR = (s.back.r + (s.thru.r - s.back.r) * m + e * s.arc.r) * back;
+        swingZ = (s.back.z + (s.thru.z - s.back.z) * m + e * s.arc.z) * back;
+        swingH = (s.back.h + (s.thru.h - s.back.h) * m + e * s.arc.h) * back;
       }
     }
 
@@ -4461,7 +4592,9 @@ export class WeaponSystem {
     const healDrop = this._healBlend * 0.30;
     model.position.set(
       base.x + bobX + swX + breathX + sp * 0.05 + this.kickX + this._healBlend * 0.10,
-      base.y + bobY + swY + breathY - sp * 0.05 - lower * v.lower + this.kickY + swingZ * 0.5 - healDrop,
+      // 上下は振りの h をそのまま使う。前は前後(swingZ)の半分を流用していたので、
+      // 突きのように「前へ出すだけで下げない」動きが作れなかった
+      base.y + bobY + swY + breathY - sp * 0.05 - lower * v.lower + this.kickY + swingH - healDrop,
       base.z + this.kickZ - sp * 0.02 + swingZ,
     );
     // kickPitch/kickYawは反動なのでADSでも残す。ADSの減衰は_fireで
