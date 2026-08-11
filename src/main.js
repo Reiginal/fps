@@ -1347,6 +1347,8 @@ class Game {
     // 案内の的を橙へ戻す。戻さないと、2回目に入った時に最初から全部緑になっている
     this._tutLevel.resetAim?.();
     this._tutAimShown = -1;
+    // 出ている的の記録も戻す。戻さないと、2回目に入った時に最初の4枚が出ない
+    this._tutAimStep = undefined;
     this._tutFlags = { nadeKill: false, healed: false };
     this._tutDoneHold = 0;
     this._tutFinishT = null;
@@ -1455,6 +1457,8 @@ class Game {
     let best = null;
     let bestOff = Infinity;
     for (const t of list) {
+      // 出ていない的は数えない（今の課題の物だけが立っている）
+      if (!t.mesh.visible) continue;
       this._aimTo.subVectors(t.pos, eye);
       const dist = this._aimTo.length();
       if (dist < 0.3) continue;
@@ -1519,6 +1523,15 @@ class Game {
     if (hits.size !== this._tutAimShown) {
       this._tutAimShown = hits.size;
       for (const t of this.level.aimTargets || []) this.level.setAimDone(t.id, hits.has(t.id));
+    }
+    /* 案内の的は**今の課題の物だけ立てる。** 前は6枚とも最初から出ていて、
+       最初の課題が「上・下・左・右の4枚」なのに橙の板が6枚見えていた。
+       歩きながら狙う2枚はその課題で出て、その時に前の4枚は消える。
+       課題が変わった時だけ触る（毎フレームvisibleを書きに行かない） */
+    const stepId = this._tutMachine.step?.id ?? null;
+    if (stepId !== this._tutAimStep) {
+      this._tutAimStep = stepId;
+      this.level.showAim?.(this._tutMachine.step?.aim);
     }
     if (res === 'advance') {
       /* できた合図。前は中央のバナー(達成)と小さいカチッだけで、
