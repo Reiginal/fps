@@ -30,7 +30,7 @@ import {
   addCoins, getCoins, coinsFor, COIN, soloCoinsFor, addSoloCoins,
 } from './wallet.js';
 import { buy, equip, ownedOf, equippedOf } from './store.js';
-import { sendVerifyMail } from './mail.js';
+import { sendVerifyMail, sendResetMail } from './mail.js';
 import {
   C, Sv, decode, encode, TIMEOUT_MS, CHAT_MAX, CHAT_GAP_MS,
 } from '../src/net/protocol.js';
@@ -233,6 +233,11 @@ const meLimit = new ReportLimiter(200);
    二重購入そのものは台帳の主キーが断るが、
    押すたびに取引が1つ立つのは無駄なので入口でも絞る */
 const buyLimit = new ReportLimiter(300);
+/* パスワードの再設定。**入会と同じくらい遅くする。**
+   ここは押されるたびに他人の受信箱へメールが飛ぶ口なので、
+   叩き放題だと嫌がらせの道具になる（知らない人に何百通も届く）。
+   Resendの無料枠(1日100通)を1人で使い切られると、本物の登録が止まる */
+const resetLimit = new ReportLimiter(5000);
 
 /* Flyの向こうにいる時、本当の送り元と本当の道筋はヘッダに入る。
    secure を取り違えると、httpsなのにCookieにSecureが付かない（危ない）か、
@@ -416,6 +421,54 @@ async function routeApi(url, req, res) {
     if (!r.ok) { sendJson(res, 200, { ok: false, error: r.error, coins: r.coins }); return; }
     logs.add('coin', { message: `1人用で${r.got}枚`, name: me.name });
     sendJson(res, 200, { ok: true, got: r.got, coins: r.coins });
+    return;
+  }
+
+  /* パスワードを忘れた時。**居ても居なくても同じ返事を返す。**
+     「そのメールアドレスは登録されていません」と返すと、
+     総当たりで会員の一覧を作れてしまう（ログインで言い分けないのと同じ理由）。
+     送れなかった時も同じ返事にする（送信の失敗も手掛かりになるので） */
+  if (url === '/api/forgot') {
+    if (!resetLimit.allow(`fgt|${ip}`, Date.now())) {
+      sendJson(res, 429, { ok: false, error: '続けて押しすぎです。少し待ってください' });
+      return;
+    }
+    const body = await readJson(req, res);
+    if (body === undefined) return;
+    if (!body) { sendJson(res, 400, { ok: false, error: '送られた中身が読めません' }); return; }
+
+    try {
+      const r = await auth.requestReset(db.query, body.email);
+      if (r) {
+        await sendResetMail(r.user.email, r.token);
+        logs.add('auth', { message: '再設定を申し込んだ', name: r.user.name });
+      }
+    } catch (e) {
+      // ここで失敗しても言わない。**返事を変えた時点で手掛かりになる**
+      console.warn('[auth] 再設定の申し込みでつまずいた:', e && e.message);
+    }
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  /* 新しいパスワードを決める。合言葉は1回しか使えず、
+     成功するとその人の番号札が全部消える（server/auth.jsのresetPassword）。
+     消えた後にここで1枚出し直すので、**押した本人はそのままログインした状態になる** */
+  if (url === '/api/reset') {
+    if (!loginLimit.allow(`rst|${ip}`, Date.now())) {
+      sendJson(res, 429, { ok: false, error: '続けて試しすぎです。少し待ってください' });
+      return;
+    }
+    const body = await readJson(req, res);
+    if (body === undefined) return;
+    if (!body) { sendJson(res, 400, { ok: false, error: '送られた中身が読めません' }); return; }
+
+    const r = await auth.resetPassword(db.query, String(body.token ?? ''), body.password);
+    if (!r.ok) { sendJson(res, 400, r); return; }
+    logs.add('auth', { message: 'パスワードを変えた', name: r.user.name });
+    const s = await auth.login(db.query, { email: r.user.email, password: body.password });
+    sendJson(res, 200, { ok: true, user: r.user },
+      s.ok ? { 'set-cookie': auth.cookieHeader(s.token, { secure }) } : undefined);
     return;
   }
 

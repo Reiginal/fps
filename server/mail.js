@@ -50,6 +50,36 @@ ${url}
   };
 }
 
+/* 再設定のリンク。**行き先はゲームの画面。**
+   確認メールのリンクが /api/verify（サーバーが処理して戻すだけ）なのと違って、
+   こちらは**新しいパスワードを打ってもらう画面が要る**ので、
+   合言葉を付けたままゲームの画面へ送る。受け取るのは src/ui/account.js */
+export const resetUrl = (token) => `${appOrigin()}/?reset=${encodeURIComponent(token)}`;
+
+/* 再設定メールの中身。
+   **「心当たりが無ければ捨ててください」を必ず書く。**
+   このメールは他人のメールアドレスを打てば誰にでも送れるので、
+   身に覚えの無い人に届くことがある。その人が慌てないようにするのと、
+   「踏まなければ何も起きない」を伝えるため */
+function resetBody(url) {
+  return {
+    subject: 'BLACKOUT — パスワードの再設定',
+    text: `パスワードの再設定が申し込まれました。
+
+下のリンクを開くと、新しいパスワードを決められます。
+
+${url}
+
+このリンクは1時間で切れます。1回しか使えません。
+心当たりが無い場合は、そのまま捨ててください。何も変わりません。`,
+    html: `<p>パスワードの再設定が申し込まれました。</p>
+<p>下のリンクを開くと、新しいパスワードを決められます。</p>
+<p><a href="${url}">${url}</a></p>
+<p>このリンクは1時間で切れます。1回しか使えません。<br>
+心当たりが無い場合は、そのまま捨ててください。何も変わりません。</p>`,
+  };
+}
+
 /**
  * 確認メールを送る。
  *
@@ -62,14 +92,36 @@ ${url}
  */
 export async function sendVerifyMail(to, token) {
   const url = verifyUrl(token);
-  const body = verifyBody(url);
+  // 手元では**リンクをそのまま出す。** これを踏めば確認が終わる
+  return send(to, verifyBody(url), `確認リンク: ${url}`);
+}
 
+/**
+ * パスワード再設定のメールを送る。
+ *
+ * **失敗しても投げない。** 呼ぶ側（server/index.js）は、
+ * 送れても送れなくても、居ても居なくても**同じ返事**を返す。
+ * 「送れませんでした」と言い分けるだけで、
+ * そのメールアドレスが登録されているかが外から分かってしまう。
+ *
+ * @returns 送れたか（コンソールへ出しただけの時もtrue）
+ */
+export async function sendResetMail(to, token) {
+  const url = resetUrl(token);
+  return send(to, resetBody(url), `再設定リンク: ${url}`);
+}
+
+/**
+ * 実際に投げる所。**2通で同じなのでここ1箇所。**
+ * 分けて書いていた頃は、片方だけ時間切れの秒数が違う、が起きうる形だった。
+ *
+ * @param hint 鍵が無い時にコンソールへ出す1行（手元ではこれを踏む）
+ */
+async function send(to, body, hint) {
   if (!isEnabled()) {
-    // 手元。**リンクをそのまま出す。** これを踏めば確認が終わる
-    console.log(`[mail] 鍵が無いので送らない。${to} 宛の確認リンク: ${url}`);
+    console.log(`[mail] 鍵が無いので送らない。${to} 宛の${hint}`);
     return true;
   }
-
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -78,7 +130,7 @@ export async function sendVerifyMail(to, token) {
         'content-type': 'application/json',
       },
       body: JSON.stringify({ from: FROM, to: [to], ...body }),
-      // 返らない相手を待ち続けると、登録した人の画面が固まる
+      // 返らない相手を待ち続けると、押した人の画面が固まる
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) {

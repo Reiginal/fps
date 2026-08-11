@@ -17,7 +17,8 @@ import {
   cookieHeader, clearCookieHeader, readCookie, COOKIE_NAME,
   checkEmail, checkPassword, checkName, normalizeEmail,
   register, login, sessionUser, logout, verifyEmail,
-  PASSWORD_MIN, NAME_MAX,
+  requestReset, resetPassword,
+  PASSWORD_MIN, NAME_MAX, RESET_TOKEN_MINUTES, EMAIL_TOKEN_HOURS,
 } from '../server/auth.js';
 import { STEPS, checkSteps, migrate } from '../server/migrations.js';
 
@@ -33,6 +34,7 @@ function fakeDb() {
   const users = [];
   const sessions = [];
   const emailTokens = [];
+  const resets = [];
   let nextId = 1;
   const sqls = [];
 
@@ -88,9 +90,44 @@ function fakeDb() {
       if (u) u.verified_at = new Date();
       return { rows: u ? [u] : [] };
     }
+    /* ---- パスワードの再設定 ---- */
+    // 申し込みの時に人を探す。pass_hashを取らないので上の分岐とは別物
+    if (s.startsWith('SELECT id, email, name, verified_at FROM users')) {
+      const u = users.find((x) => x.email === params[0]);
+      return { rows: u ? [u] : [] };
+    }
+    if (s.startsWith('DELETE FROM password_resets WHERE user_id')) {
+      for (let i = resets.length - 1; i >= 0; i--) {
+        if (resets[i].user_id === params[0]) resets.splice(i, 1);
+      }
+      return { rows: [] };
+    }
+    if (s.startsWith('INSERT INTO password_resets')) {
+      resets.push({ token_hash: params[0], user_id: params[1], expires_at: params[2] });
+      return { rows: [] };
+    }
+    if (s.startsWith('DELETE FROM password_resets WHERE token_hash')) {
+      const now = Date.now();
+      const at = resets.findIndex((x) => x.token_hash === params[0] && +x.expires_at > now);
+      if (at < 0) return { rows: [] };
+      const [t] = resets.splice(at, 1);
+      return { rows: [{ user_id: t.user_id }] };
+    }
+    if (s.startsWith('UPDATE users SET pass_hash')) {
+      const u = users.find((x) => x.id === params[0]);
+      if (u) u.pass_hash = params[1];
+      return { rows: u ? [u] : [] };
+    }
+    // **その人の札を全部捨てる。** 再設定の芯なので、偽物でもちゃんと消す
+    if (s.startsWith('DELETE FROM sessions WHERE user_id')) {
+      for (let i = sessions.length - 1; i >= 0; i--) {
+        if (sessions[i].user_id === params[0]) sessions.splice(i, 1);
+      }
+      return { rows: [] };
+    }
     return { rows: [] };
   };
-  return { query, users, sessions, emailTokens, sqls };
+  return { query, users, sessions, emailTokens, resets, sqls };
 }
 
 const GOOD = { email: 'Aki@Example.com', password: 'hunter22ok', name: 'あき' };
@@ -393,6 +430,137 @@ console.log('\n[15] 画面のidが揃っている');
   ok(html.includes('id="nmName"'), '名前欄(nmName)がある（登録時に初期値として読む）');
   // 個人情報の扱いへの導線。メアドを預かる画面から辿れないと掲示の意味が無い
   ok(/href="\/privacy\.html"/.test(html), '会員証の画面から個人情報の扱いへ行ける');
+}
+
+/* ------------------------------------------ パスワードの再設定 */
+
+console.log('\n[16] パスワードの再設定');
+{
+  const db = fakeDb();
+  await register(db.query, GOOD);
+  // 別の端末から2回入っておく（札そのものは下の[17]で見る）
+  await login(db.query, { email: GOOD.email, password: GOOD.password });
+  await login(db.query, { email: GOOD.email, password: GOOD.password });
+  ok(db.sessions.length === 2, '2つの端末から入っている');
+
+  const req = await requestReset(db.query, GOOD.email);
+  ok(!!req && !!req.token, '合言葉が出る');
+  ok(req.token !== hashToken(req.token), '**台帳へ書くのは潰した物**');
+  ok(db.resets.length === 1 && db.resets[0].token_hash === hashToken(req.token),
+    '潰した物だけが台帳に入っている');
+  ok(!req.user.pass_hash && !req.user.email.includes('Aki'),
+    '返す人の情報にパスワードが混ざっていない（メアドは小さく均されている）');
+
+  // 期限。メール確認(24時間)より短いこと
+  const life = +db.resets[0].expires_at - Date.now();
+  ok(life > 0 && life <= RESET_TOKEN_MINUTES * 60_000 + 2000,
+    `${RESET_TOKEN_MINUTES}分で切れる`);
+  ok(RESET_TOKEN_MINUTES * 60 < EMAIL_TOKEN_HOURS * 3600,
+    `**メール確認のリンクより短い**（${RESET_TOKEN_MINUTES}分 対 ${EMAIL_TOKEN_HOURS}時間）`);
+
+  // もう一度申し込むと、古い方は消える
+  const req2 = await requestReset(db.query, GOOD.email);
+  ok(db.resets.length === 1, '**新しく出すと古い合言葉は消える**（受信箱に生きたリンクを残さない）');
+  const old = await resetPassword(db.query, req.token, 'newpass9876');
+  ok(!old.ok, '古いリンクはもう使えない');
+
+  const r = await resetPassword(db.query, req2.token, 'newpass9876');
+  ok(r.ok, '新しいリンクで変えられる');
+  ok(!await login(db.query, { email: GOOD.email, password: GOOD.password }).then((x) => x.ok),
+    '**古いパスワードでは入れなくなる**');
+  const fresh = await login(db.query, { email: GOOD.email, password: 'newpass9876' });
+  ok(fresh.ok, '新しいパスワードで入れる');
+
+  // 使い切り。同じリンクを2回踏んでも2回目は効かない
+  ok(!(await resetPassword(db.query, req2.token, 'another12345')).ok,
+    '**同じリンクは1回しか使えない**');
+}
+
+console.log('\n[17] 変えたら今までのログインを全部切る');
+{
+  const db = fakeDb();
+  await register(db.query, GOOD);
+  const a = await login(db.query, { email: GOOD.email, password: GOOD.password });
+  const b = await login(db.query, { email: GOOD.email, password: GOOD.password });
+  const req = await requestReset(db.query, GOOD.email);
+  await resetPassword(db.query, req.token, 'newpass9876');
+
+  /* **これがこの機能の芯。** パスワードを変える理由の多くは
+     「盗られたかもしれない」なので、変えたのに盗った側が
+     ログインしたままなら意味が無い */
+  ok(!await sessionUser(db.query, a.token), '1つ目の端末の札が効かなくなった');
+  ok(!await sessionUser(db.query, b.token), '2つ目の端末の札も効かなくなった');
+  ok(db.sessions.length === 0, '台帳から札が消えている（JWTだとこれができない）');
+}
+
+console.log('\n[18] 会員かどうかを漏らさない');
+{
+  const db = fakeDb();
+  await register(db.query, GOOD);
+  const none = await requestReset(db.query, 'nobody@example.com');
+  ok(none === null, '居ない人にはnullを返すだけ（理由を作らない）');
+  ok(db.resets.length === 0, '居ない人ぶんの合言葉は作られない');
+
+  /* **返事を言い分けるのは受け口の仕事。**
+     居ても居なくても同じ200を返しているかを、server/index.js を読んで確かめる */
+  const idx = readFileSync(new URL('../server/index.js', import.meta.url), 'utf8');
+  const at = idx.indexOf("url === '/api/forgot'");
+  const block = idx.slice(at, idx.indexOf("url === '/api/reset'"));
+  ok(at > 0, '/api/forgot の受け口がある');
+  ok(/if \(r\) \{/.test(block), '居た時だけメールを出している');
+  /* **人を探した後は、もうエラーを返してはいけない。**
+     探す前の400（本文が読めない・連投）は誰にでも同じ条件で返るので構わない。
+     手掛かりになるのは「探した結果で返事が変わる」ことだけなので、
+     見るのは requestReset より後ろに絞る */
+  const after = block.slice(block.indexOf('auth.requestReset'));
+  ok(!/sendJson\(res, [45]/.test(after),
+    '**人を探した後はエラーを返していない**（返事の違いが手掛かりになる）');
+  ok((block.match(/sendJson\(res, 200, \{ ok: true \}\)/g) || []).length === 1,
+    '出口が1つしかない（居ても居なくても同じ返事）');
+  ok(/catch \(e\)/.test(block), 'メールが送れなくても同じ返事（失敗も手掛かりになる）');
+  // 押されるたびに他人の受信箱へ飛ぶ口なので、連投を止める
+  ok(/resetLimit\.allow/.test(block), '連投を止めている（嫌がらせに使わせない）');
+}
+
+console.log('\n[19] 再設定の合言葉は別の表に置く');
+{
+  const step = STEPS.find((s) => /password_resets/.test(s.sql));
+  ok(!!step, `再設定の表がある（${step?.n}番）`);
+  ok(/token_hash TEXT PRIMARY KEY/.test(step.sql), '潰した物を主キーにしている');
+  ok(/ON DELETE CASCADE/.test(step.sql), '会員を消したら合言葉も消える');
+  /* **メール確認の表と分けてあること。**
+     混ぜて「種類」の列で分けると、種類を見る1行を忘れただけで
+     「確認メールのリンクでパスワードを変えられる」が成立する */
+  ok(!/email_tokens/.test(step.sql), '**メール確認の表とは別**（取り違えようがない形）');
+
+  const authSrc = readFileSync(new URL('../server/auth.js', import.meta.url), 'utf8');
+  ok(/DELETE FROM password_resets\s+WHERE token_hash = \$1 AND expires_at > now\(\)/.test(authSrc),
+    '**期限の判定は台帳の中**（こちらの時計がずれても効く）');
+  ok(/RETURNING user_id/.test(authSrc), '消すのと読むのが1回で済んでいる（使い切りが競らない）');
+  ok(/DELETE FROM password_resets WHERE expires_at < now\(\)/.test(authSrc),
+    '期限切れの掃除に入っている（放っておくと増え続ける）');
+}
+
+console.log('\n[20] 再設定の画面');
+{
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const js = readFileSync(new URL('../src/ui/account.js', import.meta.url), 'utf8');
+  ok(/id="acForgot"/.test(html), 'ログインの面から「忘れた」へ行ける');
+  // 4つの面が全部そろっているか。1つ欠けると、その面だけ文言が空になる
+  for (const m of ['login', 'register', 'forgot', 'reset']) {
+    ok(new RegExp(`\\b${m}: \\{`).test(js), `${m} の面がある`);
+  }
+  /* **合言葉をURLから消していること。**
+     残すと、履歴・共有・スクショから拾える所に
+     パスワードを変えられる文字列が居座る */
+  ok(/q\.delete\('reset'\)/.test(js) && /history\.replaceState/.test(js),
+    '**URLから合言葉を消している**（履歴やスクショに残さない）');
+  ok(/this\._resetToken = t;/.test(js), '合言葉は画面ではなく手元の変数で預かる');
+  ok(/登録があれば、メールを送りました/.test(js),
+    '**送った後の文言でも会員かどうかを言わない**');
+  const mail = readFileSync(new URL('../server/mail.js', import.meta.url), 'utf8');
+  ok(/\?reset=/.test(mail), 'リンクの行き先はゲームの画面（打つ所が要るので）');
+  ok(/心当たりが無い場合は/.test(mail), '身に覚えの無い人向けの1行がある');
 }
 
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);

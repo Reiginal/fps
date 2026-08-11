@@ -95,6 +95,11 @@ export const SESSION_DAYS = 30;
 /* 確認メールのリンクの寿命。受信箱に残った古いリンクが何ヶ月後でも効くのを防ぐ */
 export const EMAIL_TOKEN_HOURS = 24;
 
+/* パスワード再設定のリンクが生きている時間。**メール確認(24時間)より短い。**
+   拾われたらパスワードを変えられる物なので、確認のリンクより値打ちが高い。
+   短くしすぎると「メールを見る前に切れた」が起きるので、1時間で置いてある */
+export const RESET_TOKEN_MINUTES = 60;
+
 /** 新しい札。32バイトの完全な乱数。総当たりできる量ではない */
 export const newToken = () => randomBytes(32).toString('base64url');
 
@@ -314,6 +319,86 @@ export async function verifyEmail(query, token) {
   return userRow(up.rows[0]);
 }
 
+/* ------------------------------------------------ パスワードの再設定 */
+
+/**
+ * 再設定のリンクを出す。
+ *
+ * **居ない人でもnullを返すだけで、呼ぶ側は言い分けてはいけない。**
+ * 「そのメールアドレスは登録されていません」と返すと、
+ * 総当たりで「誰が会員か」の一覧を作れてしまう（loginで言い分けないのと同じ理由）。
+ * server/index.js は、居ても居なくても同じ返事を返す。
+ *
+ * **新しい物を出す時に、その人の古い物を全部消す。**
+ * 消さないと、何度も押した人の受信箱にある古いリンクが全部生きたままになる。
+ * 生きているリンクは少ないほどよい。
+ *
+ * @returns { user, token } か、そんな人が居なければ null
+ */
+export async function requestReset(query, email, now = new Date()) {
+  const mail = normalizeEmail(email);
+  const res = await query(
+    'SELECT id, email, name, verified_at FROM users WHERE email = $1',
+    [mail],
+  );
+  const row = res.rows[0];
+  if (!row) return null;
+
+  await query('DELETE FROM password_resets WHERE user_id = $1', [row.id]);
+  const token = newToken();
+  const exp = new Date(now.getTime() + RESET_TOKEN_MINUTES * 60_000);
+  await query(
+    'INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES ($1, $2, $3)',
+    [hashToken(token), row.id, exp],
+  );
+  return { user: userRow(row), token };
+}
+
+/**
+ * 新しいパスワードを入れる。
+ *
+ * ここで3つのことが同時に起きる。
+ *   1. 合言葉を**使い切る**（DELETE ... RETURNING。1回しか使えない）
+ *   2. パスワードを入れ替える
+ *   3. **その人の番号札を全部捨てる**
+ *
+ * 3が肝。パスワードを変える理由の多くは「盗られたかもしれない」なので、
+ * **変えたのに盗った側がログインしたままなら意味が無い。**
+ * DBから札を消せば次の瞬間から全部無効になる（JWTではこれができない）。
+ * 自分の他の端末も切れるが、それは正しい挙動（どれが自分の端末かは分からない）。
+ *
+ * 期限の判定をSQLの中でやっているのは、こちらの時計がずれた時に
+ * 全員の合言葉が切れる（か、切れなくなる）のを防ぐため。
+ *
+ * @returns { ok:false, error } か { ok:true, user }
+ */
+export async function resetPassword(query, token, password) {
+  if (!token) return { ok: false, error: 'リンクが古いか、既に使われています' };
+  // パスワードの形は**先に**見る。潰すのに60msかかるので、
+  // 形が駄目な物にその時間を払わない
+  const bad = checkPassword(password);
+  if (bad) return { ok: false, error: bad };
+
+  const used = await query(
+    `DELETE FROM password_resets
+      WHERE token_hash = $1 AND expires_at > now()
+      RETURNING user_id`,
+    [hashToken(token)],
+  );
+  const row = used.rows[0];
+  if (!row) return { ok: false, error: 'リンクが古いか、既に使われています' };
+
+  const hash = await hashPassword(password);
+  const up = await query(
+    `UPDATE users SET pass_hash = $2
+      WHERE id = $1 RETURNING id, email, name, verified_at`,
+    [row.user_id, hash],
+  );
+  // **今まで配ってある札を全部捨てる。** 盗られた側を締め出すのがこの機能の芯
+  await query('DELETE FROM sessions WHERE user_id = $1', [row.user_id]);
+  return { ok: true, user: userRow(up.rows[0]) };
+}
+
 /**
  * 期限の切れた札と合言葉を捨てる。
  * 放っておくと、ログインのたびに1行ずつ増え続けて二度と減らない
@@ -321,4 +406,5 @@ export async function verifyEmail(query, token) {
 export async function sweepExpired(query) {
   await query('DELETE FROM sessions WHERE expires_at < now()');
   await query('DELETE FROM email_tokens WHERE expires_at < now()');
+  await query('DELETE FROM password_resets WHERE expires_at < now()');
 }
