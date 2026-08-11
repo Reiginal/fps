@@ -361,5 +361,70 @@ console.log('\n[観戦カメラ] 繋ぎ込み（main.js / remote.js）');
     '試合が終わったら観戦の相手を忘れる');
 }
 
+console.log('\n[観戦の見た目] 相手の武器に自分のスキンが乗っていないか');
+{
+  /* 2026-08-11に足した。**「デスカメラになった時に、俺と同じスキンで表示された」**
+     と言われた所。観戦は自分の武器の模型をそのまま出していたので、
+     金色のライフルを着けていると**相手も金色のライフルで撃ってきたことになる。**
+
+     直し方は「素の姿で組んだ模型を別に持って、観戦中はそちらを出す」。
+     **相手の本当のスキンは出していない**（スキンは電文に載っていないので、
+     手元にそもそも届いていない）。相手の3人称も兵士モデルの銃なので、
+     標準で出すのが他の画面と揃った状態。
+
+     見るのは「自分のスキンが漏れていないこと」だけ。
+     そこが本題で、何を出すかはその次の話 */
+  const { WeaponSystem, WEAPONS } = await import('../src/player/weapons.js');
+  const { setAccount } = await import('../src/player/skins.js');
+
+  // 自分は形と色の両方を着けている状態にする。**形の方が漏れると分かりやすい**
+  setAccount({
+    owned: ['rifle:gold', 'knife:katana'],
+    equipped: { rifle: 'gold', knife: 'katana' },
+  });
+  const ws = new WeaponSystem(new THREE.Scene(),
+    new THREE.PerspectiveCamera(75, 1.6, 0.05, 900),
+    new THREE.PerspectiveCamera(55, 1.6, 0.002, 12), new THREE.Scene());
+  ws.carry = ws.weapons.map((_, i) => i);
+  ws.refreshSkins();
+
+  const knifeAt = WEAPONS.findIndex((x) => x.id === 'knife');
+  const rifleAt = WEAPONS.findIndex((x) => x.id === 'rifle');
+  // 自分の方には着いていること（着いていなければ、この検査は何も見ていない）
+  ok(ws.weapons[knifeAt].shapeId === 'katana', '自分のナイフには刀が着いている（前提）');
+
+  const shownOf = () => {
+    const out = [];
+    for (const w of ws.weapons) if (w.model.visible) out.push({ w, plain: !!w.plain });
+    for (const w of ws._plain.values()) if (w.model.visible) out.push({ w, plain: !!w.plain });
+    return out;
+  };
+
+  ws.showSpectated(knifeAt);
+  let shown = shownOf();
+  ok(shown.length === 1, `観戦中に出ている武器は1つ（${shown.length}個）`);
+  ok(shown.length === 1 && shown[0].plain, '観戦で出しているのは素の姿の模型');
+  // **ここが本題。** 自分の刀が出ていたら元の不具合
+  ok(shown.length === 1 && shown[0].w.shapeId !== 'katana',
+    '相手のナイフに自分の刀が乗っていない');
+
+  ws.showSpectated(rifleAt);
+  shown = shownOf();
+  ok(shown.length === 1 && shown[0].plain, 'ライフルも素の姿で出る');
+  // 素の模型は覚えておくこと。倒れるたびに組み直すと画面が詰まる
+  ok(ws._plain.size === 2, `素の模型を覚えている（${ws._plain.size}本）`);
+  ws.showSpectated(rifleAt);
+  ok(ws._plain.size === 2, '同じ武器をもう一度観戦しても組み直さない');
+
+  // 自分へ戻ったら自分のスキンで出ること
+  ws.showSpectated(null);
+  shown = shownOf();
+  ok(shown.length === 1 && !shown[0].plain, '観戦を抜けたら自分の模型へ戻る');
+  ok(shown.length === 1 && shown[0].w.def.id === WEAPONS[ws.index].id,
+    '戻る先は今持っている武器');
+
+  setAccount({ owned: [], equipped: {} });
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);
