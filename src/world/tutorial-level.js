@@ -188,6 +188,11 @@ export function buildTutorialLevel(mats) {
     mesh.position.set(t.x, t.y, t.z);
     // 板の面を湧き地点へ向ける。横の的が線にしか見えないのを避ける
     mesh.lookAt(0, t.y, eyeZ);
+    /* **最初は1枚も出さない。** 出すのは今の課題の的だけ（showAim）。
+       前は6枚とも最初から立っていて、「上・下・左・右の4枚」と言われているのに
+       橙の板が6枚見え、**どれを狙えばよいのか分からなかった**（遊んで指摘された）。
+       歩きながら狙う2枚は、その課題になってから出て、前の4枚は消える */
+    mesh.visible = false;
     guides.add(mesh);
     return { id: t.id, mesh, pos: mesh.position.clone() };
   });
@@ -241,8 +246,16 @@ export function buildTutorialLevel(mats) {
       const t = aimTargets.find((a) => a.id === id);
       if (t) t.mesh.material = on ? matDone : matPending;
     },
+    /* **今の課題の的だけ出す。** 立っている板が全部「今狙う物」になるので、
+       文章を読まなくても何をすればよいかが画で分かる。
+       課題が変わった時にだけ呼ぶ（毎フレーム触る物ではない） */
+    showAim(ids) {
+      const on = new Set(ids || []);
+      for (const t of aimTargets) t.mesh.visible = on.has(t.id);
+    },
     resetAim() {
-      for (const t of aimTargets) t.mesh.material = matPending;
+      // 2回目に入った時に、緑のまま・出たまま残っていないように両方戻す
+      for (const t of aimTargets) { t.mesh.material = matPending; t.mesh.visible = false; }
     },
   };
 }

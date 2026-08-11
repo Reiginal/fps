@@ -342,6 +342,28 @@ console.log('\n[3] 小ステージ: 実際に組んで寸法を測る');
   ok(Math.abs(byId.passL.pos.x) > 6 && Math.abs(byId.passR.pos.x) > 6,
     '歩きながらの的は通路の横にある');
 
+  /* **的の出し分け。** 前は6枚とも最初から立っていて、最初の課題が
+     「上・下・左・右の4枚」なのに橙の板が6枚見えていた（遊んで指摘された）。
+     立っている板が全部「今狙う物」でないと、文章と画が食い違う */
+  const shown = () => level.aimTargets.filter((t) => t.mesh.visible).map((t) => t.id).sort();
+  ok(shown().length === 0, `組んだ直後は1枚も出ていない（今${shown().length}枚）`);
+  const lookStep = TUTORIAL_STEPS.find((st) => st.id === 'look');
+  const walkStep = TUTORIAL_STEPS.find((st) => st.id === 'lookMove');
+  level.showAim(lookStep.aim);
+  ok(shown().join() === 'down,left,right,up', `視点の課題では4枚だけ（今${shown().join()}）`);
+  level.showAim(walkStep.aim);
+  ok(shown().join() === 'passL,passR',
+    `歩きながらの課題に入ると2枚に入れ替わる（今${shown().join()}）`);
+  // 課題に的が無い間（歩く・走る…）は1枚も出さない。showAim(undefined)で消える
+  level.showAim(TUTORIAL_STEPS.find((st) => st.id === 'sprint').aim);
+  ok(shown().length === 0, '的の無い課題では1枚も出ていない');
+  // 2回目に入った時。緑のままでも出たままでも残らない
+  level.showAim(lookStep.aim);
+  level.setAimDone('up', true);
+  level.resetAim();
+  ok(shown().length === 0 && byId.up.mesh.material.color.getHex() === 0xffa24a,
+    '入り直すと的は消えて橙に戻る');
+
   /* **走りと滑り込みの助走路。** ここが一番の直し所で、前はしゃがみの後ろに
      滑り込みを置いていて助走が2mしか無かった。
      境(YARD_FAR)から最初の段(JUMP_A)まで、走り12m＋滑り6mが入る長さが要る */
