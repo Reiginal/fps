@@ -632,6 +632,24 @@ export const MATS = {
     color: new THREE.Color(1.6, 3.6, 0.35), toneMapped: false,
     transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false,
   }),
+
+  /* ---- クローム（拳銃の4つ目）。2026-08-11 ----
+     **明るさで読ませる商品。** 拳銃は塗り替えが届く面が12.6%しかないので、
+     面積では勝負できない。サイバーは「光」で解いたが、
+     ボーン（消した物）は光を使えないまま明暗差だけに頼って地味になった。
+
+     ここは**品揃えで唯一の明るい拳銃**にする。
+     アイス（狙撃銃）が「唯一の明るい銃」として効いたのと同じ理屈 */
+
+  /* 鏡面の銀。**steelでは代わりが効かない**（0x5a6068で粗さ0.34は暗くて鏡にならない）。
+     粗さを0.06まで落として環境の映り込みを強く拾わせる。
+     擦れを焼かないのは、**磨いた鏡に擦れを入れると鏡に見えなくなる**ため
+     （このゲームの他の金属は全部使い込んだ物なので、ここだけ逆） */
+  chrome: mat(0xc8d0d8, 1.0, 0.06, SURF_METAL, 2, 0.18, { envMapIntensity: 1.35 }),
+  /* 象牙の握把板。**boneでは代わりが効かない**（0xc9bfa6で粗さ0.66は鈍い）。
+     一段明るく滑らかにして、磨いた銀の隣に置いても安物に見えない所まで持ってくる */
+  ivory: mat(0xe4dcc8, 0.0, 0.34, SURF_POLYMER, 4, 0.35, { envMapIntensity: 0.5 },
+    { amount: 0.25, color: 0xf4efe2, metal: 0.0, rough: 0.28 }),
 };
 
 // レンズのフレネル反射。実物の対物レンズは正面から覗くと素通しなのに、
@@ -2520,6 +2538,56 @@ function cyberDeco(g) {
   g.add(part(sphG(0.0030), MATS.circuit, 0, P_BORE + 0.019, 0.031));
 }
 
+/* 拳銃のクローム。**サイバーと系統を正面から分ける**（黒と青緑の光 ↔ 磨いた銀と象牙）。
+ *
+ * **光らせない。** サイバーが「光」で解いた所を、こちらは「明るさ」で解く。
+ * ボーン（2026-08-11に消した物）は同じ縛りで明暗差だけに頼って地味になったので、
+ * **地そのものを明るい銀にして**、暗い背景から浮く形にしてある
+ * （アイスが狙撃銃で効いたのと同じ理屈。品揃えで唯一の明るい拳銃）。
+ *
+ * 動く群れは持っていないので飾りは全部 g へ足してよい（cyberDecoと同じ）。
+ *
+ * **照準線を塞がないこと。** 後ろの照門(z=0.026)から前の照星(z=-0.128)へ
+ * 線が通っていないと覗いた時に狙点が読めない。
+ * 照門の天面が y=P_BORE+0.0255 なので、天面へ足す物はそこへ届かせない。
+ */
+function chromeDeco(g) {
+  /* ---- 象牙の握把板。**この2枚で系統が決まる。**
+     握把の側面に貼る。傾き(P_GRIP_TILT)を合わせないと板だけ浮く */
+  for (const s of [1, -1]) {
+    g.add(part(cboxG(0.004, 0.070, 0.032), MATS.ivory, s * 0.0152, -0.062, 0.036, P_GRIP_TILT));
+    // 板の留めネジ。**2つだけ。**貼り付けた板ではなく組み付けた板に見える
+    for (const y of [-0.046, -0.080]) {
+      g.add(part(cylG(0.0026, 0.0026, 0.004, 6), MATS.brass,
+        s * 0.0172, y, 0.036, 0, 0, Math.PI / 2));
+    }
+  }
+
+  /* ---- 銃身の刻み。スライドの側面に細い溝を並べる。
+     **鏡面は情報が無いと「のべつまくなしの銀の板」に見える**ので、
+     光の当たる線を作るために刻みを入れる（彫金の代わり） */
+  for (const s of [1, -1]) {
+    for (let i = 0; i < 5; i++) {
+      const z = -0.110 + i * 0.018;
+      g.add(part(boxG(0.002, 0.014, 0.004), MATS.chrome, s * 0.0152, P_BORE + 0.002, z));
+    }
+  }
+  // 銃口の環。磨いた縁が一番光る所
+  g.add(part(torG(0.0092, 0.0018, 5, 16), MATS.chrome, 0, P_BORE, -0.150));
+
+  /* ---- 銃尾の飾り環。**照門より低く止める。**
+     照門の天面が y=P_BORE+0.0255 なので、環の頂点をそこへ届かせない */
+  g.add(part(torG(0.0088, 0.0022, 5, 16), MATS.chrome, 0, P_BORE + 0.006, 0.034));
+
+  /* ---- 撃鉄と安全子。**金は2個だけ。**
+     銀一色だと単調になるが、増やすとゴールドと紛らわしくなる */
+  g.add(part(cboxG(0.006, 0.012, 0.008), MATS.brass, 0, P_BORE + 0.012, 0.040));
+  g.add(part(cylG(0.0034, 0.0034, 0.006, 8), MATS.brass, -0.0158, -0.004, 0.014, 0, 0, Math.PI / 2));
+
+  /* ---- 弾倉の底板。握把の下端。**下から見上げた時にここが見える** */
+  g.add(part(cboxG(0.034, 0.006, 0.048), MATS.ivory, 0, -0.106, 0.049, P_GRIP_TILT));
+}
+
 /* ショットガンの廃品。**ウエスタンと同じ武器なので、系統を正面から変える。**
    あちらが「手入れされた木と真鍮」なら、こちらは「拾って継ぎ足した鉄と布」。
    同じ武器に似た系統を2つ並べても選択にならない。
@@ -3369,6 +3437,7 @@ export const SHAPE_BUILDS = {
   cyber: (view = {}) => buildPistol(view, cyberDeco),
   scrap: (view = {}) => buildShotgun(view, scrapDeco),
   venom: (view = {}) => buildSniper(view, venomDeco),
+  chrome: (view = {}) => buildPistol(view, chromeDeco),
 };
 
 // 手榴弾。持ち替えると手に持つだけで、左クリックで投げる。
@@ -4332,9 +4401,24 @@ export class WeaponSystem {
     if (at === this._specWeapon) return;
     this._specWeapon = at;
     for (const w of this.weapons) w.model.visible = false;
-    for (const w of this._plain.values()) w.model.visible = false;
+    /* 素の模型は**隠すだけでなく場面から外す。**
 
-    // 自分の物へ戻る。素の模型は捨てずに持っておく（また倒れた時に組み直さない）
+       2026-08-11に測って分かった所。隠すだけにしていたら、
+       武器を替えながら何度か倒されるうちに場面の物が289→560個（メッシュ+206個）へ増えた。
+       **隠れていても行列の計算は毎フレーム走る**（three.jsのupdateMatrixWorldは
+       visibleを見ずに子を全部辿る。描くのを飛ばすのは描画側の判定）。
+
+       実測では0.025→0.046msで熱の原因になる量ではないが、
+       このrepoの決めごとが「描く物を増やしていないか」なので、増えたまま置かない。
+
+       **覚えている物自体は捨てない。** 組み直しは実測16〜40msかかるので、
+       次に倒れた時に払い直したくない。場面から出し入れするだけにする */
+    for (const w of this._plain.values()) {
+      w.model.visible = false;
+      if (w.model.parent) this.viewScene.remove(w.model);
+    }
+
+    // 自分の物へ戻る
     if (at == null) {
       const mine = this.weapons[this.index];
       if (mine) { mine.restPose(); mine.model.visible = true; }
@@ -4345,8 +4429,12 @@ export class WeaponSystem {
     if (!def) return;
     let w = this._plain.get(at);
     if (!w) {
+      // Weaponのコンストラクタが自分でviewSceneへ入る（初回はここで足りる）
       w = new Weapon(def, this.viewScene, true);
       this._plain.set(at, w);
+    } else if (!w.model.parent) {
+      // 2回目以降。上で外してあるので戻す
+      this.viewScene.add(w.model);
     }
     // 前に持っていた人の装填途中の姿勢が残らないよう、素の形へ戻してから出す
     w.restPose();

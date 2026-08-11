@@ -382,7 +382,9 @@ console.log('\n[観戦の見た目] 相手の武器に自分のスキンが乗�
     owned: ['rifle:gold', 'knife:katana'],
     equipped: { rifle: 'gold', knife: 'katana' },
   });
-  const ws = new WeaponSystem(new THREE.Scene(),
+  // 場面は後で物の数を数えるので、変数に持っておく
+  const scene = new THREE.Scene();
+  const ws = new WeaponSystem(scene,
     new THREE.PerspectiveCamera(75, 1.6, 0.05, 900),
     new THREE.PerspectiveCamera(55, 1.6, 0.002, 12), new THREE.Scene());
   ws.carry = ws.weapons.map((_, i) => i);
@@ -415,6 +417,35 @@ console.log('\n[観戦の見た目] 相手の武器に自分のスキンが乗�
   ok(ws._plain.size === 2, `素の模型を覚えている（${ws._plain.size}本）`);
   ws.showSpectated(rifleAt);
   ok(ws._plain.size === 2, '同じ武器をもう一度観戦しても組み直さない');
+
+  /* **場面に残さないこと。** 2026-08-11に測って足した所。
+     隠すだけにしていたら、武器を替えながら何度か倒されるうちに
+     場面の物が289→560個（メッシュ+206個）へ増えた。
+     **隠れていても行列の計算は毎フレーム走る**
+     （three.jsのupdateMatrixWorldはvisibleを見ずに子を全部辿る）。
+
+     実測0.025→0.046msで熱の原因になる量ではないが、
+     このrepoの決めごとが「描く物を増やしていないか」なので、増えたまま置かない。
+     **覚えている物は捨てない**（組み直しは16〜40msかかる）ので、
+     見るのは「場面の物の数が戻ること」と「覚えている数は減らないこと」の2つ */
+  {
+    const count = () => { let c = 0; scene.traverse(() => c++); return c; };
+    // まず素の状態に戻して数える
+    ws.showSpectated(null);
+    const base = count();
+    for (let i = 0; i < ws.weapons.length; i++) ws.showSpectated(i);
+    const during = count();
+    ok(during > base, `観戦中は場面に出ている（${base} → ${during}）`);
+    ws.showSpectated(null);
+    ok(count() === base, `観戦を抜けたら場面の物の数が戻る（${count()} / 元は${base}）`);
+    ok(ws._plain.size === ws.weapons.length,
+      `覚えている素の模型は捨てていない（${ws._plain.size}本）`);
+    // もう一度観戦しても組み直さず、その時だけ場面へ戻る
+    const kept = ws._plain.size;
+    ws.showSpectated(0);
+    ok(ws._plain.size === kept, 'もう一度観戦しても組み直さない');
+    ok(count() > base, 'その時だけ場面に戻る');
+  }
 
   // 自分へ戻ったら自分のスキンで出ること
   ws.showSpectated(null);
