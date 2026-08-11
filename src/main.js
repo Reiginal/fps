@@ -42,7 +42,8 @@ import { RemotePlayers } from './net/remote.js';
 import { preloadCharModel, SOLO_MODEL } from './ai/glbchar.js';
 import { FarShadowGate } from './world/shadowgate.js';
 import {
-  K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, HP, blastDamage, MELEE_HEAVY,
+  K, KEY_CODES, S, EV, PART, MATCH, PHASE, TICK_DT, ZONE, NADE, HEAL, HP, blastDamage,
+  MELEE_HEAVY, MELEE_SWEEP,
   outsideZone, CHARACTERS,
   TEAM_NAMES, soloUnlocksAt,
 } from './net/protocol.js';
@@ -413,6 +414,8 @@ const _arcPrev = new THREE.Vector3();
 const _arcStep = new THREE.Vector3();
 // octreeの当たりから同じ面をメッシュ側で取り直す時の、短いレイの始点（_meshNear参照）
 const _meshFrom = new THREE.Vector3();
+// 近接は目より下（手の高さ）から出す。protocol.jsのMELEE_SWEEP.DROP
+const _meleeFrom = new THREE.Vector3();
 // 敵の発砲(_enemyShot)用の使い回し。発砲は敵14体の撃ち合いで毎秒30〜60回来るので、
 // 1発ごとにnewすると毎秒150個級のゴミになる（enemy.js側の_shootは先に使い回し化済み。
 // 受け側のここだけnewが残っていた）。effects.tracer/impactは同期で写し取るので渡してよい
@@ -2522,17 +2525,30 @@ class Game {
     const { origin, dir, muzzle, def, pellet, heavy } = shot;
     if (pellet === 0) { this.shotsFired++; this._tally('shots'); }
 
+    /* 近接だけは**刃の太さ(pad)と間合い(reach)**を持つ。銃には無い。
+       線のままだと、目の高さ(1.58)から水平に振った時に胴の球の上っ面しか
+       かすらず、横へのずれが0.22mまでしか許されなかった（protocol.jsのMELEE_SWEEP）。
+       対戦は server/sim.js が同じ数字で同じことをやる */
+    const sweep = def.melee ? (heavy ? MELEE_SWEEP.HEAVY : MELEE_SWEEP.LIGHT) : null;
+    const reach = sweep ? sweep.reach : def.range;
+    // 刃は目ではなく手から出す。しゃがんだ相手は太らせても目の下を通るため
+    const from = sweep
+      ? _meleeFrom.copy(origin).setY(origin.y - MELEE_SWEEP.DROP)
+      : origin;
+
     // 地形はoctreeで見る。散弾は1発でこれが9回呼ばれるので、
-    // 総当たり(1本0.2ms)のままだと引き金1回で1.9msのつっかえになる
-    const worldHit = this._terrainRay(origin, dir, def.range);
+    // 総当たり(1本0.2ms)のままだと引き金1回で1.9msのつっかえになる。
+    // 間合いで見るのは、右クリックだけ届く距離が伸びるため
+    // （def.rangeのままだと、伸びたぶんの壁が数えられない）
+    const worldHit = this._terrainRay(from, dir, reach);
 
     // 敵は専用の球/カプセルで判定する。
     // _shootablesはチュートリアルの的（居る時だけ差し替わる。普段はnull）
     let enemyHit = null;
     for (const e of this._shootables ?? this.director.active) {
       if (!e.alive) continue;
-      const h = e.intersect(origin, dir);
-      if (h && h.distance <= def.range && (!enemyHit || h.distance < enemyHit.distance)) enemyHit = h;
+      const h = e.intersect(from, dir, sweep ? sweep.pad : 0);
+      if (h && h.distance <= reach && (!enemyHit || h.distance < enemyHit.distance)) enemyHit = h;
     }
 
     // 近接は弾を飛ばさないので曳光弾も出さない（刃を振るたびに弾が飛んで見えていた）
