@@ -383,5 +383,100 @@ console.log('\n[11] 形違いのスキン');
   ok(da < kn, `ダガーはナイフより短い（${kn.toFixed(3)} → ${da.toFixed(3)}）`);
 }
 
+console.log('\n[変化の大きさ] 売る色スキンが、見て分かるほど変わっているか');
+{
+  /* 2026-08-11に足した。**「地味すぎる」で作り直した後、二度と戻せないようにする。**
+     測ったら本当に地味だったので、その時の値をここに残しておく:
+
+       歴戦   0 … **色の指定が1つも無かった。** 擦れの量だけ上げたスキンで、
+                  擦れは角にしか出ないので、600コインで何も変わらない商品だった
+       アーバン 30 … 紺黒(#1d2024)の上に青灰(#2b323c)。暗い色に暗い色を塗っていた
+       デザート 121 … 変わってはいたが、隣のキャンディ(376)に食われて地味に見えた
+
+     **通っている時点では何も分からない類の不具合。** 色は入っているし、
+     材質も焼けているし、画面にも出る。ただ変わっていないだけなので、
+     数えないと気づけない。
+
+     元の色は MATS からは取れない。**擦れを焼いた材質は色が白に置き換わる**ので
+     （weapons.jsのmat()に「色はマップ側が全部持つ」と書いてある）、
+     MATS.enamel.color を読むと 0xffffff が返る。
+     だから元の色は weapons.js の mat(0x......) から、
+     塗り替えの色は skins.js の over から、どちらも本文を読んで取る
+     （このファイルは[3]でも同じやり方をしている） */
+  const wsrc = readFileSync(new URL('../src/player/weapons.js', import.meta.url), 'utf8');
+  const ssrc = readFileSync(new URL('../src/player/skins.js', import.meta.url), 'utf8');
+
+  // MATSの元の色。「  なまえ: mat(0x......,」の形で並んでいる
+  const BASE = {};
+  for (const m of wsrc.matchAll(/^ {2}(\w+): mat\((0x[0-9a-fA-F]{6})/gm)) {
+    BASE[m[1]] = parseInt(m[2], 16);
+  }
+  ok(Object.keys(BASE).length > 8, `元の色が ${Object.keys(BASE).length} 個読めた`);
+
+  /* 目で見た距離。**緑に重みを置く。** 人の目は緑に一番敏感なので、
+     RGBを素直に足すと「青だけ変えた」を過大に、「緑を変えた」を過小に数える */
+  const rgb = (h) => [(h >> 16) & 255, (h >> 8) & 255, h & 255];
+  const dist = (a, b) => {
+    const [r1, g1, b1] = rgb(a); const [r2, g2, b2] = rgb(b);
+    return Math.sqrt(2 * (r1 - r2) ** 2 + 4 * (g1 - g2) ** 2 + 3 * (b1 - b2) ** 2);
+  };
+
+  /* skins.jsのPAINTから、その名前の over の色だけ拾う。
+     **SKINSの over をそのまま使わない。** あちらは同じ塗り替えを
+     形違い(SHAPE_LOOK)とも混ぜて持っていて、ここで見たいのは
+     「色スキンとして売っている物」だけなので、表の切れ目で区切って読む */
+  const overOf = (name) => {
+    const at = ssrc.indexOf(`\n  ${name}: {`);
+    if (at < 0) return null;
+    const rest = ssrc.slice(at + 3);
+    const end = rest.search(/\n {2}[a-zA-Z]+: \{|\n\};/);
+    const body = rest.slice(0, end < 0 ? rest.length : end);
+    const out = {};
+    for (const m of body.matchAll(/(\w+): \{ color: (0x[0-9a-fA-F]{6})/g)) {
+      out[m[1]] = parseInt(m[2], 16);
+    }
+    return out;
+  };
+
+  /* 下限。**今の一番低い物（歴戦126）より下**に置いてある。
+     ここを実測ぴったりに置くと、色を1つ触るたびに落ちて誰も直せなくなる。
+     「明らかに地味」を弾くのが目的なので、その線で足りる。
+     参考: アーバンは直す前が30で、直した後は233 */
+  const FLOOR = 80;
+  const MIN_MATS = 3;
+
+  for (const s of SKIN_LIST) {
+    if (s.id === DEFAULT_SKIN) continue;   // 標準は商品ではない
+    const over = overOf(s.id);
+    if (!over) { ok(false, `${s.name} … skins.jsに塗り方が無い`); continue; }
+    const keys = Object.keys(over).filter((k) => BASE[k] != null);
+
+    // **材質の数から見る。** 1つだけ塗り替えた物は、その部品が見えない角度で無地に戻る
+    ok(keys.length >= MIN_MATS,
+      `${s.name} … 色を変えた材質が ${keys.length} 個（${MIN_MATS}個以上）`);
+
+    if (!keys.length) continue;
+    const avg = keys.reduce((a, k) => a + dist(BASE[k], over[k]), 0) / keys.length;
+    ok(avg >= FLOOR,
+      `${s.name}(${s.price}コイン) … 目で見た変化 ${avg.toFixed(0)}（${FLOOR}以上）`);
+  }
+
+  /* **値段が高いほど変わる、までは求めない。**
+     ゴールドは金属の光りかたで値打ちを出していて、色の距離では測れない。
+     ただ「一番安い物より変わらない一番高い物」は通さない
+     （歴戦600が0で、デザート300が121だったのがまさにその形だった） */
+  const paid = SKIN_LIST.filter((s) => s.id !== DEFAULT_SKIN);
+  const score = (s) => {
+    const over = overOf(s.id) || {};
+    const keys = Object.keys(over).filter((k) => BASE[k] != null);
+    return keys.length ? keys.reduce((a, k) => a + dist(BASE[k], over[k]), 0) / keys.length : 0;
+  };
+  const cheapest = paid.reduce((a, b) => (a.price <= b.price ? a : b));
+  const dearest = paid.reduce((a, b) => (a.price >= b.price ? a : b));
+  ok(score(dearest) >= score(cheapest) * 0.5,
+    `一番高い${dearest.name}(${score(dearest).toFixed(0)})が、`
+    + `一番安い${cheapest.name}(${score(cheapest).toFixed(0)})の半分は変わっている`);
+}
+
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);
 process.exit(bad === 0 ? 0 : 1);

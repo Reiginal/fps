@@ -55,12 +55,19 @@ targets.push({
 /* 形ごとの銃声。**ドラゴンは低く鈍く、キャンディは軽くて高い。**
    元の銃と並べて測らないと「低くした」が本当かどうか分からないので、
    ライフルの音のすぐ後ろに並ぶ名前にしてある */
-const rifle = WEAPONS.find((w) => w.id === 'rifle');
-for (const shape of ['dragon', 'cute']) {
+/* **形と、それを着ける銃を組で持つ。** 2026-08-11に3つ足したぶんは
+   ライフル以外に着くので、ライフル固定では鳴らせない
+   （ショットガンの木の音を、ライフルの音を土台に鳴らしても比べ物にならない）*/
+const SHAPE_ON = [
+  ['dragon', 'rifle'], ['cute', 'rifle'],
+  ['western', 'shotgun'], ['ice', 'sniper'], ['cyber', 'pistol'],
+];
+for (const [shape, weaponId] of SHAPE_ON) {
+  const gun = WEAPONS.find((w) => w.id === weaponId);
   targets.push({
-    name: `gun-rifle-${shape}`, label: `銃声(ライフル/${shape})`,
-    seconds: Math.max(2.0, (gunTune(shape, rifle.sound).tailDecay || 0.4) * 1.6 + 0.8),
-    play: (a) => a.gunshot(gunTune(shape, rifle.sound), null, null),
+    name: `gun-${weaponId}-${shape}`, label: `銃声(${weaponId}/${shape})`,
+    seconds: Math.max(2.0, (gunTune(shape, gun.sound).tailDecay || 0.4) * 1.6 + 0.8),
+    play: (a) => a.gunshot(gunTune(shape, gun.sound), null, null),
   });
 }
 // 形ごとの振る音。**刀は長く澄んで、ダガーは短く高い。**
