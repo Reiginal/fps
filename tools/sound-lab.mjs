@@ -8,6 +8,7 @@
 import { mkdirSync } from 'node:fs';
 import { capture, BANDS } from './sound-measure.mjs';
 import '../server/dom-stub.js';
+import { SWING_HEAVY_TUNE } from '../src/core/audio.js';
 
 const OUT = 'sounds';
 mkdirSync(OUT, { recursive: true });
@@ -36,7 +37,21 @@ targets.push({ name: 'explosion', label: '爆発', play: (a) => a.explosion(null
 // 自分が倒れた時の音。**一番長く聴かされる音**（結果画面まで鳴っている）なのに
 // 一度も測っていなかった。3秒取るのは、耳鳴りの尻尾まで含めて見るため
 targets.push({ name: 'player-down', label: '自分が倒れた', play: (a) => a.playerDown(), seconds: 3.0 });
-targets.push({ name: 'swing', label: 'ナイフを振る', play: (a) => a.swing() });
+/* 振る音は2種類ある。**強い一撃は低く長い。**
+   同じ音を大きくするだけだと「近くで振った」にしか聞こえない。
+   長さを0.6秒に切ってあるのは、2秒取ると残響の尻尾ばかりが数字に乗るため
+
+   **wavで候補を並べて選ぶやり方は、一度やって機能しなかった**（2026-08-11）。
+   4案を書き出して聴いてもらったが「全部きもい」で終わり、
+   しかも爆発やキル音まで一緒に流れて何を聴いているのか分からなくなった。
+   短い効果音は、実際に構えて振った時の速さと一緒でないと判断できない。
+   **次に迷ったら、候補を並べるより実機へ出して聴いてもらう方が早い。**
+   src/core/audio.js の swing(tune) は残してあるので、必要ならここから渡せる */
+targets.push({ name: 'swing', label: 'ナイフを振る', play: (a) => a.swing(), seconds: 0.6 });
+targets.push({
+  name: 'swing-heavy', label: '強い一撃', seconds: 0.9,
+  play: (a) => a.swing(SWING_HEAVY_TUNE),
+});
 // 刃が当たった音は材質で分かれる。金属だけ「カンッ」と長く残るのが狙いなので、
 // 4つとも書き出して長さと重心を並べて見る
 for (const k of ['flesh', 'metal', 'wood', 'concrete']) {

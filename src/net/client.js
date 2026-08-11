@@ -602,7 +602,7 @@ export class NetClient {
   /* 撃った瞬間に呼ぶ。当たり判定はサーバーなので、こちらは撃った向きだけ申告する。
      溜めている入力を先に吐くのは、サーバーがseqの入力を知らないまま
      この電文を受け取ると、巻き戻す先が無くて当たり判定を作れないため */
-  sendShot(origin, dir) {
+  sendShot(origin, dir, heavy = false) {
     if (!this.connected) return;
     this._flushInput();
     let dx = dir.x, dy = dir.y, dz = dir.z;
@@ -614,6 +614,9 @@ export class NetClient {
       s: this._seq - 1,
       o: [qPos(origin.x), qPos(origin.y), qPos(origin.z)],
       d: [qPos(dx), qPos(dy), qPos(dz)],
+      /* 強い一撃の印。**威力そのものは送らない**（送ると好きな数を書ける）。
+         偽って送り続けても、サーバーが発射権を3個使うので間隔が3倍に伸びるだけ */
+      h: heavy ? 1 : undefined,
     });
   }
 

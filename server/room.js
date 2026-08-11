@@ -10,9 +10,9 @@ import { Capsule } from 'three/addons/math/Capsule.js';
 import {
   TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS, MATCH, PHASE, ZONE, NADE, blastDamage, outsideZone,
   Sv, EV, packPlayer, SEATS, SEAT_SPAWN, CHARACTERS, MODE_IDS, LOBBY_ROW, LOBBY_ROW_LEN, DROP,
-  TEAM_OF_SEAT, TEAM_NAMES,
+  TEAM_OF_SEAT, TEAM_NAMES, MELEE_HEAVY,
 } from '../src/net/protocol.js';
-import { SimPlayer, resolveShot, rewindMs, originVisible, WEAPONS } from './sim.js';
+import { SimPlayer, resolveShot, rewindMs, originVisible, WEAPONS, heavyDef } from './sim.js';
 import { Bot, forwardOf } from './bot.js';
 import { modeOf } from './modes.js';
 import { logs } from './logs.js';
@@ -930,8 +930,12 @@ export class Room {
     return false;
   }
 
-  // 発射。当たり判定はここで完結する
-  shot(slot, seq, origin, dir) {
+  /**
+   * 発射。当たり判定はここで完結する。
+   * @param heavy 近接の強い一撃。**遅いぶん重い。**
+   *              発射権を余分に使うので、偽っても間隔が伸びるだけ
+   */
+  shot(slot, seq, origin, dir, heavy = false) {
     const sim = slot.sim;
     if (!sim.alive) return;
     // LIVE以外は当たり判定を通さない。ロビー(WAIT)でも全員が生存・湧き済みなので、
@@ -942,10 +946,17 @@ export class Room {
     if (this.phase !== PHASE.LIVE) return;
     // 持ち替えの最中は撃てない。切り替えを撃つ度に挟む撃ち方を成立させない
     if (sim.swapIn > 0) return;
-    // rpmを超える連射は捨てる。弾数はクライアントが持つが、
-    // 撃てる速さだけはサーバーが持たないと押しっぱなしで撃ち放題になる
-    if (sim.fireTokens < 1) return;
-    sim.fireTokens -= 1;
+    /* rpmを超える連射は捨てる。弾数はクライアントが持つが、
+       撃てる速さだけはサーバーが持たないと押しっぱなしで撃ち放題になる。
+
+       **強い一撃はここから余分に使う。** 威力を上げるのに新しい制限を足さず、
+       既にあるこの1つで間隔を伸ばす。だから「強い」と偽って送り続けても、
+       間隔がCOST倍になるだけで得が無い。
+       近接以外では効かない（銃に強弱は無い） */
+    const strong = heavy && sim.def.melee;
+    const cost = strong ? MELEE_HEAVY.COST : 1;
+    if (sim.fireTokens < cost) return;
+    sim.fireTokens -= cost;
     // 撃ったら包帯を中断する。クライアント側も撃った時点で中断するので、
     // ここで揃えないと、こちらだけ巻き切って体力が食い違う。
     // 「巻いている間は撃たせない」にはしない。中断の知らせが届くのと
@@ -987,7 +998,10 @@ export class Room {
       octree: this.world.octree,
       origin,
       dir,
-      def: sim.def,
+      /* 強い一撃は威力だけ差し替える。**射程も減衰もそのまま。**
+         射程まで伸ばすと「遠くから強く当たる」になって、
+         間合いを詰める道具という形が崩れる */
+      def: strong ? heavyDef(sim.def) : sim.def,
       targets,
       atMs,
       rewind: REWIND_ON,

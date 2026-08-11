@@ -71,6 +71,44 @@ export const KILL_TUNE = {
   hits: 2, pitch: 1, gap: 0.155, tail: 1, weight: 1, edge: 0.3, drive: 2.8, level: 1,
 };
 
+/**
+ * 刃を振る音の作り。**「鈍い」と言われて作り直した所。**
+ *
+ *   band    … 帯域の [開始, 頂点, 終わり] Hz。**頂点がシュッとゴォを分ける**
+ *   at      … [頂点までの秒, 終わりまでの秒]。短いほど鋭く通り過ぎる
+ *   q       … 帯の細さ。低いと広がって、ノイズがそのまま「ゴォ」になる
+ *   gain    … 芯の音量
+ *   env     … [立ち上がり, 減衰] 秒
+ *   rate    … ノイズの再生速度の範囲。高いほど粒が細かい
+ *   edge    … 刃先の鳴きの量。0で無し。伸ばすと金属の残響になる
+ *   air     … 押しのける空気の [開始, 頂点, 終わり] Hz
+ *   airGain … 空気の量。**芯に対する比。** ここが1.0だと前の鈍い音に戻る
+ *   airDec  … 空気の減衰(秒)
+ *
+ * 数字の当たりは tools/sound-lab.mjs で書き出して測る。
+ * **ただし最後は聴いて決める。**測って良く見える音が鈍いことがある（実際そうだった）
+ */
+export const SWING_TUNE = {
+  band: [1900, 6200, 2400], at: [0.042, 0.105], q: 3.0,
+  gain: 1.40, env: [0.004, 0.075], rate: [1.3, 1.7],
+  edge: 0.45,
+  air: [310, 740, 270], airGain: 0.38, airDec: 0.11,
+};
+
+/**
+ * 強い一撃の振る音。**通常より低く、長く、空気が重い。**
+ *
+ * 同じ音を大きくするだけだと「近くで振った」にしか聞こえない。
+ * 重い物を振ると空気の量が増えて、通り過ぎるのに時間がかかる。
+ * 芯を1オクターブ弱下げて、空気の比を倍にしてある
+ */
+export const SWING_HEAVY_TUNE = {
+  band: [1100, 3800, 1500], at: [0.070, 0.170], q: 2.4,
+  gain: 1.55, env: [0.006, 0.130], rate: [0.9, 1.15],
+  edge: 0.30,
+  air: [220, 560, 200], airGain: 0.80, airDec: 0.20,
+};
+
 export class AudioEngine {
   constructor() {
     this.ctx = null;
@@ -1814,38 +1852,70 @@ export class AudioEngine {
     src.start(t, Math.random()); src.stop(t + 0.3);
   }
 
-  /** 刃を振る音。空気を切る「ヒュッ」だけ。金属は鳴らさない（振っただけでは鳴らない） */
-  swing() {
+  /**
+   * 刃を振る音。空気を切る「シュッ」だけ。金属は鳴らさない（振っただけでは鳴らない）。
+   *
+   * **一度「鈍い」と言われて作り直した音。** 前は2層あって、
+   * 空気の層（260〜620Hzのローパス）が**芯より大きい音量(1.45対1.30)**で鳴っていた。
+   * 低い音は高い音を覆い隠すので、聞こえていたのはほぼ空気の方＝「ボワッ」。
+   * 測ると低音13.5%・重心3282Hzで、数字の上では悪く見えないのが厄介な所だった。
+   *
+   * その空気の層は、もっと前に「低音が0.6%しかなくて細い糸のようだ」と言われて
+   * 足した物で、**直しすぎて逆へ振れていた。** 今は芯に対する比(airGain)で持たせて、
+   * 片方を動かしてももう片方との関係が崩れないようにしてある。
+   *
+   * @param tune 音の作り。**普段は渡さない。**
+   *             tools/sound-lab.mjs が候補を聴き比べる時だけ差し替える
+   */
+  swing(tune = SWING_TUNE) {
     if (!this.ready || !this.enabled) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
-    const src = this._noiseSource(rnd(1.1, 1.4));
+    const u = tune;
+
+    const src = this._noiseSource(rnd(u.rate[0], u.rate[1]));
     const bp = ctx.createBiquadFilter();
     bp.type = 'bandpass';
-    // 通り過ぎる間に帯域が上がって下がる。これが「横切った」に聞こえる
-    bp.frequency.setValueAtTime(700, t);
-    bp.frequency.exponentialRampToValueAtTime(2600, t + 0.06);
-    bp.frequency.exponentialRampToValueAtTime(900, t + 0.16);
-    bp.Q.value = 1.4;
+    // 通り過ぎる間に帯域が上がって下がる。これが「横切った」に聞こえる。
+    // **頂点の高さがシュッとゴォを分ける。** 実際の刃の風切りは4〜8kHzに芯がある
+    bp.frequency.setValueAtTime(u.band[0], t);
+    bp.frequency.exponentialRampToValueAtTime(u.band[1], t + u.at[0]);
+    bp.frequency.exponentialRampToValueAtTime(u.band[2], t + u.at[1]);
+    // Qが低いと帯が広がって、ノイズがそのまま「ゴォ」に聞こえる
+    bp.Q.value = u.q;
     const g = ctx.createGain();
     src.connect(bp); bp.connect(g);
-    this._env(g, t, 1.30, 0.010, 0.12);
+    this._env(g, t, u.gain, u.env[0], u.env[1]);
     this._out(g, 0.12, 0.05);
     src.start(t, Math.random()); src.stop(t + 0.4);
 
-    // 押しのける空気。帯域を絞ったシュッという音だけだと、
-    // measureで低音の取り分が0.6%しかなく、細い糸のような音になっていた。
-    // 速く動く物は必ず低い所の空気も動かす
+    /* 刃先の鳴き。ごく短い高域を1つ重ねると「切った」の角が立つ。
+       長く伸ばすと金属の残響になって、振っただけで鳴っているように聞こえる */
+    if (u.edge > 0) {
+      const ed = this._noiseSource(rnd(1.8, 2.2));
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 5200;
+      const eg = ctx.createGain();
+      ed.connect(hp); hp.connect(eg);
+      this._env(eg, t + 0.012, u.edge, 0.002, 0.030);
+      this._out(eg, 0.10, 0.04);
+      ed.start(t + 0.012, Math.random()); ed.stop(t + 0.2);
+    }
+
+    /* 押しのける空気。**芯に対する比で持つ。**
+       絶対値で持っていた頃、芯を上げても空気がそのままで関係が崩れた。
+       速く動く物は低い所の空気も動かすので、0にはしない */
     const air = this._noiseSource(rnd(0.35, 0.5));
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.setValueAtTime(260, t);
-    lp.frequency.exponentialRampToValueAtTime(620, t + 0.07);
-    lp.frequency.exponentialRampToValueAtTime(200, t + 0.18);
+    lp.frequency.setValueAtTime(u.air[0], t);
+    lp.frequency.exponentialRampToValueAtTime(u.air[1], t + 0.07);
+    lp.frequency.exponentialRampToValueAtTime(u.air[2], t + 0.18);
     lp.Q.value = 0.8;
     const ag = ctx.createGain();
     air.connect(lp); lp.connect(ag);
-    this._env(ag, t, 1.45, 0.014, 0.15);
+    this._env(ag, t, u.gain * u.airGain, 0.014, u.airDec);
     this._out(ag, 0.10, 0.04);
     air.start(t, Math.random()); air.stop(t + 0.45);
   }

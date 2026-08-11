@@ -6,7 +6,9 @@ import { muzzleFlashTexture, radialTexture, smokeTexture } from '../world/textur
 import { tryModelOverride } from './glbview.js';
 import { applySkin, skinFor, shapeOf } from './skins.js';
 // 持ち物の決まりだけ取り込む。protocol.jsはこちらを読まないので輪にならない
-import { loadoutOf, NADE } from '../net/protocol.js';
+import { loadoutOf, NADE, MELEE_HEAVY } from '../net/protocol.js';
+// 強い一撃の音。低く長い（重い物を振ると空気の量が増える）
+import { SWING_HEAVY_TUNE } from '../core/audio.js';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -3888,7 +3890,8 @@ export class WeaponSystem {
 
        投げ物では覗く物が無いので、こちらは**押した瞬間に手前へ放る**（下の投擲で受ける） */
     const rightEdge = !!input.clicked?.(2);
-    if (rightEdge && !d.thrown) this.adsHeld = !this.adsHeld;
+    // 近接の右クリックは覗きではなく強い一撃。覗きの入り切りへ流さない
+    if (rightEdge && !d.thrown && !d.melee) this.adsHeld = !this.adsHeld;
     // 包帯を持っている間は武器そのものを下ろしているので、覗くも撃つも無い
     const busyHealing = this.bandageOut || player.healing > 0;
     // 近接は覗く物が無い。覗けると刃を目の前に構えて視界を塞ぐだけになる
@@ -4025,12 +4028,24 @@ export class WeaponSystem {
         this.onThrow?.(true);
         this.fireTimer = 60 / d.rpm;
       }
+    } else if (d.melee && rightEdge && canFire) {
+      /* 近接の右クリック。**遅いが重い一撃。**
+         覗く物が無い武器なので、右クリックは今まで何も起きなかった。
+
+         間隔をここで伸ばすのは見た目の話で、**本当の縛りはサーバーが持つ**
+         （発射権をMELEE_HEAVY.COST個使う）。こちらだけで止めると、
+         書き換えれば通常の速さで強い一撃が出せることになる */
+      player.cancelHeal?.();
+      this.heavy = true;
+      this.swing = MELEE_HEAVY.TIME_S;
+      this._fire(player, ctx);
+      this.fireTimer = (60 / d.rpm) * MELEE_HEAVY.COST;
     } else if (wantFire && canFire) {
       if (w.ammo > 0) {
         // 撃ったら包帯を中断する。撃ちながら巻けると遅くする意味が無い
         player.cancelHeal?.();
         // 近接は撃つのではなく振る。刃が通り過ぎる動きを出す
-        if (d.melee) this.swing = SWING_TIME;
+        if (d.melee) { this.swing = SWING_TIME; this.heavy = false; }
         this._fire(player, ctx);
         this.fireTimer = 60 / d.rpm;
         if (burst) {
@@ -4116,6 +4131,8 @@ export class WeaponSystem {
       this.onShot?.({
         origin, dir, muzzle: muzzleWorld, def: d,
         pellet: p, pellets: d.pellets,
+        // 強い一撃か。1人用は威力を掛け、対戦はサーバーへ印だけ送る
+        heavy: !!(d.melee && this.heavy),
       });
     }
 
@@ -4180,8 +4197,8 @@ export class WeaponSystem {
       ctx.audio?.gunshot(d.sound, null, null);
 
     } else {
-      // 刃は空気を切る音だけ
-      ctx.audio?.swing?.();
+      // 刃は空気を切る音だけ。強い一撃は低く長い（重い物を振ると空気の量が増える）
+      ctx.audio?.swing?.(this.heavy ? SWING_HEAVY_TUNE : undefined);
     }
 
     if (d.casing) {
