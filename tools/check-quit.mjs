@@ -87,5 +87,53 @@ console.log('\n[5] 戻れる');
     '戻るボタンをゲームループの外から繋いでいる');
 }
 
+console.log('\n[並び] ホームのボタンが1行に収まっているか');
+/* **ボタンの中で単語が割れるのは、幅が足りないという意味。**
+   実際に「チュートリア／ル」で割れていた（ストアを足して1行4個にした時。2026-08-11）。
+   ブラウザ無しでも、幅は掛け算で出せる:
+
+     1個あたりの幅 = (枠 - 隙間×(個数-1)) ÷ 個数
+     文字が要る幅   = 文字数 × (字の大きさ + 字間)
+
+   等幅の全角なので、1文字は「字の大きさ」ぶんの幅を取る。
+   字間(letter-spacing)は文字ごとに足されるので掛ける。
+   数字はCSSから読む（片方だけ変えた時に、この見張りが古くならないように） */
+{
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const num = (re, why) => {
+    const m = html.match(re);
+    if (!m) { ok(false, `CSSから${why}を読めない`); return 0; }
+    return Number(m[1]);
+  };
+  const panel = num(/\.netpanel \{ width: min\((\d+)px/, '枠の幅');
+  const btn = html.match(/\.netbtn \{[\s\S]*?\}/)?.[0] || '';
+  const size = Number(btn.match(/font-size:\s*(\d+)px/)?.[1] || 0);
+  /* **`.2em` を 0.2 と読むこと。** 最初 `\.?(\d+)em` と書いていて、
+     `.2em` から「2」だけ拾って0.02にしていた。字間が10分の1になるので、
+     **1行4個の頃の「チュートリアル」を93pxと見積もって見逃していた**
+     （本当は109px要って、1個あたり97pxに入らない）。
+     見張るための検査が、見張りたい物を通していた */
+  const spacing = parseFloat(btn.match(/letter-spacing:\s*([\d.]+)em/)?.[1] || '0');
+  const gap = num(/\.netbtns \{ display: flex; gap: (\d+)px/, '隙間');
+  ok(panel > 0 && size > 0 && gap > 0, `CSSから寸法を読めた（枠${panel}px 字${size}px 隙間${gap}px）`);
+  ok(/white-space:\s*nowrap/.test(btn),
+    '**文字の途中で折り返さない**（足りない時ははみ出して一目で分かる）');
+
+  // ホームの中のボタンの行だけを見る（ロビーや会員証の行は幅の条件が違う）
+  const home = html.slice(html.indexOf('<div id="netmenu"'), html.indexOf('<div id="account"'));
+  const rows = [...home.matchAll(/<div class="netbtns[^"]*">([\s\S]*?)<\/div>/g)];
+  ok(rows.length >= 2, `ホームにボタンの行が${rows.length}本ある`);
+  for (const [, inner] of rows) {
+    const labels = [...inner.matchAll(/<button[^>]*>([^<]+)<\/button>/g)].map((m) => m[1]);
+    if (!labels.length) continue;
+    const each = (panel - gap * (labels.length - 1)) / labels.length;
+    const longest = labels.reduce((a, b) => (a.length >= b.length ? a : b));
+    const need = longest.length * (size * (1 + spacing));
+    ok(need <= each,
+      `${labels.length}個の行（${labels.join('・')}）… 一番長い「${longest}」に`
+      + `${need.toFixed(0)}px要って、1個あたり${each.toFixed(0)}px`);
+  }
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);
