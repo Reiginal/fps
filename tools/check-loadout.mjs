@@ -235,6 +235,34 @@ console.log('\n[7] 数字キーに載らない枠（Qの狙撃銃・Eのショ�
   ws.adsHeld = true;
   ok(!ws.startInspect(), '覗いている間は見られない');
   ws.adsHeld = false;
+
+  /* **回さないこと。** 2026-08-11に1周回す形で出したら
+     「なんか腕ごと回るってどういうこと？ちょっと見れればいいのよ」と言われた。
+
+     正体は**腕が武器の模型の中に入っていること。**
+     手と腕(buildHand)は銃と同じ群れの子なので、
+     模型のrotation.zを回すと腕まで一緒に回る。銃だけ回す方法が無い。
+
+     実際に見る動きを回してみて、**傾く量が小さいまま**であることを測る。
+     1周(6.28rad)回っていたら元の形に戻っている */
+  const src2 = readFileSync(new URL('../src/player/weapons.js', import.meta.url), 'utf8');
+  ok(!/turn: Math\.PI \* 2/.test(src2), '1周回す設定が残っていない');
+
+  ws.switching = 0;
+  ws.startInspect();
+  let maxRoll = 0;
+  const still = {
+    down: () => false, pressed: () => false, clicked: () => false, buttons: [false, false, false],
+  };
+  // 見る動きの間ずっと回し続けて、傾きの最大を拾う
+  for (let i = 0; i < 150; i++) {
+    ws.update(1 / 120, still, player, {});
+    maxRoll = Math.max(maxRoll, Math.abs(ws.current.model.rotation.z));
+  }
+  /* 0.6rad(約34度)まで。**傾けて天面を見せる**にはこのくらいで足り、
+     1周(6.28)や半周(3.14)には遠い。
+     元の構えにも少し傾きがあるので0にはならない */
+  ok(maxRoll < 0.6, `見ている間の傾きが小さいまま（一番傾いた所で ${maxRoll.toFixed(2)}rad）`);
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
