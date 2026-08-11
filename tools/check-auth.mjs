@@ -638,8 +638,24 @@ console.log('\n[名前が出るまで] 先に聞き始めているか');
     '**index.htmlの頭で /api/me を先に投げている**（<style>より前）');
   ok(/window\.__me[\s\S]{0,220}credentials:\s*'same-origin'/.test(head),
     'Cookieを付けて投げている（付け忘れると誰でもない扱いで返る）');
-  ok(/window\.__me[\s\S]{0,260}AbortSignal\.timeout/.test(head),
-    '返らないサーバーで待ち続けない');
+  /* **投げる側に打ち切りの時計を持たせないこと。**
+     ここに AbortSignal.timeout(15000) を付けていて、2026-08-12に
+     本番へ出す所（e2e）で止まった。この時計は壁時計なので、
+     **読み込みで本体が詰まっている間も数える。**
+     答えは数msで返っているのに、受け取り手が付くのは地形を組み終わった後なので、
+     起動が15秒を超える所では「もう返ってきている物」を自分から打ち切っていた。
+     GPUが無い所（CIとheadless）は起動に20秒以上かかる。
+     待つのをやめる判断は、本体が空いてから数える受け取り側でやる */
+  const throwSection = head.slice(head.indexOf('window.__me'));
+  ok(!/AbortSignal|signal:/.test(throwSection.slice(0, 300)),
+    '**投げる側に打ち切りの時計が無い**（読み込み中も数えて、返っている物を捨てる）');
+
+  /* 受け取り側には上限があること。**無いと、答えないサーバーで
+     会員証の行が永久に決まらない**（押しても何も起きない行が出たままになる） */
+  const early = js.slice(js.indexOf('async function earlyMe'));
+  const earlyBody = early.slice(0, early.indexOf('\n}'));
+  ok(/Promise\.race/.test(earlyBody) && /setTimeout/.test(earlyBody),
+    '**受け取る側で待つのをやめる**（本体が空いてから数えるので、秒数がそのまま意味を持つ）');
   /* 受け取り手が付くのは数秒後なので、失敗をそのままにすると
      「拾われなかった失敗」として画面のエラーに数えられ /logs に出る */
   ok(/window\.__me[\s\S]{0,300}\.catch\(/.test(head),

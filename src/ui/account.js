@@ -77,12 +77,26 @@ async function read(res) {
    （ログイン・ログアウトの後にこれを使い回すと、変わる前の状態が返る）。
 
    **無ければ何事もなく自分で聞く形にしてある。** index.html側の1行を
-   消したり書き換えたりしても、遅くなるだけで壊れないようにするため */
+   消したり書き換えたりしても、遅くなるだけで壊れないようにするため。
+
+   **打ち切りの時計はここに置く（index.html側には置かない）。**
+   あちらに AbortSignal.timeout を付けていた時は、読み込みで本体が詰まっている
+   間も時計が進み、返ってきている答えを自分から捨てていた
+   （2026-08-12、本番へ出す所で止まった。経緯はindex.htmlのコメント）。
+   ここへ来るのは地形を組み終わった後で、本体は空いている。
+   だから15秒はそのまま「サーバーが15秒答えない」を意味する */
+const EARLY_WAIT_MS = 15000;
+
 async function earlyMe() {
   const p = window.__me;
   if (!p) return null;
   window.__me = null;
-  const res = await p;
+  /* 答えない時に会員証の行が永久に決まらないのを防ぐ。
+     待つのをやめるだけで、向こうのfetchは放っておく（掴んでいる物は無い） */
+  const res = await Promise.race([
+    p,
+    new Promise((done) => { setTimeout(() => done(null), EARLY_WAIT_MS); }),
+  ]);
   // 繋がらなかった時はnullが来る。会員証は無いものとして扱う
   return res ? read(res) : { off: true };
 }
