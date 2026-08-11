@@ -17,12 +17,9 @@
 import * as THREE from 'three';
 import { WEAPONS } from '../player/weapons.js';
 import {
-  SKINS, skinAt, applySkin, shapeFor, paintFor, hasSkin, wearSkin,
-  setOwned, ownedSkus, shapeOf,
+  SKINS, skinAt, applySkin, skinFor, hasSkin, wearSkin, setOwned, ownedSkus, shapeOf,
 } from '../player/skins.js';
-import {
-  SKINNABLE, DEFAULT_SKIN, skuOf, itemsFor, slotOf,
-} from '../net/protocol.js';
+import { SKINNABLE, DEFAULT_SKIN, skuOf, itemsFor } from '../net/protocol.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -52,7 +49,6 @@ export class LookMenu {
       title: $('lkTitle'), sub: $('lkSub'),
       guns: $('lkGuns'),
       list: $('lkList'),
-      shapes: $('lkShapes'), shapeRow: $('lkShapeRow'), paintName: $('lkPaintName'),
       name: $('lkName'), note: $('lkNote'), help: $('lkHelp'),
       status: $('lkStatus'), coins: $('lkCoins'),
       close: $('lkClose'),
@@ -132,9 +128,9 @@ export class LookMenu {
     for (const g of this.guns.values()) g.visible = false;
     const def = WEAPONS.find((w) => w.id === this.weapon);
     if (!def) return;
-    const { shape, paint } = this._look();
-    const build = shapeOf(shape) || def.build;
-    const key = `${this.weapon}:${build === def.build ? '-' : shape}`;
+    const shown = this._shown();
+    const build = shapeOf(shown) || def.build;
+    const key = `${this.weapon}:${build === def.build ? '-' : shown}`;
 
     let g = this.guns.get(key);
     if (!g) {
@@ -148,25 +144,11 @@ export class LookMenu {
     }
     g.visible = true;
     this.gun = g;
-    // 色を選んでいなければ、その形が持っている色で塗る（金色の刀 / 素の刀）
-    applySkin(g, paint === DEFAULT_SKIN ? shape : paint);
+    applySkin(g, shown);
   }
 
-  /**
-   * 今プレビューに出す組み合わせ。**枠が2つあるので対で返す。**
-   *
-   * 試着(preview)は、その物が入る枠だけを差し替える。
-   * ここを1つの値にしていた頃は、刀を着けている人がゴールドを試着すると
-   * **刀が消えて普通のナイフが金色になっていた**（遊んで指摘された所）。
-   * 枠で分ければ、着けている刀の上に色が乗って「金色の刀」が見える
-   */
-  _look() {
-    const slot = this.preview ? slotOf(this.preview) : null;
-    return {
-      shape: slot === 'shape' ? this.preview : shapeFor(this.weapon),
-      paint: slot === 'paint' ? this.preview : paintFor(this.weapon),
-    };
-  }
+  /* 今プレビューに出すスキン。ストアの面では、選んでいる商品を試着させる */
+  _shown() { return this.preview || skinFor(this.weapon); }
 
   _buildGuns() {
     this.el.guns.innerHTML = '';
@@ -213,93 +195,56 @@ export class LookMenu {
         ? `コイン ${Number(this.user.coins ?? 0).toLocaleString()}枚`
         : 'ログインすると買えます');
 
+    list.innerHTML = '';
+    const shown = this._shown();
     /* **その武器で扱える物だけを並べる。**
        色は全武器で売っているが、形（刀・ダガー）はその武器専用なので、
        全部のスキンをなめると「ライフルの刀」が並んでしまう */
     const sell = itemsFor(this.weapon).map((it) => ({ ...skinAt(it.id), ...it }));
-    const now = this._look();
-    // 標準はどちらの枠にも要る（形を元へ戻す／色を外す）。買う物ではないので売らない
-    const back = { ...skinAt(DEFAULT_SKIN), price: 0 };
-    const shapes = sell.filter((s) => s.kind === 'shape');
-    const paints = sell.filter((s) => s.kind !== 'shape');
-
-    /* **形を持たない武器では、形の列ごと隠す。**
-       選べる物が標準1つだけの列を出しても、何ができるのか分からない */
-    this.el.shapeRow.classList.toggle('hidden', shapes.length === 0);
-    if (shapes.length) this._row(this.el.shapes, [back, ...shapes], 'shape', now.shape);
-    this._row(list, [back, ...paints], 'paint', now.paint);
-    this.el.paintName.textContent = shapes.length ? '色' : 'スキン';
-
-    /* 印の読み方。**印だけ置いても意味は伝わらない**
-       （遊んで「左右のマークがなんなのか謎」と言われた）。
-       形違いが1つも並んでいない時に「形」の説明を出しても邪魔なので、
-       並んでいる物に合わせて出し分ける */
-    this.el.help.innerHTML = '<span class="sw"></span> その武器がこの色になる'
-      + (shapes.length ? '　／　<b>形</b> 色だけでなく形も変わる。'
-        + '**形と色は別々に着けられる**（刀を金色に、など）' : '');
-
-    // 名前と説明は、今プレビューに出ている物。形が標準なら色の方を出す
-    const lead = now.shape !== DEFAULT_SKIN ? now.shape : now.paint;
-    const s = SKINS.find((x) => x.id === lead) || SKINS[0];
-    this.el.name.textContent = now.shape !== DEFAULT_SKIN && now.paint !== DEFAULT_SKIN
-      ? `${skinAt(now.shape).name} / ${skinAt(now.paint).name}`
-      : s.name;
-    this.el.note.textContent = s.note;
-  }
-
-  /**
-   * 枠1つぶんを並べる。
-   *
-   * **ストアでも持っている物を隠さない。** 前は買った物が消える形だったので、
-   * 買うほど品揃えが減って寂しくなるうえ、「刀を持っているのに刀が見当たらない」
-   * になっていた（遊んで「それぞれのスキンが見えるべき」と言われた所）。
-   * 持っている物には「所持」と出して、押したら試着になる
-   */
-  _row(box, items, slot, current) {
-    box.innerHTML = '';
-    for (const s of items) {
+    const all = [skinAt(DEFAULT_SKIN), ...sell];
+    for (const s of all) {
       const have = hasSkin(this.weapon, s.id);
-      // 装備の面には、持っている物だけ（買う画面ではないので値段も出さない）
+      // ストアの面には、持っていない物と標準以外を並べる
+      if (this.store && (have || s.id === DEFAULT_SKIN)) continue;
+      // 装備の面には、持っている物だけ
       if (!this.store && !have) continue;
 
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'lkitem';
-      if (s.id === current) b.classList.add('on');
-      /* 形違いは色違いと値打ちが違うので、一目で分かる印を付ける。
-         印の意味は下の1行(lkHelp)で説明する。**印だけでは伝わらない** */
-      b.innerHTML = `<span class="sw" style="background:${s.swatch}" title="この色になる"></span>`
+      if (s.id === shown) b.classList.add('on');
+      /* 見本の色と名前と値段だけ。**「形」「色」の区別は出さない。**
+         遊ぶ人にとってはどれも同じ「スキン」で、
+         作り手から見た「これは形が変わる方」は、選ぶ時に要らない区別だった
+         （「何この分け方、そんな制度ないから」と言われた 2026-08-11）。
+         形が変わる物はプレビューを見れば分かるし、値段も高いので伝わる */
+      b.innerHTML = `<span class="sw" style="background:${s.swatch}"></span>`
         + `<span class="nm">${s.name}</span>`
-        + (s.kind === 'shape' ? '<span class="kd" title="形そのものが変わる">形</span>' : '')
-        + (!this.store ? ''
-          : (have || s.id === DEFAULT_SKIN)
-            ? '<span class="ow">所持</span>'
-            : `<span class="pr">${(s.price || 0).toLocaleString()}</span>`);
-      /* 持っている物をストアで押した時は試着だけ。**着け替えはしない。**
-         入口が2つに分かれているので、買いに来た人を着せ替えの動きへ通さない */
-      b.onclick = () => {
-        if (!this.store) { this._wear(s.id, slot); return; }
-        if (have || s.id === DEFAULT_SKIN) { this._try(s); return; }
-        this._buy(s);
-      };
-      box.appendChild(b);
+        + (this.store ? `<span class="pr">${(s.price || 0).toLocaleString()}</span>` : '');
+      b.onclick = () => (this.store ? this._buy(s) : this._wear(s.id));
+      list.appendChild(b);
     }
 
-    if (!box.children.length) {
+    if (!list.children.length) {
       const p = document.createElement('div');
       p.className = 'lkempty';
-      // 行き先を書いておく。入口が分かれているので、ここから飛べない
-      p.textContent = '持っているスキンがありません。ホームのストアで買えます';
-      box.appendChild(p);
+      p.textContent = this.store
+        ? 'この武器のスキンは全部持っています'
+        // 行き先を書いておく。入口が分かれているので、ここから飛べない
+        : '持っているスキンがありません。ホームのストアで買えます';
+      list.appendChild(p);
     }
-  }
 
-  /** 試着だけ。買わないし着けもしない（ストアで持っている物を押した時） */
-  _try(s) {
-    this.preview = this.preview === s.id ? null : s.id;
-    this._showGun();
-    this._paint();
-    this._say('');
+    /* 見本の色の読み方だけ。**「形」「色」の分け方は書かない。**
+       前は「その武器がこの色になる／形 色だけでなく形も変わる」と
+       2種類あるかのように書いていて、**そんな制度は無い**と言われた。
+       スキンはスキンで、1つの武器に1つ着ける */
+    this.el.help.textContent = list.querySelector('.lkitem')
+      ? '左の四角がそのスキンの色。選ぶと上の3Dがすぐ変わります' : '';
+
+    const s = SKINS.find((x) => x.id === shown) || SKINS[0];
+    this.el.name.textContent = s.name;
+    this.el.note.textContent = s.note;
   }
 
   _say(text, bad = false) {
@@ -307,24 +252,17 @@ export class LookMenu {
     this.el.status.classList.toggle('bad', !!bad);
   }
 
-  /**
-   * 装備する。**その場で決まる。**「決定」を押させると押し忘れる人が出る。
-   *
-   * @param slot どちらの枠か。**明示して送る。** idから割り出す形にすると、
-   *   標準(stock)がどちらの枠にも属さないので「形を元へ戻す」が送れない
-   */
-  async _wear(id, slot) {
+  /** 装備する。**その場で決まる。**「決定」を押させると押し忘れる人が出る */
+  async _wear(id) {
     if (this.busy) return;
-    if (!wearSkin(this.weapon, id, slot)) { this._say('持っていません', true); return; }
+    if (!wearSkin(this.weapon, id)) { this._say('持っていません', true); return; }
     this.preview = null;
     this._showGun();
     this._paint();
     this.onChange();
     // ログインしていれば台帳にも覚えさせる。していなければこの端末だけ
     if (!this.user) return;
-    try {
-      await api('/api/equip', { weapon: this.weapon, slot, skin: id });
-    } catch { /* 手元は変わっている */ }
+    try { await api('/api/equip', { weapon: this.weapon, skin: id }); } catch { /* 手元は変わっている */ }
   }
 
   async _buy(s) {
@@ -358,23 +296,21 @@ export class LookMenu {
 
     setOwned(r.owned);
     /* 買えた合図。**文字が変わるだけでは手応えが無い。**
-       押した所は「値段」から「所持」へ変わるだけなので、
-       買えたのか押し間違えたのかが文字だけでは読めない */
+       ストアからはその商品が消えるので、押した所の見た目も一緒に変わってしまい、
+       「買えたのか、押し間違えて何か消えたのか」が読めない */
     this.onBought(s);
     if (this.user) this.user.coins = r.coins;
     this.preview = null;
-    /* 買ったらそのまま着ける。買った直後にもう一度押させる理由が無い。
-       **枠を明示する。** 形を買ったら形の枠へ、色を買ったら色の枠へ。
-       枠を分けたので、刀を買っても着けている色は消えない */
-    const slot = slotOf(s.id);
-    wearSkin(this.weapon, s.id, slot);
+    // 買ったらそのまま着ける。買った直後にもう一度押させる理由が無い
+    wearSkin(this.weapon, s.id);
     this._showGun();
     this.onChange();
+    /* **買ったらそのまま着ける。**ストアからはその商品が消えるので、
+       着けたことをここで言わないと「買ったのに何も起きていない」に見える。
+       面は切り替えない（入口が分かれているので、勝手に別の画面へ移らない） */
     this._say(`${s.name} を買って、そのまま装備しました`);
     this._paint();
-    try {
-      await api('/api/equip', { weapon: this.weapon, slot, skin: s.id });
-    } catch { /* 手元は変わっている */ }
+    try { await api('/api/equip', { weapon: this.weapon, skin: s.id }); } catch { /* 手元は変わっている */ }
   }
 
   get isOpen() { return !this.el.root.classList.contains('hidden'); }

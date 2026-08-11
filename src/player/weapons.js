@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { muzzleFlashTexture, radialTexture, smokeTexture } from '../world/textures.js';
 import { tryModelOverride } from './glbview.js';
-import { applySkin, shapeFor, paintIdFor, shapeOf } from './skins.js';
+import { applySkin, skinFor, shapeOf } from './skins.js';
 // 持ち物の決まりだけ取り込む。protocol.jsはこちらを読まないので輪にならない
 import { loadoutOf, NADE, MELEE_HEAVY, MELEE_SWEEP } from '../net/protocol.js';
 // 強い一撃の音。低く長い（重い物を振ると空気の量が増える）
@@ -141,7 +141,7 @@ export function swingOf(weaponId, kind, shapeId = shapeIdOf(weaponId)) {
  * 振り方（SWINGS）と振る音（audio.jsのSWING_TUNES）が両方これで引く
  */
 function shapeIdOf(weaponId) {
-  const skin = shapeFor(weaponId);
+  const skin = skinFor(weaponId);
   return shapeOf(skin) ? skin : null;
 }
 // 包帯を巻くのにかかる秒数。protocol.jsのHEAL.TIME_Sと同じ値を持つ
@@ -3347,9 +3347,9 @@ class Weapon {
     /* **どの組み立てで作ったか。** 形違いのスキン（刀・ダガー）は
        組み立てそのものが別なので、着け替えの時にここを見て
        「作り直しが要るか」を決める（WeaponSystem.refreshSkins）*/
-    this.builtWith = shapeOf(shapeFor(def.id)) || def.build;
+    this.builtWith = shapeOf(skinFor(def.id)) || def.build;
     /* 着けている形違いスキンのid（色だけならnull）。**振り方と銃声がここを見る。**
-       撃つたびに引き直さないのは、shapeFor が中で品揃えの配列を作るため。
+       撃つたびに引き直さないのは、skinFor が中で品揃えの配列を作るため。
        毎秒12発の銃だと、その配列を毎秒12個捨てることになる */
     this.shapeId = shapeIdOf(def.id);
     this.inner = this.builtWith(v);
@@ -3370,9 +3370,8 @@ class Weapon {
     tryModelOverride(this, def.id).catch(() => {});
 
     /* 選んだスキンの色を被せる。**組み上がった後で材質だけ差し替える。**
-       形の違いは上の builtWith が既に効いているので、ここは色だけ。
-       色を選んでいなければ、その形が持っている色になる（paintIdFor） */
-    applySkin(this.inner, paintIdFor(def.id));
+       形の違いは上の builtWith が既に効いているので、ここは色だけ */
+    applySkin(this.inner, skinFor(def.id));
 
     this.ammo = def.mag;
     this.reserve = def.reserve;
@@ -3755,7 +3754,7 @@ export class WeaponSystem {
   refreshSkins() {
     for (let i = 0; i < this.weapons.length; i++) {
       const w = this.weapons[i];
-      const want = shapeOf(shapeFor(w.def.id)) || w.def.build;
+      const want = shapeOf(skinFor(w.def.id)) || w.def.build;
       if (want !== w.builtWith) {
         // 古い方を場面から外してから差し替える。外さないと2挺重なって出る
         this.viewScene.remove(w.model);
@@ -3764,7 +3763,7 @@ export class WeaponSystem {
         this.weapons[i] = fresh;
         continue;
       }
-      applySkin(w.inner, paintIdFor(w.def.id));
+      applySkin(w.inner, skinFor(w.def.id));
       // 色だけの着け替えでも、形違いから色違いへ戻した時にここが古いままになる
       w.shapeId = shapeIdOf(w.def.id);
     }

@@ -596,18 +596,7 @@
   .lkname { font-size: 15px; letter-spacing: .18em; color: var(--hud); margin-top: 12px; }
   .lknote { font-size: 10px; letter-spacing: .1em; color: var(--dim); min-height: 20px; }
   /* 並べる。狭い画面では折り返す */
-  .lklist { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 6px 0 4px; }
-  /* **枠は2つ（形・色）。** どちらの枠を触っているかが見えないと、
-     「色を選んだのに形が変わった」に見える（前は枠が1つで実際そうなっていた） */
-  .lkrow { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
-  .lkrow.hidden { display: none; }
-  .lkrowname {
-    flex: 0 0 34px; text-align: right;
-    font-family: var(--mono); font-size: 11px; letter-spacing: .12em; color: var(--dim);
-  }
-  .lkrow .lklist { flex: 1; justify-content: flex-start; margin: 0; }
-  /* 買ってある物の印。ストアでも隠さずに並べる（品揃えが減っていくと寂しい）*/
-  .lkitem .ow { font-size: 9px; letter-spacing: 0; color: var(--ok); }
+  .lklist { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 14px 0 4px; }
   .lkitem {
     display: flex; align-items: center; gap: 7px;
     padding: 8px 12px;
@@ -619,14 +608,9 @@
   .lkitem.on { color: var(--accent); border-color: var(--accent); background: rgba(99,210,255,.1); }
   /* 色の見本。3Dの絵が出るまでの間も、どんな色かがここで読める */
   .lkitem .sw { width: 13px; height: 13px; border: 1px solid rgba(255,255,255,.25); }
-  /* 形違いの印。色違いと値打ちが違うので一目で分かるようにする。
-     **9pxでは字が潰れて「緑の四角」にしか見えなかった**（遊んで
-     「左右のマークがなんなのか謎」と言われた）。読める大きさまで上げる */
-  .lkitem .kd {
-    font-size: 10px; font-weight: 700; letter-spacing: .04em; color: var(--bg);
-    background: var(--ok); padding: 2px 5px;
-  }
-  /* マークの読み方。**印だけ置いても、初見の人には意味が伝わらない** */
+  /* 「形」の札はここにあったが消した。**スキンに種類の区別を出さない**
+     （形が変わる物かどうかは、選ぶ側には要らない区別だった。2026-08-11） */
+  /* 見本の色の読み方。**印だけ置いても、初見の人には意味が伝わらない** */
   .lkhelp {
     font-size: 10px; letter-spacing: .08em; color: var(--dim);
     margin: 2px 0 6px; line-height: 1.6;
@@ -1334,16 +1318,7 @@
     <div class="lkname" id="lkName"></div>
     <div class="lknote" id="lkNote"></div>
 
-    <!-- **枠は2つ（形・色）。** 持っている形×持っている色が全部組める。
-         形を持たない武器（ピストル等）では、形の列ごと隠す -->
-    <div class="lkrow" id="lkShapeRow">
-      <div class="lkrowname">形</div>
-      <div class="lklist" id="lkShapes"></div>
-    </div>
-    <div class="lkrow">
-      <div class="lkrowname" id="lkPaintName">色</div>
-      <div class="lklist" id="lkList"></div>
-    </div>
+    <div class="lklist" id="lkList"></div>
     <!-- 並んだ物に付いている印の読み方。中身はlook.jsが入れる -->
     <div class="lkhelp" id="lkHelp"></div>
 

@@ -211,7 +211,41 @@ export const STEPS = [
     );
       CREATE INDEX password_resets_user_id_idx ON password_resets (user_id)`,
   },
-  // 現金を入れる時の明細(ledger)はここへ足す。上の10には二度と触らない
+  {
+    n: 11,
+    name: 'スキンの枠を1つに戻す',
+    /* **9番でやったことを畳む。9番そのものは消さない。**
+       消すと、既に流し終わった本番と、これから流す新しい手元で
+       出来上がる形が変わってしまう（このファイルの冒頭の決まり）。
+       行って戻った跡がそのまま残るのが正しい。
+
+       なぜ戻すか: 遊ぶ人にとって**スキンはスキンで、形と色という区別が無い。**
+       「刀を金色に」は作り手から見れば組み合わせが増えるが、
+       選ぶ側には枠が2つある画面が増えただけだった。
+       1つの武器に1つ着ける、へ戻す。
+
+       **形を残して色を捨てる。** 両方着けている人は、
+       形の方が見た目の違いが大きく、値段も高い（900〜2000 対 300〜1500）。
+       金色の刀を着けていた人は「刀」になる（「金色のナイフ」ではなく）。
+
+       DISTINCT ON は「その並びで最初の1行だけ残す」というPostgresの書き方。
+       slot='shape' を先に並べておけば、形がある人は形が残る */
+    sql: `CREATE TABLE equipped_one AS
+        SELECT DISTINCT ON (user_id, weapon_id) user_id, weapon_id, skin_id
+          FROM equipped_skins
+         ORDER BY user_id, weapon_id, (slot = 'shape') DESC;
+      DROP TABLE equipped_skins;
+      ALTER TABLE equipped_one RENAME TO equipped_skins;
+      ALTER TABLE equipped_skins
+        ALTER COLUMN user_id   SET NOT NULL,
+        ALTER COLUMN weapon_id SET NOT NULL,
+        ALTER COLUMN skin_id   SET NOT NULL;
+      ALTER TABLE equipped_skins ADD PRIMARY KEY (user_id, weapon_id);
+      ALTER TABLE equipped_skins
+        ADD CONSTRAINT equipped_skins_user_id_fkey
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`,
+  },
+  // 現金を入れる時の明細(ledger)はここへ足す。上の11には二度と触らない
 ];
 
 /**
