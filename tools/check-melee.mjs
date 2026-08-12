@@ -20,7 +20,7 @@ import { MELEE_HEAVY, MELEE_SWEEP, HITBOX, HP } from '../src/net/protocol.js';
 import { WEAPONS as SIM_WEAPONS, heavyDef, hitPose } from '../server/sim.js';
 import { WEAPONS, SWINGS, swingOf, WeaponSystem } from '../src/player/weapons.js';
 import { setAccount } from '../src/player/skins.js';
-import { SWING_TUNE, SWING_HEAVY_TUNE, swingTune } from '../src/core/audio.js';
+import { SWING_TUNE, SWING_HEAVY_TUNE, SWING_TUNES, swingTune } from '../src/core/audio.js';
 
 let bad = 0;
 const ok = (c, msg) => { console.log(`  ${c ? '○' : '× 失敗:'} ${msg}`); if (!c) bad++; };
@@ -364,11 +364,50 @@ console.log('\n[9] 振る音が形と強さで分かれている');
   ok(kl.edge > SWING_TUNE.edge, `刀は刃先が鳴る（${SWING_TUNE.edge} → ${kl.edge}）`);
   ok(dl.env[1] < SWING_TUNE.env[1], `ダガーの方が短い（${SWING_TUNE.env[1]} → ${dl.env[1]}秒）`);
   ok(dl.airGain < SWING_TUNE.airGain, `ダガーは空気が少ない（${SWING_TUNE.airGain} → ${dl.airGain}）`);
-  // 全部の形で右の方が低いこと（同じ音を大きくしただけにしない）
-  for (const s of ['katana', 'dagger']) {
+  /* 全部の形で右の方が低いこと（同じ音を大きくしただけにしない）。
+     **表そのものから引く。** ここに名前をべた書きしていたせいで、
+     2026-08-11に足した3つ（レイピア・斧・グローブ）がこの検査を素通りしていた */
+  for (const s of Object.keys(SWING_TUNES)) {
     ok(swingTune(s, true).band[1] < swingTune(s, false).band[1],
       `${s}も右の方が低い（${swingTune(s, false).band[1]} → ${swingTune(s, true).band[1]}Hz）`);
   }
+
+  /* **5つの形が、狙った順番に並んでいるか。**
+     2026-08-12に測ったら、刀の右(886ms/重心6260Hz)とダガーの右(886/6265)が
+     **数字の上でほぼ同じ音**だった。見た目を5つに分けても、
+     音が2つ同じなら着け替えた実感はそのぶん減る。
+
+     並びの意図（audio.jsのコメントの通り）:
+       高さ … レイピア > ダガー > 刀 > ナイフ > 斧
+       長さ … 斧 > 刀 > ナイフ > レイピア・ダガー
+       重さ … 斧が一番。空気の層(airGain)で持つ */
+  const T = (s, h = false) => (s === 'knife' ? (h ? SWING_HEAVY_TUNE : SWING_TUNE) : swingTune(s, h));
+  const higher = [['rapier', 'dagger'], ['dagger', 'katana'], ['katana', 'knife'], ['knife', 'axe']];
+  for (const [a, b] of higher) {
+    ok(T(a).band[1] > T(b).band[1],
+      `${a}の方が${b}より高い（${T(b).band[1]} → ${T(a).band[1]}Hz）`);
+  }
+  ok(T('axe').env[1] > T('katana').env[1] && T('katana').env[1] > T('knife').env[1],
+    `長さは 斧${T('axe').env[1]} > 刀${T('katana').env[1]} > ナイフ${T('knife').env[1]}秒`);
+  ok(T('dagger').env[1] < T('rapier').env[1],
+    `ダガーが一番短い（レイピア${T('rapier').env[1]} → ダガー${T('dagger').env[1]}秒）`);
+  for (const s of ['katana', 'dagger', 'rapier', 'glove']) {
+    ok(T('axe', true).airGain > T(s, true).airGain,
+      `斧の空気が${s}より重い（${T(s, true).airGain} → ${T('axe', true).airGain}）`);
+  }
+  /* **拳は刃の鳴きを持たない。** ここが残っていると、
+     刃物と同じ「シュッ」が拳から鳴る（測った時に帯が900〜3400Hzに居た） */
+  ok(T('glove').edge < 0.10, `グローブは刃先が鳴らない（edge=${T('glove').edge}）`);
+  ok(T('glove').band[1] < T('knife').band[1] * 0.5,
+    `グローブの帯はナイフの半分より下（${T('knife').band[1]} → ${T('glove').band[1]}Hz）`);
+
+  /* **書き出す側にも全部並んでいるか。** 音を足した人が
+     tools/sound-lab.mjs にも名前を写す手順だったので、
+     2026-08-11に足した3つは**一度も測られていなかった**（2026-08-12に気づいた）。
+     測れない音は「ダサい」と言われた時に勘で直すことになる */
+  const lab = src('tools/sound-lab.mjs');
+  ok(/for \(const shape of Object\.keys\(SWING_TUNES\)\)/.test(lab),
+    '振る音は表から引いて書き出している（名前のべた書きではない）');
   // 知らない形はナイフの音へ落ちる（形を足して音を書き忘れても黙って壊れない）
   ok(swingTune('dragon', false) === SWING_TUNE, '知らない形はナイフの音になる');
 
