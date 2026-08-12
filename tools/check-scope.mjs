@@ -293,9 +293,11 @@ console.log('\n[4] ライフルの形違いが赤ドットの窓を狭めてい�
   })();
   ok(base > 6.0, `素のままの窓は ${base.toFixed(1)}度`);
 
-  for (const [name, id] of [
-    ['ドラゴン', 'dragon'], ['キャンディ', 'cute'], ['装甲', 'armor'], ['桜', 'sakura'],
-  ]) {
+  /* **並べる形は表から引く。** ここに名前をべた書きしていたせいで、
+     後から足した形が測られないまま出ていく形になっていた
+     （同じ抜け方を振る音・銃声・訓練場の弾でも踏んでいる）*/
+  const { SHAPE_LIST } = await import('../src/net/protocol.js');
+  for (const { name, id } of SHAPE_LIST.filter((x) => x.weapon === 'rifle')) {
     setAccount({ owned: [`rifle:${id}`], equipped: { rifle: id } });
     ws.refreshSkins();
     const w = aim('rifle');
@@ -327,9 +329,8 @@ console.log('\n[5] 狙撃銃の形違いが望遠照準の窓を狭めていな�
   })();
   ok(base > 4.0, `素のままの窓は ${base.toFixed(1)}度`);
 
-  for (const [name, id] of [
-    ['アイス', 'ice'], ['ヴェノム', 'venom'], ['星', 'astro'], ['竹', 'bamboo'],
-  ]) {
+  const { SHAPE_LIST: SL } = await import('../src/net/protocol.js');
+  for (const { name, id } of SL.filter((x) => x.weapon === 'sniper')) {
     setAcc({ owned: [`sniper:${id}`], equipped: { sniper: id } });
     ws.refreshSkins();
     const w = aim('sniper');
