@@ -374,8 +374,14 @@ console.log('\n[13] 台帳の作り替えの手順');
 console.log('\n[14] 台帳が無ければ、口ごと消える');
 {
   const src = readFileSync(new URL('../server/index.js', import.meta.url), 'utf8');
-  ok(/if \(!accountsOn && url !== '\/api\/me'\) \{ res\.writeHead\(404\)/.test(src),
-    '**書き込む口は accountsOn が立っていなければ404**（「有るけど使えない」を作らない）');
+  /* **404を返さない口は名指しで数える。** 2026-08-12に順位表(/api/ranking)が
+     2つ目の例外になった。正規表現で1つ目だけを見ていると、
+     例外がいくつ増えても通ってしまう（例外が増えること自体は正しいが、
+     「どれが例外か」がここに書いてある状態を保ちたい）*/
+  const open = (src.match(/url !== '\/api\/(\w+)'/g) || []).map((m) => m.split("'")[1]);
+  ok(/if \(!accountsOn && url !== '\/api\/me' && url !== '\/api\/ranking'\) \{/.test(src),
+    `**書き込む口は accountsOn が立っていなければ404**（素通しは ${open.join('・')} だけ）`);
+  ok(open.length === 2, `素通しの口は2つまで（今 ${open.length}つ）`);
 
   /* 「/api/me」だけは404にしない。
      ここを404にすると、台帳を置いていない本番で遊ぶ人全員のコンソールに

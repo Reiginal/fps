@@ -20,6 +20,7 @@ import { WeaponSystem, WEAPONS } from './player/weapons.js';
 import { Director, Enemy } from './ai/enemy.js';
 import { HUD } from './ui/hud.js';
 import { NetMenu, NET_MSG } from './ui/netmenu.js';
+import { Ranking } from './ui/ranking.js';
 import { AccountMenu } from './ui/account.js';
 import { LookMenu } from './ui/look.js';
 import { setAccount } from './player/skins.js';
@@ -974,6 +975,9 @@ class Game {
   _bindMenu() {
     const menu = new NetMenu();
     this.menu = menu;
+    /* ホームの隅の順位表。**開くたびに聞き直す**（間はranking.jsが空ける）。
+       誰かが登録してくれた時に、こちらが気づくための物 */
+    this.ranking = new Ranking();
 
     /* 設定（感度・音量・上下反転・全画面）。
        作った時点で覚えている値が全部効くので、ここで1つずつ写す必要はない。
@@ -1226,6 +1230,7 @@ class Game {
       this._joinMatch(opt);
     };
     menu.show();
+    this.ranking?.refresh();
   }
 
   /**
@@ -1246,6 +1251,7 @@ class Game {
     this._flushStats();
     if (this.mode === 'versus') this._quitMatch();
     this.menu.hide();
+    this.ranking?.hide();
     this.settings?.hide();
     this.account?.hide();
     this.look?.hide();
@@ -1274,6 +1280,7 @@ class Game {
     this._lastTime = performance.now();
     this.renderer?.setAnimationLoop(() => this._loop());
     this.menu.show();
+    this.ranking?.refresh();
   }
 
   /* 音を起こす。ブラウザは操作を起点にしないとWebAudioを走らせてくれないので、
@@ -1799,6 +1806,7 @@ class Game {
     this.hud.netStatus('');
     this.menu.setBusy(false);
     this.menu.hide();
+    this.ranking?.hide();
     // 発言の中身は誰が言ったかを名前で運ぶので、自分の名前を覚えておく。
     // idで比べたいところだが、抜けた人の発言を残すために名前で運んでいる
     this._myName = name;
@@ -1943,6 +1951,7 @@ class Game {
     document.exitPointerLock?.();
     this._enterSolo();
     this.menu.show();
+    this.ranking?.refresh();
     this.menu.setBusy(false);
   }
 
@@ -2147,6 +2156,7 @@ class Game {
     this.state = 'menu';
     document.exitPointerLock?.();
     this.menu.show();
+    this.ranking?.refresh();
   }
 
   /* ---------------------------------------------------- 通算の戦績 */

@@ -108,6 +108,34 @@
   #cross i.v { width: 2px; height: 9px; left: -1px; }
   #cross i.h { height: 2px; width: 9px; top: -1px; }
   #cross.hit i { background: var(--warn); }
+  /* 順位表。ホームの隅に小さく置く。**押せない・邪魔しない。**
+     ボタンの列と重ならないよう左下へ寄せてある（ボタンは中央の枠の中） */
+  #rank {
+    position: absolute; left: 18px; bottom: 18px; z-index: 2;
+    min-width: 168px; max-width: 220px;
+    padding: 10px 12px 8px;
+    background: rgba(8,10,12,.55); border: 1px solid rgba(255,255,255,.10);
+    border-radius: 6px;
+    font-size: 10px; letter-spacing: .08em; line-height: 1.7;
+    color: var(--dim); pointer-events: none;
+  }
+  #rank .rkhead {
+    font-size: 9px; letter-spacing: .18em; color: var(--accent);
+    margin-bottom: 4px;
+  }
+  #rank ol { list-style: none; margin: 0; padding: 0; }
+  #rank li { display: flex; gap: 8px; align-items: baseline; }
+  /* 順位の数字は幅を固定する。桁で名前の左端がずれると読みにくい */
+  #rank li i { font-style: normal; width: 14px; color: rgba(255,255,255,.35); }
+  #rank li b {
+    font-weight: normal; color: var(--hud); flex: 1;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #rank li span { color: rgba(255,255,255,.45); }
+  /* 1位だけ色を変える。並びの意味が一目で分かる */
+  #rank li.top b { color: var(--accent); }
+  #rkFoot { margin-top: 5px; font-size: 9px; color: rgba(255,255,255,.30); }
+
   #dot {
     position: absolute; left: -1.5px; top: -1.5px;
     width: 3px; height: 3px; border-radius: 50%;
@@ -1377,6 +1405,18 @@
       <button id="nmSolo" class="netbtn" type="button">1人で遊ぶ</button>
       <button id="nmJoin" class="netbtn main" type="button">対戦に参加</button>
     </div>
+  </div>
+
+  <!-- 順位表。**常に出しっぱなし。** 2026-08-12に足した。
+       狙いは「誰かが新しく登録してくれた時にそれが分かる」こと。
+       遊んだ記録はサーバーに1つも残っていない（撃破数は端末の中だけ）ので、
+       人が来たかを知る手立てがこれしか無い。
+       順位はコインの残高ではなく**稼いだ総額**で付ける（買うと減る物では順位にならない）。
+       中身の出し入れは src/ui/ranking.js -->
+  <div id="rank" class="hidden">
+    <div class="rkhead">よく遊んでいる人</div>
+    <ol id="rkList"></ol>
+    <div id="rkFoot"></div>
   </div>
 </div>
 

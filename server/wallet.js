@@ -120,10 +120,15 @@ export function coinsFor(me, top) {
 export async function addCoins(query, userId, amount) {
   const add = Math.max(0, Math.round(amount || 0));
   if (!add) return getCoins(query, userId);
+  /* **earned にも同じだけ足す。** こちらは減らない列で、順位表(/api/ranking)が読む。
+     残高(coins)は買うと減るので順位にできない
+     （スキンを買った人ほど下に落ちる表になる） */
   const res = await query(
-    `INSERT INTO wallets (user_id, coins) VALUES ($1, $2)
+    `INSERT INTO wallets (user_id, coins, earned) VALUES ($1, $2, $2)
      ON CONFLICT (user_id) DO UPDATE
-       SET coins = wallets.coins + EXCLUDED.coins, updated_at = now()
+       SET coins = wallets.coins + EXCLUDED.coins,
+           earned = wallets.earned + EXCLUDED.earned,
+           updated_at = now()
      RETURNING coins`,
     [userId, add],
   );
@@ -192,8 +197,10 @@ export async function addSoloCoins(query, userId, want, now = new Date()) {
     }
 
     const res = await query(
+      // earnedにも同じだけ足す（addCoinsと同じ理由。順位表が読む減らない列）
       `UPDATE wallets
-          SET coins = coins + $2, solo_day = $3, solo_today = $4,
+          SET coins = coins + $2, earned = earned + $2,
+              solo_day = $3, solo_today = $4,
               solo_at = now(), updated_at = now()
         WHERE user_id = $1 RETURNING coins`,
       [userId, got, today, used + got],
@@ -204,6 +211,41 @@ export async function addSoloCoins(query, userId, want, now = new Date()) {
     await query('ROLLBACK').catch(() => {});
     throw e;
   }
+}
+
+/**
+ * 順位表。**稼いだコインの総額の多い順。**
+ *
+ * なぜ残高(coins)ではないか: 買うと減るので、
+ * **スキンを買った人ほど下に落ちる表**になる。earnedは減らない。
+ *
+ * なぜ要るか（2026-08-12に足した理由）: ホーム画面に常に出しておくと、
+ * **誰かが新しく登録してくれた時にそれが分かる。**
+ * 今は遊んだ記録がサーバーに1つも残らない（撃破数は端末の中だけ）ので、
+ * 「人が来たか」を知る手立てがこれしか無い。
+ *
+ * **名前とスコアしか返さない。** メールもidも返さない
+ * （誰でも見える口なので、名前以外を載せると身元が漏れる）。
+ *
+ * @param limit 何位まで。呼ぶ側が大きい数を渡しても20で止める
+ * @returns { rows: [{ name, earned }], players: 登録した人の数 }
+ */
+export async function ranking(query, limit = 10) {
+  const n = Math.min(20, Math.max(1, Math.round(limit) || 10));
+  const top = await query(
+    `SELECT u.name, COALESCE(w.earned, 0) AS earned
+       FROM users u
+       LEFT JOIN wallets w ON w.user_id = u.id
+      WHERE u.verified_at IS NOT NULL
+      ORDER BY earned DESC, u.id ASC
+      LIMIT $1`,
+    [n],
+  );
+  const all = await query('SELECT COUNT(*)::int AS n FROM users WHERE verified_at IS NOT NULL');
+  return {
+    rows: (top?.rows ?? []).map((r) => ({ name: String(r.name ?? ''), earned: Number(r.earned ?? 0) })),
+    players: Number(all?.rows?.[0]?.n ?? 0),
+  };
 }
 
 /** 今いくら持っているか。財布がまだ無い人は0 */

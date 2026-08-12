@@ -27,7 +27,7 @@ import { WEAPONS, weaponsSource } from './sim.js';
 import * as db from './db.js';
 import * as auth from './auth.js';
 import {
-  addCoins, getCoins, coinsFor, COIN, soloCoinsFor, addSoloCoins,
+  addCoins, getCoins, coinsFor, COIN, soloCoinsFor, addSoloCoins, ranking,
 } from './wallet.js';
 import { buy, equip, ownedOf, equippedOf } from './store.js';
 import { sendVerifyMail, sendResetMail } from './mail.js';
@@ -127,7 +127,14 @@ async function serveStatic(req, res) {
        しかも/api/meは隠す中身が何も無い（ログインの画面は誰にでも見える）ので、
        404にして得られる物が最初から無かった */
     if (url.startsWith('/api/')) {
-      if (!accountsOn && url !== '/api/me') { res.writeHead(404).end('not found'); return; }
+      /* 順位表の口も、台帳が無い時に404を返さない。
+         /api/meと同じ理由で、ホーム画面が起動のたびに必ず1回叩く口なので、
+         404にすると遊ぶ人全員のコンソールに毎回赤い行が出る。
+         中身が無い時は「まだ誰もいない」を返せばいい */
+      if (!accountsOn && url !== '/api/me' && url !== '/api/ranking') {
+        res.writeHead(404).end('not found');
+        return;
+      }
       await handleApi(url, req, res);
       return;
     }
@@ -328,6 +335,25 @@ async function routeApi(url, req, res) {
        Neonが寝ている時はその全部が起きるのを待つことになる */
     await withWallet(me);
     sendJson(res, 200, { ok: true, accounts: true, user: me });
+    return;
+  }
+
+  /* 順位表。**誰でも見える。ログインも要らない。**
+     ホーム画面に出しっぱなしにする物なので、遊ぶ前から見えている必要がある。
+
+     返すのは名前と稼いだ総額だけ（wallet.jsのrankingが絞っている）。
+     台帳が無い置き場では「まだ誰もいない」を返す——
+     404にすると起動のたびにコンソールへ赤い行が出る（/api/meと同じ話）*/
+  if (url === '/api/ranking') {
+    if (req.method !== 'GET') { res.writeHead(405).end('get only'); return; }
+    if (!accountsOn) { sendJson(res, 200, { ok: true, accounts: false, rows: [], players: 0 }); return; }
+    // 連投止めは/api/meと同じ物に相乗りする（同じ人が同じ勢いで叩く口なので）
+    if (!meLimit.allow(`rank|${ip}`, Date.now())) {
+      sendJson(res, 429, { ok: false, error: '少し待ってください' });
+      return;
+    }
+    const r = await ranking(db.query, 10);
+    sendJson(res, 200, { ok: true, accounts: true, ...r });
     return;
   }
 
