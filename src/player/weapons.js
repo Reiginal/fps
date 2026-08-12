@@ -15,6 +15,9 @@ import { swingTune, gunTune } from '../core/audio.js';
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
+/* 鎖鎌の鎖を「世界の下」へ垂らすのに使う。毎フレーム触るのでここで1つ作る
+   （毎フレームnewすると、持ち替えるたびではなく**60分の1秒ごとにごみが出る**）*/
+const _chainQ = new THREE.Quaternion();
 const _v4 = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 const _fwd = new THREE.Vector3(0, 0, 1);
@@ -4781,22 +4784,30 @@ function buildKusarigama(view = {}) {
      武器を見る動き(5キー)でここを回すと分銅がぶんぶん振り回される
      （INSPECTSのkusarigama.spin） */
   const chain = new THREE.Group();
-  chain.position.set(-0.012, 0.002, 0.124);
-  const CH = 14;
-  /* 柄尻(原点)から分銅までの道。**途中で少し下へ落ちてから持ち上がる。**
-     真っ直ぐ結ぶと棒に見えるので、垂れを1つ挟む */
-  const at = (t) => {
-    const sag = Math.sin(t * Math.PI) * 0.052;      // 中ほどの垂れ
-    return [
-      -0.048 * t,
-      0.138 * t - sag,
-      -0.204 * t,
-    ];
-  };
+  /* 鎖を留める所。**柄尻ではなく、刃の付け根の首。**
+
+     2026-08-12に柄尻から移した。柄尻は画面(306,206)＝右下の枠の外にあるので、
+     **そこから下へ垂らすと何をしても見えない**（測った。長さ0.2で画面(299,319)）。
+     鎖鎌は柄尻に留める物と刃の付け根に留める物の両方が実在するので、
+     見える側を採る。首なら画面(244,152)＝枠の中から垂らせる */
+  chain.position.set(0.028, 0.002, -0.086);
+  const CH = 10;
+  /* 付け根(原点)から下へ。**この群れは模型の回転を打ち消してある**ので、
+     ここでの -y はそのまま「世界の下」になる（_animateの鎖の節）。
+     真っ直ぐ引くと棒に見えるので、左右へわずかに蛇行させる。
+
+     長さ0.112は**測って決めた。** 止まっている時に分銅が画面(244,175)＝
+     下の縁ぎりぎりに来て、走ると(244,166)まで上がる。
+     「歩いたり走ったりしたらギリ見える」がこの数字 */
+  const at = (t) => [
+    Math.sin(t * 2.6) * 0.010,
+    -0.112 * t,
+    -0.012 * t,
+  ];
   for (let i = 0; i < CH; i++) {
     const q = at(i / CH);
     /* **輪を交互に90度倒す**のが鎖の見分けで、同じ向きに並べると縄になる */
-    chain.add(part(torG(0.0072, 0.0022, 4, 8), MATS.phosphate,
+    chain.add(part(torG(0.0068, 0.0021, 4, 8), MATS.phosphate,
       q[0], q[1], q[2], Math.PI / 2, i % 2 ? Math.PI / 2 : 0, 0));
   }
   /* ---- 分銅。**鎖の先の重り。** ここが無いと鎖がただ垂れているだけになる。
@@ -4805,14 +4816,15 @@ function buildKusarigama(view = {}) {
      bakeStaticは1つの材質で失敗すると**群れ全部の結合を諦める**ので、
      ここを揃えないだけで面が15個から37個へ跳ねた（ダガーで一度踏んだのと同じ罠）*/
   const tip = at(1);
-  chain.add(partS(sphG(1), MATS.phosphate, tip[0], tip[1], tip[2], 0.020, 0.026, 0.020));
-  chain.add(part(torG(0.0082, 0.0022, 4, 10), MATS.phosphate,
-    tip[0] * 0.92, tip[1] * 0.92, tip[2] * 0.92, Math.PI / 2));
+  chain.add(partS(sphG(1), MATS.phosphate, tip[0], tip[1] - 0.017, tip[2], 0.019, 0.024, 0.019));
+  chain.add(part(torG(0.0078, 0.0021, 4, 10), MATS.phosphate, tip[0], tip[1], tip[2], Math.PI / 2));
   bakeStatic(chain);
   g.add(chain);
   g.userData.chain = chain;
-  // 柄尻の環。鎖を留めている所
+  // 柄尻の石突（いしづき）。鎖はもうここに留めていないが、金具そのものは残す
   g.add(part(torG(0.0110, 0.0028, 5, 12), MATS.phosphate, 0, 0.002, 0.124));
+  // 鎖を留める環。首に付ける
+  g.add(part(torG(0.0098, 0.0026, 5, 12), MATS.phosphate, 0.028, 0.002, -0.086, 0, Math.PI / 2, 0));
 
   meleeRig(g, view, { muzzleZ: -0.190, sightZ: -0.100, gripR: 0.017 });
   bakeStatic(g);
@@ -7172,7 +7184,7 @@ export class WeaponSystem {
        （上のINSPECTのコメントに経緯）。
 
        ins … 引き寄せている量(0〜1)。始めと終わりだけ滑らかにして、間は止める */
-    let insZ = 0, insH = 0, insP = 0, insY = 0, insR = 0;
+    let insZ = 0, insH = 0, insP = 0, insY = 0, insR = 0, insSpin = 0;
     if (this.inspect > 0) {
       // **形ごとに違う動きを持てる。**書いていない形は既定（INSPECTS参照）
       const q = inspectOf(w.shapeId);
@@ -7195,14 +7207,8 @@ export class WeaponSystem {
         insR += Math.sin(t) * q.shake * ins;
         insP += Math.sin(t * 1.7) * q.shake * 0.6 * ins;
       }
-      /* 鎖を回す。**回すのは群れだけ。** 模型ごと回すと腕まで回る。
-         insを掛けているので、引き寄せながら回り始めて、戻りながら止まる */
-      if (q.spin > 0 && w.parts.chain) {
-        w.parts.chain.rotation.z = (q.time - this.inspect) * q.spin * ins;
-      }
-    } else if (w.parts.chain && w.parts.chain.rotation.z) {
-      // 見るのをやめたら元へ戻す。戻さないと回った所で止まったままになる
-      w.parts.chain.rotation.z = 0;
+      // 鎖を回す量（実際に回すのは下の1箇所。insを掛けて、引き寄せながら回り始める）
+      if (q.spin > 0) insSpin = (q.time - this.inspect) * q.spin * ins;
     }
 
     // 巻いている間は武器を大きく下げて画面の外へ寄せる。
@@ -7248,6 +7254,36 @@ export class WeaponSystem {
       const busy = this.punchLeft ? fistL : fistR;
       idle.position.set(0, -swingH * k, -swingZ * k);
       busy.position.set(0, 0, 0);
+    }
+
+    /* ---- 鎖鎌の鎖。**世界の下へ垂らして、動くと振れる。**
+       2026-08-12に「鎖の位置が不自然すぎるわ。走ったら、歩いたり走ったりしたら
+       ギリ見える、揺れてギリ見えるとか、なんか不自然じゃない感じにしたし」と言われた所。
+
+       **不自然の正体は「上へ浮いていた」こと。** その前は鎖を柄尻から前・左・上へ
+       回して画面に入れていたが、垂れ下がる物が持ち上がっているので嘘に見えた。
+
+       今は2段でやる:
+         1. 模型の回転を打ち消す＝武器をどう傾けても**鎖は真下を向く**（重力）
+         2. その上に揺れを足す。歩調(bobPhase)で前後へ、半分の速さで左右へ振る
+
+       柄尻は画面(306,206)＝右下の枠の外なので、真下に垂れている間は見えない。
+       **振れて前へ来た時だけ画面へ入る**（+0.3radで画面(267,156)）。
+       「歩いたり走ったりしたらギリ見える」がそのまま形になっている */
+    const chain = w.parts.chain;
+    if (chain) {
+      // 1. 模型の回転を打ち消す。これで鎖は世界の下を向く
+      _chainQ.setFromEuler(model.rotation).invert();
+      chain.quaternion.copy(_chainQ);
+      /* 2. 揺れ。**止まっている時もわずかに振る**（0にすると、
+         立ち止まった瞬間に鎖が凍って作り物に見える）。
+         走ると振れ幅が3倍近くになって、画面の中まで入ってくる */
+      const spd = Math.min(1, (player.horizontalSpeed || 0) / 7);
+      const amp = 0.06 + spd * 0.42;
+      chain.rotateX(Math.sin(player.bobPhase) * amp + spd * 0.10);
+      chain.rotateZ(Math.sin(player.bobPhase * 0.5 + 1.1) * amp * 0.5);
+      // 3. 武器を見る動きの間だけ、真下を軸にぶんぶん回す
+      if (insSpin) chain.rotateY(insSpin);
     }
 
     // 覗いている間はFOVを絞る。ビューモデルのFOVは本編より狭くしておくと
