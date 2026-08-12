@@ -263,6 +263,33 @@ console.log('\n[7] 数字キーに載らない枠（Qの狙撃銃・Eのショ�
      1周(6.28)や半周(3.14)には遠い。
      元の構えにも少し傾きがあるので0にはならない */
   ok(maxRoll < 0.6, `見ている間の傾きが小さいまま（一番傾いた所で ${maxRoll.toFixed(2)}rad）`);
+
+  /* ---- 形ごとの見る動き。2026-08-12に足した
+     （「ブキミルモーションも何個かは、ちょっと違う挙動をするみたいなのあってもいいよね」）。
+
+     **付いている形が実在すること**と、**やりすぎていないこと**を見る。
+     ここが緩いと、消した形の設定が残ったり、
+     腕ごと回る量まで傾けた設定が黙って入ったりする */
+  const tbl = src2.match(/const INSPECTS = \{[\s\S]*?\n\};/)?.[0] ?? '';
+  ok(tbl !== '', '形ごとの表がある');
+  const ids = [...tbl.matchAll(/^ {2}(\w+): \{/gm)].map((m) => m[1]);
+  ok(ids.length >= 3, `違う動きを持つ形が ${ids.length}つ`);
+  const { SHAPE_LIST } = await import('../src/net/protocol.js');
+  const known = new Set(SHAPE_LIST.map((x) => x.id));
+  const ghost = ids.filter((id) => !known.has(id));
+  ok(!ghost.length, ghost.length ? `売っていない形の設定が残っている（${ghost.join('、')}）`
+    : '**書いてある形が全部実在する**（消した形の設定が残っていない）');
+
+  /* やりすぎの線を数字で引く。
+     傾け(tilt) … 1.0rad(57度)まで。**腕ごと回って見えるのがこの先**
+     引き寄せ(z) … 0.07mまで。引きすぎると銃口が画面を覆う */
+  let over = null;
+  for (const m of tbl.matchAll(/^ {2}(\w+): \{ ([^}]*)\}/gm)) {
+    const num = (k) => Number(new RegExp(`${k}: (-?[\\d.]+)`).exec(m[2])?.[1] ?? 0);
+    if (Math.abs(num('tilt')) > 1.0 || num('z') > 0.07) over = m[1];
+  }
+  ok(!over, over ? `${over} がやりすぎ（傾け1.0rad・引き寄せ0.07mまで）`
+    : '傾けも引き寄せも上限の中に収まっている');
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
