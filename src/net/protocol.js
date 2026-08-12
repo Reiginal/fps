@@ -807,7 +807,9 @@ export const SKINNABLE = ['rifle', 'shotgun', 'pistol', 'sniper', 'knife'];
  * （そちらはthree.jsを読み込むので、サーバーが読むこの表とは分けてある）。
  */
 export const SHAPE_LIST = [
-  { weapon: 'knife', id: 'katana', name: '刀', price: 1200 },
+  /* 2026-08-12に「刀」から改名した。**idは変えていない。**
+     idは買った物の記録(sku)そのものなので、変えると持っている人の刀が消える */
+  { weapon: 'knife', id: 'katana', name: '日本刀', price: 1200 },
   { weapon: 'knife', id: 'dagger', name: 'ダガー', price: 900 },
   /* 2026-08-11に3つ足した。「ナイフ種類増やしたいなぁ。レイピア？おの？パンチグローブ？」
      **強さは3つとも今まで通り全部同じ。** 差は見た目・振り方・音の3つだけ。

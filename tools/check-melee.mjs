@@ -460,7 +460,7 @@ console.log('\n[当たるタイミング] 刃が届いてから判定が出て�
      ここに数字を書き写すと、SWINGSを触った時に片方だけ古くなる */
   const delayOf = (s) => (s.wind + (1 / s.speed) * (1 - s.wind)) * s.time;
   const rows = [
-    ['ナイフ', 'knife'], ['刀', 'katana'], ['ダガー', 'dagger'],
+    ['ナイフ', 'knife'], ['日本刀', 'katana'], ['ダガー', 'dagger'],
   ];
   for (const [name, shape] of rows) {
     for (const kind of ['light', 'heavy']) {
