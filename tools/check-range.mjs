@@ -97,6 +97,49 @@ console.log('\n[3] 動きの式: 判定と見た目が一緒に動く');
   ok(/player\.refill\(\)/.test(frame), '体力を戻している（無敵）');
 }
 
+console.log('\n[3.5] 訓練場で持てる武器**全部**の弾が戻る');
+{
+  /* **形ではなく実際に減らして戻して確かめる。**
+     上の[3]は「refillReserveを呼んでいる」までしか見ていないので、
+     呼ばれた先が一部の枠しか見ていない時に素通りする。実際そうなった:
+
+       2026-08-11 … Eの枠(rangeIndex)にショットガンを足した
+       2026-08-12 … 「ショットガンだけは弾が無限じゃない」と言われた
+
+     refillReserveが carry と quickIndex しか見ていなくて、
+     **Eの枠だけ補給から漏れていた。** 同じ抜け方はQの枠でも一度やっている
+     （あちらは狙撃銃で、コメントに残っている）。
+     枠を足すたびに手で書き足す形なので、ここは実測で押さえる */
+  const { WeaponSystem, WEAPONS } = await import('../src/player/weapons.js');
+  const ws = new WeaponSystem(new THREE.Scene(),
+    new THREE.PerspectiveCamera(75, 1.6, 0.05, 900),
+    new THREE.PerspectiveCamera(55, 1.6, 0.002, 12), new THREE.Scene());
+
+  // main.jsの_enterRangeと同じ配り方にする
+  ws.quickIndex = WEAPONS.findIndex((w) => w.id === 'sniper');
+  ws.rangeIndex = WEAPONS.findIndex((w) => w.id === 'shotgun');
+
+  const slots = [...ws.carry, ws.quickIndex, ws.rangeIndex].filter((i) => i != null);
+  // 予備弾を持つ武器だけを見る（ナイフと手榴弾は元から持たない）
+  const withReserve = slots.filter((i) => ws.weapons[i].def.reserve > 0);
+  ok(withReserve.length >= 4, `訓練場で持てて予備弾のある武器が ${withReserve.length}本`);
+
+  for (const i of withReserve) ws.weapons[i].reserve = 0;
+  ws.refillReserve();
+  for (const i of withReserve) {
+    const w = ws.weapons[i];
+    ok(w.reserve === w.def.reserve,
+      `${w.def.name} … 予備弾が戻る（${w.reserve} / ${w.def.reserve}）`);
+  }
+
+  /* 弾倉の中身は戻さないこと。**練習でも装填の呼吸は本物のまま**にしておく
+     （戻すと、撃ち切る直前に補給が入って装填が一度も起きない）*/
+  const sg = ws.weapons[ws.rangeIndex];
+  sg.ammo = 0;
+  ws.refillReserve();
+  ok(sg.ammo === 0, 'マガジンの中身は戻さない（装填の呼吸は残す）');
+}
+
 console.log('\n[4] 本編との縁切り（戦績・波・死・自爆）');
 {
   const src = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
