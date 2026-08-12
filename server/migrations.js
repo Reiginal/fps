@@ -399,6 +399,23 @@ export const STEPS = [
       DELETE FROM equipped_skins
             WHERE skin_id = 'gold' AND weapon_id <> 'knife'`,
   },
+  {
+    n: 17,
+    name: '稼いだコインの総額（順位表の元）',
+    /* 2026-08-12。ホーム画面に順位表を出すために足した列。
+
+       **残高(coins)では順位にできない。** 買うと減るので、
+       スキンを買った人ほど下に落ちる表になる。
+       earned は受け取った時にしか動かない＝下がらない。
+
+       **今いる人の分は残高で埋める。** ここまでに使った分は台帳のどこにも
+       残っていない（明細を持っていないので）ので、正確には出せない。
+       「持っている分は少なくとも稼いだ分」なので、下振れする方へ倒してある。
+       ここから先は addCoins と addSoloCoins が両方の列へ足す */
+    sql: `ALTER TABLE wallets
+      ADD COLUMN earned BIGINT NOT NULL DEFAULT 0 CHECK (earned >= 0);
+      UPDATE wallets SET earned = coins`,
+  },
   // 現金を入れる時の明細(ledger)はここへ足す。上の11には二度と触らない
 ];
 
