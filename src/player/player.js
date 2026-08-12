@@ -158,7 +158,36 @@ const STRIDE_CROUCH = 0.66;
 // 連射の代償は残しつつ、狙い直しで取り返せる量に落とす
 const RECOIL_KEEP = 0.22;
 
+/* 狙点へ置いていった分を、指を離した後に返す（リコイルリカバリー）。
+ *
+ * **一般的なFPSは全部これを持っている。** 撃っている間に銃口が上がるのは同じで、
+ * 分かれるのは離した後:
+ *   CS/Valorant … 跳ねは全部戻るが、自分で引き下げた分は自分の狙点として残る
+ *                 （撃ち終わると足元を向いているので、上へ戻すのは自分の仕事）
+ *   CoD系       … 「リコイルセンタリング」。**撃つ前に狙っていた点へ勝手に戻る**
+ * ここは後者を採る。ブラウザで気軽に遊ぶ物なので、
+ * 30発撃つたびに狙点を自力で拾い直させると、撃ち合いより整地の練習になる。
+ *
+ * 連射の代償は消えない。**戻るのは指を離した後**なので、
+ * 押しっぱなしの間は今まで通り上へ流れていく。
+ *
+ * REST … 最後の1発から、返し始めるまでの間(秒)。
+ *        **一番速い武器の発射間隔より長くないと、連射の合間に返り始める**
+ *        （ライフルは640rpm＝0.094秒間隔。0.07にすると1発ごとに2割返って、
+ *          押しっぱなしで上へ流れる感じがほとんど消える）。
+ *        逆に長すぎると、撃ち終わってから戻り始めるまでが待たされる。
+ *        単発の武器（拳銃400rpm＝0.15秒）は合間に少し返るが、そちらは正しい
+ * RATE … 返す速さ。damp()の係数で、9なら0.25秒でほぼ返り切る */
+const RECOIL_RETURN_REST = 0.12;
+const RECOIL_RETURN_RATE = 9;
+
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+
+/* 借り(debt)を、逆向きに動かした分(d)だけ返済する。0を越えて符号は変えない
+   （引きすぎた分まで借りにすると、次に撃った時に上へ吹き上がる）*/
+const payBack = (debt, d) => (debt > 0
+  ? Math.max(0, debt + Math.min(0, d))
+  : Math.min(0, debt + Math.max(0, d)));
 
 // 減衰バネ。kick()で衝撃を積むと一度行き過ぎてから戻る。
 // damp()だと目標へ滑らかに寄るだけで「行き過ぎ」が出ず、軽い体に見えてしまう
@@ -252,6 +281,11 @@ export class Player {
     this.roll = 0;
     this.recoilPitch = 0;
     this.recoilYaw = 0;
+    /* 狙点へ置いていった分（借り）。指を離すと返す。
+       自分でマウスを引き下げた分は、ここから先に引く＝二重に下がらない */
+    this._aimDebtP = 0;
+    this._aimDebtY = 0;
+    this._recoilRest = 99;
 
     // 着地の沈み / 踏み込みの衝撃 / 姿勢変化の勢い
     this._dip = new Spring(190, 22);
@@ -331,6 +365,10 @@ export class Player {
     this._fallSpeed = 0;
     this._airTime = 0;
     this._jumpBuffer = 0;
+    // 湧き直した先へ、前の弾倉の借りを持ち越さない
+    this._aimDebtP = 0;
+    this._aimDebtY = 0;
+    this._recoilRest = 99;
   }
 
   get position() {
@@ -574,8 +612,15 @@ export class Player {
          落とす量は武器が決める（adsSlow）。倍率の高い照準ほど、同じ手の動きで
          景色が速く流れるので、狙撃銃だけ0.72＝感度28%まで落としてある */
       const scale = 1 - this.adsFactor * (this.adsSlow ?? 0.45);
-      this.yaw += look.yaw * scale;
-      this.pitch = clamp(this.pitch + look.pitch * scale, -1.5, 1.5);
+      const dy = look.yaw * scale;
+      const dp = look.pitch * scale;
+      this.yaw += dy;
+      this.pitch = clamp(this.pitch + dp, -1.5, 1.5);
+      /* **自分で戻した分は、返す予定の借りから先に引く。**
+         これが無いと、引き下げながら撃った人だけ
+         「自分で下げた量＋勝手に返ってきた量」で二重に下を向く */
+      this._aimDebtP = payBack(this._aimDebtP, dp);
+      this._aimDebtY = payBack(this._aimDebtY, dy);
     } else {
       input.takeLook();
     }
@@ -1068,6 +1113,23 @@ export class Player {
     this.recoilPitch = THREE.MathUtils.damp(this.recoilPitch, 0, 7.5, dt);
     this.recoilYaw = THREE.MathUtils.damp(this.recoilYaw, 0, 7.5, dt);
 
+    /* 撃つのをやめたら、狙点へ置いていった分を返す。
+       **狙点(pitch/yaw)そのものを動かす**ので、次に撃ち始める場所が元へ戻る。
+       上のrecoilPitch(跳ね)とは別物で、あちらは撃った瞬間だけ画を揺らす層 */
+    this._recoilRest += dt;
+    if (this._recoilRest > RECOIL_RETURN_REST && (this._aimDebtP || this._aimDebtY)) {
+      const k = 1 - Math.exp(-RECOIL_RETURN_RATE * dt);
+      const backP = this._aimDebtP * k;
+      const backY = this._aimDebtY * k;
+      this.pitch = clamp(this.pitch - backP, -1.5, 1.5);
+      this.yaw -= backY;
+      this._aimDebtP -= backP;
+      this._aimDebtY -= backY;
+      // 0.0001ラジアン＝20m先で2mm。ここまで来たら畳んで、以降の計算を止める
+      if (Math.abs(this._aimDebtP) < 1e-4) this._aimDebtP = 0;
+      if (Math.abs(this._aimDebtY) < 1e-4) this._aimDebtY = 0;
+    }
+
     // 段差で持ち上げた分を少しずつ返す。これが無いと縁で視点が瞬間移動する
     this._stepSmooth = THREE.MathUtils.damp(this._stepSmooth, 0, 15, dt);
 
@@ -1076,8 +1138,11 @@ export class Player {
   }
 
   // 武器から1発ぶんの反動を受け取る。半分は狙点(pitch/yaw)へ置いていき、
-  // 残り半分だけを行って戻る跳ねに回す。置いていった分は自分でマウスを引いて
-  // 戻すしかないので、撃つほど狙いが上へ流れる＝弾を撒くのに代償がつく。
+  // 残り半分だけを行って戻る跳ねに回す。置いていった分は撃っている間ずっと
+  // 積み上がるので、撃つほど狙いが上へ流れる＝弾を撒くのに代償がつく。
+  //
+  // **置いていった分は借りとして数えてあって、指を離すと返ってくる**
+  // （RECOIL_RETURN_REST の説明。連射中は返らないので代償は残る）。
   //
   // keepは呼ぶ側で下げられる。自分でトリガーを引いた結果なら残すのが正しいが、
   // 被弾のフリンチのように自分が選んでいない跳ねまで残すと、撃たれた回数ぶん
@@ -1087,10 +1152,16 @@ export class Player {
     const keepYaw = yaw * keep;
     // 視点入力と同じ上限で止める。ここで止めないと真上を越えた値が残り、
     // 次にマウスを動かした瞬間に上限へ引き戻されて視点が飛ぶ
+    const before = this.pitch;
     this.pitch = clamp(this.pitch + keepPitch, -1.5, 1.5);
     this.yaw += keepYaw;
     this.recoilPitch += pitch - keepPitch;
     this.recoilYaw += yaw - keepYaw;
+    /* 借りに積む。**上限で止まった分は積まない**（実際に動いた量だけを返す。
+       真上を向いた所で撃ち続けた人が、離した瞬間に地面まで落ちるのを防ぐ）*/
+    this._aimDebtP += this.pitch - before;
+    this._aimDebtY += keepYaw;
+    this._recoilRest = 0;
   }
 
   _applyCamera() {
