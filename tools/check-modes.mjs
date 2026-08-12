@@ -104,11 +104,18 @@ console.log('\n[4] ガンゲームは倒すたびに武器が替わる');
   const ps = startWith(['あき', 'ばん'], 'gun');
   ok(room.mode === 'gun', 'ガンゲームで始まった');
   ok(room.rules.rounds === false, 'ラウンドを持たない');
+  /* **手榴弾を数えない。** 2026-08-13に
+     「ガンゲームの時は、手榴弾の弾の制限があったらちょっとおかしいよね」で足した。
+     手榴弾の段は投げる物が無くなるとそこで詰む（拾えない遊び方なので補充が無い）*/
+  ok(room.rules.nadeLimit === false, '手榴弾を数えない');
 
   const [a, b] = ps;
   ok(a.slot.stage === 0, '最初は0段目');
-  ok(a.slot.sim.carry.length === 1,
-    `持ち物は1本だけ (${a.slot.sim.carry.map(idOf).join('、')})`);
+  /* **銃1本＋ナイフ。** 2026-08-13にナイフを常に持たせるようにした
+     （「弾切れした時に殺しようがないし」）。
+     この遊び方は落ちた武器を拾えないので、撃ち切ると次に倒されるまで何もできなかった */
+  ok(a.slot.sim.carry.length === 2 && a.slot.sim.carry.map(idOf).includes('knife'),
+    `持ち物は今の段の1本とナイフ (${a.slot.sim.carry.map(idOf).join('、')})`);
   ok(idOf(a.slot.sim.weapon) === GUN_ORDER[0],
     `最初の武器は ${GUN_ORDER[0]}（今 ${idOf(a.slot.sim.weapon)}）`);
 
@@ -118,7 +125,10 @@ console.log('\n[4] ガンゲームは倒すたびに武器が替わる');
     ok(a.slot.stage === st + 1, `${st + 1}段目へ進んだ`);
     ok(idOf(a.slot.sim.weapon) === GUN_ORDER[st + 1],
       `武器が ${GUN_ORDER[st + 1]} になった（今 ${idOf(a.slot.sim.weapon)}）`);
-    ok(a.slot.sim.carry.length === 1, '持ち物は1本のまま');
+    /* 最後の段（ナイフ）だけは1本。銃が無くなるので、段としての手応えが残る */
+    const want = GUN_ORDER[st + 1] === 'knife' ? 1 : 2;
+    ok(a.slot.sim.carry.length === want,
+      `持ち物は ${want}本（${a.slot.sim.carry.map(idOf).join('、')}）`);
     // 倒された側は生き返らせて次へ
     room._respawn(b.slot);
   }
@@ -218,9 +228,33 @@ console.log('\n[9] 遊び方を変えると持ち物も配り直る');
   const dmCarry = a.slot.sim.carry.length;
   ok(dmCarry >= 3, `デスマッチでは ${dmCarry}本`);
   room.setMode('gun');
-  ok(a.slot.sim.carry.length === 1, `ガンゲームでは1本（${a.slot.sim.carry.map(idOf).join('')}）`);
+  ok(a.slot.sim.carry.length === 2 && a.slot.sim.carry.map(idOf).includes('knife'),
+    `ガンゲームでは今の段の1本とナイフ（${a.slot.sim.carry.map(idOf).join('、')}）`);
+
   room.setMode('dm');
   ok(a.slot.sim.carry.length === dmCarry, `戻すと ${dmCarry}本に戻る`);
+}
+
+console.log('\n[9.5] ガンゲームだけ手榴弾を数えない');
+{
+  /* 2026-08-13に足した。「ガンゲームの時は、手榴弾の弾の制限があったら
+     ちょっとおかしいよね」と言われた所。
+     あちらは手榴弾の段があって、投げる物が無くなるとその段で詰む
+     （落ちた武器を拾えない遊び方なので、補充する道が1つも無い）。
+
+     **実際に投げて数える。** 決まりの表を読むだけだと、
+     部屋の側が決まりを見ていない時に素通りする */
+  const ps = startWith(['あき', 'ばん'], 'gun');
+  const a = ps[0];
+  const before = a.slot.nades;
+  for (let i = 0; i < 8; i++) room.throwNade(a.slot, null, { x: 0, y: 0, z: -1 });
+  ok(a.slot.nades === before, `ガンゲームでは減らない（${before} → ${a.slot.nades}）`);
+
+  const ps2 = startWith(['あき', 'ばん'], 'dm');
+  const c = ps2[0];
+  c.slot.nades = 2;
+  room.throwNade(c.slot, null, { x: 0, y: 0, z: -1 });
+  ok(c.slot.nades === 1, `デスマッチでは今まで通り減る（2 → ${c.slot.nades}）`);
 }
 
 console.log('\n[10] 決まりはサーバーだけが持っている');

@@ -22,6 +22,9 @@ const idsToIndex = (weapons, ids) => ids
 const deathmatch = {
   id: 'dm',
 
+  // 手榴弾は1ラウンドの持ち数で縛る（既定。ガンゲームだけが外す）
+  nadeLimit: true,
+
   // ラウンド制。倒れたらそのラウンドは終わりで、復活はラウンドの頭にまとめて
   rounds: true,
 
@@ -53,13 +56,30 @@ const gungame = {
 
   rounds: false,
 
-  // **今の段の武器だけを持たせる。** 1本だけにするのがこの遊び方の芯で、
-  // 持ち替えができると全部持っているのと変わらなくなる
+  /* **今の段の武器と、ナイフ。** 1本だけにするのがこの遊び方の芯だが、
+     ナイフだけは常に持たせる。
+
+     2026-08-13に足した。「せめてナイフ、ナイフはデフォルトであってもいいと思うけどね。
+     弾切れした時に殺しようがないし」と言われた所。
+     この遊び方は落ちた武器を拾えない(drops: false)ので、
+     **弾を撃ち切った人は次に倒されるまで何もできない。**
+
+     最後の段はナイフなので、そこでは今まで通り**ナイフ1本だけ**になる
+     （銃が無くなるので、段としての手応えは残る）*/
   carryFor: (weapons, slot) => {
     const order = idsToIndex(weapons, GUN_ORDER);
     const st = Math.min(slot?.stage ?? 0, order.length - 1);
-    return [order[st]];
+    const knife = weapons.findIndex((w) => w.id === 'knife');
+    const carry = [order[st]];
+    if (knife >= 0 && !carry.includes(knife)) carry.push(knife);
+    return carry;
   },
+
+  /* **手榴弾を数えない。** 2026-08-13に
+     「ガンゲームの時は、手榴弾の弾の制限があったらちょっとおかしいよね」と言われた所。
+     手榴弾の段は**投げる物が無くなったらそこで詰む**（拾えないので補充も無い）。
+     数えないのはこの遊び方だけで、デスマッチと2対2は今まで通り */
+  nadeLimit: false,
 
   stagesOf: (weapons) => idsToIndex(weapons, GUN_ORDER).length,
 
@@ -98,6 +118,7 @@ const gungame = {
 const teamplay = {
   id: 'team',
   rounds: true,
+  nadeLimit: true,
   carryFor: (weapons) => loadoutOf(weapons),
   stagesOf: () => 1,
   drops: true,

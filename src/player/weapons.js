@@ -5951,6 +5951,9 @@ export class WeaponSystem {
        ソロは投げた瞬間に、対戦はサーバーが「飛んだ」と言ってきた時に減る。
        0になったら手から下ろす（takeNade を参照）*/
     this.nades = NADE.PER_ROUND;
+    /* 手榴弾を数えない遊び方か。**ガンゲームだけ立つ。**
+       EV.ARMの段の数から main.js が入れる */
+    this.nadeFree = false;
     // 投げ切ったので、投げ終わったら手から下ろす、の印
     this._holsterThrown = false;
     // 自分から持ち替えた時に知らせる先。対戦では持っている物をサーバーへ
@@ -6372,7 +6375,10 @@ export class WeaponSystem {
    */
   takeNade() {
     if (this.nades <= 0) return false;
-    this.nades--;
+    /* **ガンゲームでは減らさない。** あちらは手榴弾の段があって、
+       投げる物が無くなるとその段で詰む（落ちた武器を拾えない遊び方なので、
+       補充する道が1つも無い）。サーバー側も同じ扱い（server/modes.jsのnadeLimit）*/
+    if (!this.nadeFree) this.nades--;
     /* **その場では替えない。** switchTo は持ち替えを跨いで前の武器の動きが
        残らないよう swing を0に戻すので、ここで呼ぶと投げる動作が
        始まった瞬間に消えて、玉だけ飛んで手は動かない絵になる。
