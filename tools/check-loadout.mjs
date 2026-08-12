@@ -296,10 +296,14 @@ console.log('\n[7] 数字キーに載らない枠（Qの狙撃銃・Eのショ�
      鎖鎌の鎖を回す形を足した。腕は武器と同じ群れに入っているので、
      模型のrotationへ回転を積むと腕まで回る。
      **回す先が userData の群れ限定**であることを見る */
-  ok(/w\.parts\.chain\.rotation\.z = /.test(src2), '回すのは鎖の群れ（parts.chain）');
+  ok(/if \(insSpin\) chain\.rotateY\(insSpin\);/.test(src2), '回すのは鎖の群れ（parts.chain）');
   ok(!/insR \+= [^;]*spin/.test(src2), '模型の傾き(insR)へは回転を積んでいない');
-  // 見るのをやめたら戻すこと。戻さないと回った所で止まったままになる
-  ok(/w\.parts\.chain\.rotation\.z = 0;/.test(src2), 'やめた時に元へ戻している');
+  /* **毎フレーム向きを作り直していること。** 回した角度を足し込む形だと、
+     見るのをやめた所で止まったままになる。
+     鎖は「模型の回転を打ち消してから揺れを足す」を毎フレームやり直すので、
+     insSpinが0になった瞬間に自然と元へ戻る */
+  ok(/chain\.quaternion\.copy\(_chainQ\);/.test(src2),
+    '毎フレーム向きを作り直している（やめた時に自然と戻る）');
 }
 
 console.log('\n[9] パンチグローブは左右交互に打つ');
