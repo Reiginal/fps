@@ -15,6 +15,7 @@
 // この検査がやるのは、一度直した物が黙って元に戻るのを止めることだけ。
 //
 //   node tools/check-sound.mjs
+import { readFileSync } from 'node:fs';
 import '../server/dom-stub.js';
 import { OfflineCtx } from './offline-audio.mjs';
 import { analyze, capture, SR } from './sound-measure.mjs';
@@ -518,6 +519,15 @@ console.log('\n[4.7] 形スキンの銃声が、見た目の通りに鳴って�
       .map((s) => s.name);
     ok(missing.length === 0,
       `形違いの銃は全部専用の銃声を持っている${missing.length ? ` ← ${missing.join('、')}が無い` : ''}`);
+
+    /* **書き出す側にも全部並んでいるか。**
+       tools/sound-lab.mjs に名前をべた書きしていた頃、
+       後から足した形が**一度も測られないまま**になっていた
+       （2026-08-12にリボルバーとソードオフで踏んだ。振る音でも同じ形で踏んだ）。
+       測れない音は「ダサい」と言われた時に勘で直すことになる */
+    const lab = readFileSync(new URL('../tools/sound-lab.mjs', import.meta.url), 'utf8');
+    ok(/const SHAPE_ON = SHAPE_LIST/.test(lab),
+      '銃声は表から引いて書き出している（名前のべた書きではない）');
   }
 }
 
