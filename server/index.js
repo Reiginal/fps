@@ -27,7 +27,7 @@ import { WEAPONS, weaponsSource } from './sim.js';
 import * as db from './db.js';
 import * as auth from './auth.js';
 import {
-  addCoins, getCoins, coinsFor, COIN, soloCoinsFor, addSoloCoins, ranking,
+  addCoins, getCoins, coinsFor, COIN, soloCoinsFor, addSoloCoins, ranking, addPlay,
 } from './wallet.js';
 import { buy, equip, ownedOf, equippedOf } from './store.js';
 import { sendVerifyMail, sendResetMail } from './mail.js';
@@ -463,6 +463,16 @@ async function routeApi(url, req, res) {
     if (!body) { sendJson(res, 400, { ok: false, error: '送られた中身が読めません' }); return; }
 
     const want = soloCoinsFor(body);
+    /* **順位表の元は、コインが貰えたかどうかに関係なく足す。**
+       コインには1日の上限があるが、**上限に当たった後も遊んではいる。**
+       ここを受け取りと同じ扱いにすると、その日たくさん遊んだ人ほど記録が止まる。
+
+       申告された数字なので上限で丸める（soloCoinsForと同じ考え方）。
+       1回の申告で第500波・撃破5000までしか受け取らない */
+    await addPlay(db.query, me.id, {
+      waves: Math.min(500, Math.max(0, body.wave | 0)),
+      kills: Math.min(5000, Math.max(0, body.kills | 0)),
+    }).catch((e) => console.warn(`[rank] 記録を足せなかった: ${e && e.message}`));
     // 取引を使うので1本の接続の上で（買う時と同じ理由）
     const r = await db.withClient((q) => addSoloCoins(q, me.id, want));
     if (!r.ok) { sendJson(res, 200, { ok: false, error: r.error, coins: r.coins }); return; }
@@ -571,6 +581,13 @@ async function payMatch(slots) {
     try {
       // 1人ずつ順に書く。まとめて1つの取引にすると、誰か1人で詰まった時に全員が待つ
       const coins = await addCoins(db.query, user.id, got);
+      /* 順位表の元も一緒に足す。**コインとは別の数字。**
+         勝ちは「一番ラウンドを取った人」で、誰も取っていない試合(0-0の時間切れ)では
+         誰にも付かない（topが0の時は上の判定で全員が外れる）*/
+      await addPlay(db.query, user.id, {
+        wins: top > 0 && (s.rounds | 0) === top ? 1 : 0,
+        kills: s.sim?.kills,
+      });
       paid.set(s, { got, coins });
     } catch (e) {
       // その人だけ配れなかった。試合の終わりそのものは止めない

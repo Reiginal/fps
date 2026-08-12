@@ -3,9 +3,11 @@
 // なぜ要るか: **誰でも見える口**なので、うっかり載せた1列がそのまま外へ出る。
 // 名前以外（メール・id）が混ざっていないかを、実際に呼んで確かめる。
 //
-// もう1つは順位の元。**残高(coins)で並べてはいけない。**
-// 買うと減るので「スキンを買った人ほど下に落ちる表」になる。
-// 減らない列(earned)で並べていることを見る。
+// もう1つは順位の元。**コインで並べてはいけない。**
+// 残高は買うと減るし、稼いだ総額は**台帳から直に足せる**ので、
+// どちらも「遊んだ記録」にならない
+// （2026-08-12に「稼いだコインの総額、微妙だな。俺ら金もらってるからね、DBで」）。
+// 遊ばないと増えない3つ（勝利・撃破・到達波）で並べていることを見る。
 //
 //   node tools/check-ranking.mjs
 import { readFileSync } from 'node:fs';
@@ -32,36 +34,55 @@ console.log('\n[1] 返す中身は名前とスコアだけ');
   /* 台帳が余計な列を返してきても、こちらで捨てていること。
      **SELECT を直しても大丈夫な形にしておく**のが目的 */
   const db = fakeDb([
-    { name: 'れい', earned: 5200, email: 'x@example.com', id: 7, pass_hash: 'zzz' },
-    { name: 'ばん', earned: 900, email: 'y@example.com', id: 8 },
+    { name: 'れい', score: 5200, wins: 12, email: 'x@example.com', id: 7, pass_hash: 'zzz' },
+    { name: 'ばん', score: 900, wins: 1, email: 'y@example.com', id: 8 },
   ], 2);
   const r = await ranking(db.query, 10);
   ok(r.rows.length === 2, `2人ぶん返る（${r.rows.length}人）`);
   const keys = Object.keys(r.rows[0]).sort().join(',');
-  ok(keys === 'earned,name', `1人ぶんの中身は name と earned だけ（${keys}）`);
+  ok(keys === 'name,score,wins', `1人ぶんの中身は name と score と wins だけ（${keys}）`);
   const dumped = JSON.stringify(r);
   ok(!/example\.com/.test(dumped), '**メールが混ざっていない**');
   ok(!/pass|hash/i.test(dumped), '合言葉らしき物も混ざっていない');
   ok(r.players === 2, `登録した人の数も返る（${r.players}人）`);
 }
 
-console.log('\n[2] 順位の元は「稼いだ総額」で、残高ではない');
+console.log('\n[2] 順位の元は「遊んだ量」で、コインではない');
 {
+  const { SCORE, scoreOf } = await import('../server/wallet.js');
   const db = fakeDb([], 0);
   await ranking(db.query, 10);
   const top = db.sqls[0].sql;
-  ok(/ORDER BY earned DESC/.test(top), `earnedの多い順で並べている`);
-  ok(!/ORDER BY[^;]*coins/.test(top), '**残高(coins)では並べていない**（買うと下がる物では順位にならない）');
+  ok(/ORDER BY score DESC/.test(top), '点の高い順で並べている');
+  ok(!/ORDER BY[^;]*(coins|earned)/.test(top),
+    '**コインでは並べていない**（台帳から直に足せる物では記録にならない）');
   // メール未確認の人は出さない。確認前でも名前は付けられるので、そこを載せない
   ok(/verified_at IS NOT NULL/.test(top), 'メールを確認した人だけを並べる');
 
-  /* 稼いだ総額は**受け取った時に一緒に増える。**
+  /* **勝利が一番重いこと。**「できれば勝利数が高いほうがいいね」と言われた所。
+     1勝＝撃破50回＝到達波20。1試合の撃破は多くて10前後なので、
+     勝った試合1つが負け続けた10試合より上に来る */
+  ok(SCORE.WIN > SCORE.KILL * 10 && SCORE.WIN > SCORE.WAVE * 10,
+    `勝利が一番重い（勝${SCORE.WIN} 撃破${SCORE.KILL} 波${SCORE.WAVE}）`);
+  ok(scoreOf({ wins: 1 }) > scoreOf({ kills: 10, waves: 10 }),
+    '1勝が「撃破10・波10」より上');
+  // soloだけ・対戦だけのどちらでも上がること
+  ok(scoreOf({ waves: 12 }) > 0 && scoreOf({ kills: 12 }) > 0,
+    '1人プレイだけでも対戦だけでも点が入る');
+  ok(scoreOf({ wins: -5, kills: -5 }) === 0, '負の数を渡しても点は0まで');
+
+  /* 遊んだ記録は**両方の入口から足される。**
      ここが抜けると、順位表が全員0のまま動かない */
-  const w = readFileSync(new URL('../server/wallet.js', import.meta.url), 'utf8');
-  ok(/earned = wallets\.earned \+ EXCLUDED\.earned/.test(w),
-    'addCoinsがearnedにも足している');
-  ok(/coins = coins \+ \$2, earned = earned \+ \$2/.test(w),
-    '1人プレイの受け取り(addSoloCoins)もearnedに足している');
+  const idx = readFileSync(new URL('../server/index.js', import.meta.url), 'utf8');
+  ok(/wins: top > 0 && \(s\.rounds \| 0\) === top \? 1 : 0/.test(idx),
+    '対戦の終わりに、1位だけ勝ち星が付く');
+  ok(/addPlay\(db\.query, me\.id, \{[\s\S]{0,120}waves:/.test(idx),
+    '1人プレイの受け取りで到達波と撃破が足される');
+  /* **コインが貰えなかった時も記録は足す。**
+     1日の上限に当たった後も遊んではいるので、
+     受け取りと同じ扱いにすると、その日たくさん遊んだ人ほど記録が止まる */
+  ok(idx.indexOf('addPlay(db.query, me.id') < idx.indexOf('addSoloCoins(q, me.id, want)'),
+    '**コインの上限判定より前に記録している**（上限に当たっても記録は残る）');
 }
 
 console.log('\n[3] 数を絞っている');
