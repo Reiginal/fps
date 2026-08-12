@@ -77,6 +77,37 @@ const PAINT = {
    足した部品だけ浮いて見える。** 組み立て(SHAPE_BUILDS)が飾りを、
    ここが本体の色を受け持つ */
 const SHAPE_LOOK = {
+  kusarigama: {
+    note: '前へ曲がる鎌の刃と、柄尻から垂れる鎖と分銅。黒鉄と縄',
+    swatch: '#2b2a26',
+    /* **農具の鉄。** 日本刀（黒漆と金）と同じ和の系統だが、
+       あちらが飾ってある物なのに対してこちらは**使っている物**なので、
+       磨かず・金を使わず、縄と木で仕上げる */
+    over: {
+      steel: { color: 0x8a8f94, wear: { color: 0xd2d8de, amount: 0.5 } },
+      phosphate: { color: 0x24231f, wear: { color: 0x7e7666, amount: 1.0, dust: 0.18 } },
+      chrome: { color: 0xc8ccd0 },
+      walnut: { color: 0x4a3422, wear: { color: 0x8a6038, dust: 0.12 } },
+      strap: { color: 0x8a7a58 },
+      anodized: { color: 0x2a2822, wear: { color: 0x7a7260 } },
+    },
+  },
+  chainsaw: {
+    note: '刃物ではなく機械。角張った発動機と、刃を並べた前へ伸びるバー',
+    swatch: '#d4620e',
+    /* **橙。** 品揃えで一番強い色になる。
+       作業機械は遠くからでも見える色で塗ってあるのが普通で、
+       他の短剣（黒・銀・銅・赤）とどれとも被らない */
+    over: {
+      polymer: { color: 0xd4620e, roughness: 0.52, wear: { color: 0xf2a052, amount: 0.6, dust: 0.16 } },
+      enamel: { color: 0x1a1a1c, wear: { color: 0x6e6a66, amount: 0.9, dust: 0.14 } },
+      phosphate: { color: 0x53585c, wear: { color: 0xa8b0b6, amount: 1.0 } },
+      chrome: { color: 0xd8dce0 },
+      strap: { color: 0x2a2a2c },
+      steel: { color: 0x9aa2a8, wear: { color: 0xd8e0e6 } },
+    },
+  },
+
   /* ---- 短剣の形違い5つ。**2026-08-12に、5つとも塗りを足した。**
      「ナイフ系のスキン全体的に色とか質感にも変化欲しい」と言われた所。
      それまで5つとも**塗りを1つも持っていなかった**ので、
