@@ -1044,8 +1044,13 @@ export class Room {
     const sim = slot.sim;
     if (!sim.alive) return;
     if (this.phase !== PHASE.LIVE) return;
-    if (slot.nades <= 0) return;
-    slot.nades--;
+    /* **ガンゲームだけ数えない。** あちらは手榴弾の段があって、
+       投げる物が無くなるとその段で詰む（落ちた武器を拾えない遊び方なので、
+       補充する道が1つも無い）。決まりは server/modes.js が持つ */
+    if (this.rules.nadeLimit !== false) {
+      if (slot.nades <= 0) return;
+      slot.nades--;
+    }
 
     const eye = sim.eye();
     const g = {

@@ -243,7 +243,10 @@ export class Bot {
     const target = this._pick(foes, eye);
     // 見えているかは選んだ1人にだけ聞く。全員に毎刻み聞くと、
     // 人数ぶんの射線判定が60Hzで走る
-    const seen = target ? this._visible(target, eye, octree) : false;
+    /* 見えている点。**頭が隠れていても胴が出ていれば撃つ。**
+       返ってきた点をそのまま狙うので、「見えている所を撃つ」が一致する */
+    const at = target ? this._visibleAt(target, eye, octree) : null;
+    const seen = !!at;
 
     let wantYaw = p.yaw;
     let wantPitch = p.pitch;
@@ -254,7 +257,12 @@ export class Bot {
     if (target) {
       const t = target.player.collider.start;
       const teye = target.eye(_eyeB);
-      _look.x = t.x; _look.y = teye.y - AIM_DROP; _look.z = t.z;
+      /* 狙う所。**見えている点があればそこ。** 無ければ目の少し下（今まで通り）。
+         胴しか見えていない時に目を狙うと、遮蔽へ撃ち続けることになる */
+      if (at) _look.copy(at);
+      else { _look.x = t.x; _look.y = teye.y - AIM_DROP; _look.z = t.z; }
+      // 目が見えている時だけ、狙いを少し下げる（頭を狙い続けないため）
+      if (at === teye) _look.y = teye.y - AIM_DROP;
       dist = Math.hypot(t.x - eye.x, t.z - eye.z);
       if (seen) {
         const a = aimAt(eye, _look);
@@ -408,12 +416,36 @@ export class Bot {
     return best;
   }
 
-  /* 相手が見えているか。octreeを渡さなければ全部見えている扱い
-     （検査から地形抜きで動かせるようにするため） */
-  _visible(foe, eye, octree) {
-    if (!octree) return true;
+  /**
+   * 相手の**どこが見えているか。** 見えている点を返す。見えていなければ null。
+   *
+   * **目だけを見ていた。** 2026-08-13に「この位置の時に敵があんまり撃ってこない。
+   * なんで簡単に勝てちゃいます」と言われた所で、
+   * 遊ぶ側が**低い梁の下**に立っていた。
+   * 目と目を結ぶ線は梁に当たるが、胴から下は丸見えという形になる。
+   * 1本しか撃たない判定だと、そこが「見えていない」になって
+   * **CPUが一度も撃たないまま立っている。**
+   *
+   * 目が通らなかった時だけ、胴と腰の高さをもう2本試す。
+   * **見えている時は今まで通り1本で終わる**ので、
+   * 撃ち合いが起きている間の負荷は変わらない。
+   *
+   * octreeを渡さなければ全部見えている扱い
+   * （検査から地形抜きで動かせるようにするため）
+   *
+   * @returns 見えている点（使い回しのベクトル）か null
+   */
+  _visibleAt(foe, eye, octree) {
     const teye = foe.eye(_eyeB);
-    return originVisible(octree, eye, teye);
+    if (!octree) return teye;
+    if (originVisible(octree, eye, teye)) return teye;
+    /* 胴(-0.35)と腰(-0.68)。**足首まで下げない。**
+       足だけ見えている時に撃たせると、遮蔽の裏へ弾を撃ち続けることになる */
+    for (const dy of [-0.35, -0.68]) {
+      _peek.set(teye.x, teye.y + dy, teye.z);
+      if (originVisible(octree, eye, _peek)) return _peek;
+    }
+    return null;
   }
 
   /**
@@ -451,5 +483,7 @@ export class Bot {
 const _eyeA = new THREE.Vector3();
 const _eyeB = new THREE.Vector3();
 const _look = new THREE.Vector3();
+// 見えているかを試す点。頭が隠れていても胴が出ていることがあるので使い回す
+const _peek = new THREE.Vector3();
 const _probeDir = new THREE.Vector3();
 const _probeRay = new THREE.Ray();

@@ -341,6 +341,50 @@ console.log('\n[8] 弾倉を自分で数える（サーバーは弾数を持っ�
   ok(gap > 90, `装填で撃てない間がある（一番長い間が${gap}刻み）。弾倉は${mag}発`);
 }
 
+console.log('\n[8.5] 頭が隠れていても、胴が出ていれば撃つ');
+{
+  /* 2026-08-13に足した。「この位置の時に敵があんまり撃ってこない。
+     なんで簡単に勝てちゃいます」と言われた所で、
+     遊ぶ側が**低い梁の下**に立っていた。
+
+     見えているかの判定が**目と目を結ぶ1本だけ**だったので、
+     梁で頭が隠れると「見えていない」になって、
+     胴が丸見えでもCPUが一度も撃たなかった。 */
+  const bot = new Bot({ rng: lcg(99) });
+  // 目の高さに板を1枚だけ渡した地形。頭は隠れるが胴は出ている
+  /* 目の高さに渡した梁。**高い所を通る線だけ**を止める。
+     下がっていく線（胴・腰へ向かう線）は素通しにする */
+  const fakeOctree = {
+    rayIntersect: (ray) => {
+      // 半分ほど進んだ所の高さで見る。梁の下をくぐる線はここで低くなっている
+      const midY = ray.origin.y + ray.direction.y * 6;
+      return midY >= 1.5 ? { distance: 3 } : null;
+    },
+  };
+  const foe = {
+    id: 2,
+    player: { collider: { start: { x: 0, y: 0.4, z: -12 } } },
+    eye: (out) => { out.set(0, 1.58, -12); return out; },
+  };
+  const eye = { x: 0, y: 1.58, z: 0 };
+  const at = bot._visibleAt(foe, eye, fakeOctree);
+  ok(!!at, '頭が隠れていても、見えている点が返る');
+  ok(at && at.y < 1.5, `返ってくるのは目より下の点（y=${at ? at.y.toFixed(2) : '-'}）`);
+
+  // 全部が遮られている時は、今まで通り「見えていない」
+  const blocked = { rayIntersect: () => ({ distance: 0.5 }) };
+  ok(bot._visibleAt(foe, eye, blocked) === null, '全部遮られていれば見えていない');
+  // 地形を渡さなければ全部見えている扱い（検査から地形抜きで動かせる）
+  ok(!!bot._visibleAt(foe, eye, null), '地形が無ければ見えている扱い');
+
+  /* **足だけ見えている時に撃たせない。** 試す高さが下がりすぎると、
+     遮蔽の裏へ弾を撃ち続けるCPUになる */
+  const src = readFileSync(new URL('../server/bot.js', import.meta.url), 'utf8');
+  const lows = /for \(const dy of \[([^\]]*)\]\)/.exec(src)?.[1] ?? '';
+  const worst = Math.min(...lows.split(',').map(Number));
+  ok(worst >= -0.8, `一番下でも目から${worst}m（足首まで下げていない）`);
+}
+
 console.log('\n[9] 器の繋ぎ込み（電文・画面）');
 {
   const proto = readFileSync(new URL('../src/net/protocol.js', import.meta.url), 'utf8');
