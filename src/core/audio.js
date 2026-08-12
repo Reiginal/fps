@@ -617,7 +617,11 @@ export class AudioEngine {
   }
 
   resume() {
-    if (this.ctx?.state === 'suspended') this.ctx.resume();
+    /* **catchが要る。** resume()はpromiseを返すので、断られた時は
+       例外ではなく「拾われなかった約束の失敗」として流れて、
+       遊ぶ側の画面の隅へ英語のまま出る（src/ui/diag.js）。
+       人が押していない所から呼ばれると断られるので、起こり得る */
+    if (this.ctx?.state === 'suspended') this.ctx.resume()?.catch?.(() => {});
   }
 
   /**
