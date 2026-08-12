@@ -8,7 +8,8 @@
 import { mkdirSync } from 'node:fs';
 import { capture, BANDS } from './sound-measure.mjs';
 import '../server/dom-stub.js';
-import { SWING_HEAVY_TUNE, SWING_TUNES, swingTune, gunTune } from '../src/core/audio.js';
+import { SWING_HEAVY_TUNE, SWING_TUNES, SHAPE_GUN, swingTune, gunTune } from '../src/core/audio.js';
+import { SHAPE_LIST } from '../src/net/protocol.js';
 
 const OUT = 'sounds';
 mkdirSync(OUT, { recursive: true });
@@ -55,15 +56,17 @@ targets.push({
 /* 形ごとの銃声。**ドラゴンは低く鈍く、キャンディは軽くて高い。**
    元の銃と並べて測らないと「低くした」が本当かどうか分からないので、
    ライフルの音のすぐ後ろに並ぶ名前にしてある */
-/* **形と、それを着ける銃を組で持つ。** 2026-08-11に3つ足したぶんは
-   ライフル以外に着くので、ライフル固定では鳴らせない
-   （ショットガンの木の音を、ライフルの音を土台に鳴らしても比べ物にならない）*/
-const SHAPE_ON = [
-  ['dragon', 'rifle'], ['cute', 'rifle'],
-  ['western', 'shotgun'], ['ice', 'sniper'], ['cyber', 'pistol'],
-  ['armor', 'rifle'], ['sakura', 'rifle'], ['shark', 'shotgun'],
-  ['skeleton', 'pistol'], ['astro', 'sniper'], ['bamboo', 'sniper'], ['venom', 'sniper'], ['chrome', 'pistol'],
-];
+/* **形と、それを着ける銃を組で持つ。** 形はライフル以外にも着くので、
+   ライフル固定では鳴らせない
+   （ショットガンの木の音を、ライフルの音を土台に鳴らしても比べ物にならない）。
+
+   **表そのものから引く。** ここに名前をべた書きしていたせいで、
+   2026-08-12に足した2つ（リボルバー・ソードオフ）が
+   **書き出しに出てこなかった**（振る音でも同じ抜け方をした所）。
+   どの銃に着けるかは protocol.js の SHAPE_LIST が持っているので、そこから取る */
+const SHAPE_ON = SHAPE_LIST
+  .filter((s2) => SHAPE_GUN[s2.id])          // 銃声を持つ形だけ（短剣は下の振る音で見る）
+  .map((s2) => [s2.id, s2.weapon]);
 for (const [shape, weaponId] of SHAPE_ON) {
   const gun = WEAPONS.find((w) => w.id === weaponId);
   targets.push({

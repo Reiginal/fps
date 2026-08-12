@@ -394,6 +394,44 @@ const SHAPE_LOOK = {
     },
   },
 
+  /* ---- 2026-08-12に足した2つ。**どちらも形ごと別の銃になる。**
+     「ピストルがなんかな。どれもイケてないんだよな」
+     「ショットガンもなんか好きに足んないなぁ」と言われた所。
+     色を並べても「同じ銃の色違い」から出られないので、組み立てから変えている
+     （実際の組み立ては weapons.js の buildRevolver / buildSawedOff）*/
+  revolver: {
+    note: 'スライドを持たない。丸い銃身と回転弾倉、立った撃鉄と胡桃の握把',
+    swatch: '#1d2733',
+    /* **青黒い鋼（ブルーイング）。** 今の拳銃は黒・銀・黒緑・透明で、
+       青みのある黒が1つも無い。木の握把と並べた時に一番古い銃に見える色 */
+    over: {
+      enamel: { color: 0x141c26, wear: { color: 0x6e808e, amount: 0.9 } },
+      anodized: { color: 0x1a2430, wear: { color: 0x7a8c9a } },
+      phosphate: { color: 0x1d2733, wear: { color: 0x8496a4, amount: 0.8 } },
+      polymer: { color: 0x181f27, wear: { color: 0x5a6a76 } },
+      steel: { color: 0x8496a4, wear: { color: 0xccd8e2 } },
+      walnut: { color: 0x53301c, wear: { color: 0x9a6034 } },
+      brass: { color: 0xc0913a, wear: { color: 0xecd48c } },
+    },
+  },
+  sawedoff: {
+    note: '銃身を切り詰めた二連。露出した撃鉄と木の先台、切り口の地金',
+    swatch: '#2a2018',
+    /* **黒鉄と古い木。** ウエスタン（手入れされた胡桃と真鍮）と分ける。
+       あちらは飾ってある猟銃で、こちらは**切ってある**銃なので、
+       木も金属も傷んでいる方が正しい。切り口(steel)だけ明るく残す */
+    over: {
+      enamel: { color: 0x1a1712, wear: { color: 0x7a6c52, amount: 1.1, dust: 0.18 } },
+      phosphate: { color: 0x211c15, wear: { color: 0x8a7854, amount: 1.0, dust: 0.16 } },
+      anodized: { color: 0x241e16, wear: { color: 0x8e7c58 } },
+      polymer: { color: 0x1e1a14, wear: { color: 0x6a5c44 } },
+      walnut: { color: 0x40291a, wear: { color: 0x845234, dust: 0.14 } },
+      // 切った面。**ここだけ明るい。** 切ったばかりの地金が光る
+      steel: { color: 0xb0b6bc, wear: { color: 0xe4eaf0 } },
+      brass: { color: 0x9a7c34, wear: { color: 0xd0b06a } },
+    },
+  },
+
   cute: {
     note: '猫耳・丸めた角・パステルの縞・星のチャーム',
     swatch: '#d98aa6',
