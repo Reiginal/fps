@@ -596,6 +596,15 @@ export const MATS = {
     blending: THREE.AdditiveBlending, depthWrite: false,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   }),
+  /* 望遠照準の点の縁。**加算ではなく普通に重ねる暗い円。**
+     点(dot)は加算合成なので、明るい空を背にすると白へ溶けて消える。
+     下に暗い円を1枚敷くと、背景が何色でも点の形だけは残る。
+     色を真っ黒にしないのは、暗い場所で今度は縁が穴に見えるため */
+  reticleRim: new THREE.MeshBasicMaterial({
+    color: 0x0a0c10, toneMapped: false, transparent: true, opacity: 0.72,
+    depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+  }),
 
   /* ---- ここから下は形違いのスキンだけが使う材質。
      普段の銃には1つも貼られていないので、素の見た目は1ミリも変わらない */
@@ -1992,8 +2001,13 @@ function addScope(g, y, z) {
   const cy = y + 0.026;
   const SEG = 36;
   const EYE_Z = 0.075, OBJ_Z = -0.115;   // 接眼リムと対物リムの位置（zからの差）
-  const EYE_R = 0.0210, OBJ_R = 0.036;   // 内壁の半径。上の計算がこの2つ
-  const TUBE_R = 0.0260, BELL_R = 0.0410; // 外皮
+  /* 内壁の半径。**上の計算がこの2つ。**
+     2026-08-12に0.0210→0.0250へ広げた。「スコープ覗いている時、もう少し見やすく、
+     敵がスコープ内に映るようにしてほしい」と言われた所。
+     覗いた画の76%が筒の胴で埋まっていて、景色が見えるのは24%しかなかった。
+     外皮(TUBE_R)も一緒に太らせないと壁の厚みが0になるので、そちらも上げてある */
+  const EYE_R = 0.0280, OBJ_R = 0.042;   // 内壁の半径。上の計算がこの2つ
+  const TUBE_R = 0.0330, BELL_R = 0.0470; // 外皮
 
   /* ---- マウント。レールを前後2箇所で跨ぐ。
      ここを板や箱で筒の上まで回すと、視線の円錐へ食い込んで開口の縁が欠ける。
@@ -2008,15 +2022,15 @@ function addScope(g, y, z) {
 
   /* ---- 内壁。接眼側は直筒、対物側は前へ開くベル。
      必ず両端を開けること（openEnded）。蓋が付くと覗いた瞬間に黒い円板が立つ */
-  g.add(part(cylG(EYE_R, EYE_R, 0.113, SEG, true), MATS.opticTube, 0, cy, z + 0.0215, Math.PI / 2));
+  g.add(part(cylG(EYE_R, EYE_R, 0.092, SEG, true), MATS.opticTube, 0, cy, z + 0.032, Math.PI / 2));
   g.add(part(cylG(EYE_R, OBJ_R, 0.080, SEG, true), MATS.opticTube, 0, cy, z - 0.075, Math.PI / 2));
   // 外皮。内壁と分けると筒に厚みが出る
   g.add(part(cylG(TUBE_R, TUBE_R, 0.115, SEG, true), MATS.gunmetal, 0, cy, z + 0.0205, Math.PI / 2));
   g.add(part(cylG(TUBE_R, BELL_R, 0.082, SEG, true), MATS.gunmetal, 0, cy, z - 0.076, Math.PI / 2));
   // 接眼側の張り出し（目を当てる所）。内径は筒の外皮まで開けておく。
   // ここを細くすると、接眼リムより手前で視線を絞ることになって輪が出る
-  g.add(part(cylG(0.032, TUBE_R, 0.030, SEG, true), MATS.gunmetal, 0, cy, z + 0.062, Math.PI / 2));
-  g.add(part(torG(0.0322, 0.0030, 6, 26), MATS.anodized, 0, cy, z + EYE_Z + 0.002));
+  g.add(part(cylG(0.039, TUBE_R, 0.030, SEG, true), MATS.gunmetal, 0, cy, z + 0.062, Math.PI / 2));
+  g.add(part(torG(0.0392, 0.0030, 6, 26), MATS.anodized, 0, cy, z + EYE_Z + 0.002));
   // 対物リムの面取り。縁に細い鏡面ラインを走らせる
   g.add(part(torG(BELL_R - 0.001, 0.0028, 6, 30), MATS.anodized, 0, cy, z + OBJ_Z + 0.004));
   g.add(part(torG(BELL_R - 0.004, 0.0014, 5, 30), MATS.steel, 0, cy, z + OBJ_Z + 0.010));
@@ -2062,40 +2076,30 @@ function addScope(g, y, z) {
   g.add(sheen);
   g.userData.sheen = sheen;
 
-  /* ---- レティクル。狙撃銃なので点ではなく十字にする。
-     真ん中を空けて（中心を隠さない）、外側だけ太くする実物の形にすると、
-     細い線でも背景に負けずに追える。
-     線の長さは「その面で見えている円」の内側に収めること。
-     この面での円の半径は 開口の傾き(0.0834) × 目からの距離(0.3167) = 0.0264 なので、
-     一番外の線でも0.0245で止める（はみ出すと筒の内壁に刺さって途中で切れる） */
-  const bars = [];
-  const bar = (len, th, off, vertical) => {
-    for (const s of [1, -1]) {
-      const m = part(
-        planeG(vertical ? th : len, vertical ? len : th), MATS.reticle,
-        vertical ? 0 : s * (off + len / 2), cy + (vertical ? s * (off + len / 2) : 0),
-        z + OBJ_Z + 0.015,
-      );
-      m.renderOrder = 20;
-      m.userData.keep = true;
-      g.add(m);
-      bars.push(m);
-    }
-  };
-  /* 内側の細い線と、外側の太い線。太いほうが視線を中心へ導く。
+  /* ---- レティクル。**点1つだけ。**
+     2026-08-12に十字（細い線4本＋太い線4本＋芯）から作り直した。
+     「シンプルなドットみたいなのがいいんだけど、倍率上がったら」と言われた所。
 
-     **太さは実測して決めた。** 覗くとビューモデルの画角が14.4度まで絞られるので、
-     720pだと1度が50画素になる（腰だめの55度なら13画素）。
-     最初に置いた0.0010は、そこで9画素の帯になって的を隠していた。
-     細い線2.5画素・太い線5画素・芯4画素に収まる寸法まで詰める。
-     太さを変えた時は _spike ではなく tools/check-scope.mjs で測り直すこと */
-  bar(0.012, 0.00028, 0.0035, false);
-  bar(0.012, 0.00028, 0.0035, true);
-  bar(0.008, 0.00055, 0.0165, false);
-  bar(0.008, 0.00055, 0.0165, true);
-  // 芯。十字の交点は空けてあるので、狙点そのものはこの点が受け持つ
-  const dot = part(planeG(0.00045, 0.00045), MATS.dot, 0, cy, z + OBJ_Z + 0.016);
-  dot.renderOrder = 20;
+     倍率が上がると線も一緒に太くなる。覗いた時の画角は14.4度なので
+     720pだと1度が50画素——腰だめ(55度)の4倍の太さで線が乗る。
+     8本の線が寄って**星形の塊**になっていて、狙う所ほど濃かった。
+     倍率のある照準ほど、真ん中は空けて点だけにするのが読みやすい。
+
+     **加算合成の点だけにはしない。** MATS.dot は加算なので、
+     明るい空を背に置くと白に溶けて消える（赤＋白＝白）。
+     暗い縁を1枚下に敷いて、どんな背景でも点の形が残るようにする */
+  const bars = [];
+  // 縁。**点より一回り大きい暗い円。** これが背景との境になる
+  const rim = part(circG(0.00048, 20), MATS.reticleRim, 0, cy, z + OBJ_Z + 0.0155);
+  rim.renderOrder = 20;
+  rim.userData.keep = true;
+  g.add(rim);
+  bars.push(rim);
+  /* 芯。**5画素。** 細すぎると倍率の中で見失い、
+     太いと20m先の頭(18cm)を点が覆い隠す。
+     太さを変えた時は tools/check-scope.mjs の[3]で測り直すこと */
+  const dot = part(planeG(0.00055, 0.00055), MATS.dot, 0, cy, z + OBJ_Z + 0.016);
+  dot.renderOrder = 21;
   dot.userData.keep = true;
   g.add(dot);
   bars.push(dot);
@@ -4481,7 +4485,7 @@ export const WEAPONS = [
     view: {
       // 全長19cmしかないので、ライフルと同じ縮尺だと画面で豆粒になる。
       // 1.0だと本体が画面の6〜10%しか占めず、何を持っているのか読めなかった
-      scale: 1.28, adsScale: 0.86, adsDist: 0.125,
+      scale: 1.28, adsScale: 0.86, adsDist: 0.105,
       // 握把と弾倉が画面の下へ抜けるのは拳銃では正常で、どのFPSもそう描く。
       // 見せたいのはスライドと照準なので、そこが枠に入る高さまで持ち上げる。
       // 総当たりで測ると、y=-0.150では本体の21.8%が枠外（弾倉の底が画面外）、
