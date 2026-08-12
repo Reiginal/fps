@@ -81,7 +81,47 @@ const BURST_GAP_S = 0.32;
    time … 全体の長さ(秒)
    in/out … 引き寄せる・戻すのにかける割合。間は持ち上げたまま止める
    tilt … 傾ける量(rad)。銃口を少し左へ向けて、天面がこちらを向く程度 */
-const INSPECT = { time: 1.0, in: 0.22, out: 0.28, tilt: 0.34 };
+const INSPECT = {
+  time: 1.0, in: 0.22, out: 0.28,
+  // 手前へ引く量・持ち上げる量・銃口を左へ振る量・先を下げる量・傾ける量
+  z: 0.05, h: 0.030, yaw: 0.42, pitch: -0.24, tilt: 0.34,
+  // 保っている間の震え。振れ幅(rad)と速さ(Hz)。既定は震えない
+  shake: 0, shakeHz: 0,
+};
+
+/* 形ごとの見る動き。**書いていない形は上の既定で動く。**
+ *
+ * 2026-08-12に足した。「ブキミルモーションも何個かは、ちょっと違う挙動をするみたいなの
+ * あってもいいよね」と言われた所（全部に付ける必要は無い、とも言われている）。
+ *
+ * **付けるのは「その武器にしか無い所」を見せられる形だけ。**
+ * 何となく角度を変えただけの物を足すと、押しても違いが分からないぶん
+ * 「同じ動きが微妙にずれている」に見えて、かえって雑になる。
+ *
+ * **回さないのは全部に共通。** 腕が同じ群れに入っているので、
+ * 大きく回すと腕ごと回る（上のINSPECTのコメントの経緯）。
+ * ここで変えられるのは「どこを向けて、どれだけ引き寄せて、震えるか」まで
+ */
+const INSPECTS = {
+  /* リボルバー … **弾倉を見せる。** 横へ大きく倒して、面をこちらへ向ける。
+     この銃の中身は回る弾倉なので、そこが見えないと見る意味が無い */
+  revolver: { tilt: 0.86, yaw: 0.66, pitch: -0.10, z: 0.062, h: 0.034, time: 1.2 },
+  /* チェーンソー … **掛ける。** 引き紐を引く動きは作れない（腕が別に動かせない）ので、
+     代わりに**震わせる**。機械が回っている物だと、それだけで伝わる */
+  chainsaw: { tilt: 0.20, yaw: 0.30, pitch: -0.12, z: 0.040, h: 0.026, time: 1.3, shake: 0.020, shakeHz: 26 },
+  /* 日本刀 … **刃を返す。** ゆっくり、傾けるのを主にする。
+     刃文と鎬は面の向きで見え方が変わるので、傾けるだけで中身が出る */
+  katana: { tilt: 0.92, yaw: 0.20, pitch: -0.06, z: 0.030, h: 0.040, time: 1.4, in: 0.30, out: 0.34 },
+  /* 鎖鎌 … **分銅を垂らす。** 傾けず、少し持ち上げて長めに保つ。
+     鎖は下がっている物なので、傾けると持ち上がって形が崩れる */
+  kusarigama: { tilt: 0.08, yaw: 0.34, pitch: -0.16, z: 0.036, h: 0.052, time: 1.4, shake: 0.008, shakeHz: 5 },
+  /* ソードオフ … **切り口を見せる。** 折って中を見せる動きは作れないので、
+     銃口をこちらへ向けて、切った面が正面に来る角度で止める */
+  sawedoff: { tilt: 0.30, yaw: 0.78, pitch: 0.06, z: 0.058, h: 0.028, time: 1.1 },
+};
+
+/** その形の見る動き。**書いていない形は既定** */
+const inspectOf = (shape) => (shape && INSPECTS[shape] ? { ...INSPECT, ...INSPECTS[shape] } : INSPECT);
 
 export const SWINGS = {
   // ナイフ・左: 右上から左下への袈裟斬り。元からある動き
@@ -6219,7 +6259,8 @@ export class WeaponSystem {
     if (this.reloading > 0 || this.switching > 0 || this.shellReload) return false;
     if (this.adsHeld || this.adsFactor > 0.02) return false;
     if (this.bandageOut || this.swing > 0 || this._throwCharging) return false;
-    this.inspect = INSPECT.time;
+    // 長さも形ごとに違う（日本刀と鎖鎌は長めに保つ）
+    this.inspect = inspectOf(this.current?.shapeId).time;
     return true;
   }
 
@@ -7067,17 +7108,27 @@ export class WeaponSystem {
        ins … 引き寄せている量(0〜1)。始めと終わりだけ滑らかにして、間は止める */
     let insZ = 0, insH = 0, insP = 0, insY = 0, insR = 0;
     if (this.inspect > 0) {
-      const k = 1 - clamp01(this.inspect / INSPECT.time);
+      // **形ごとに違う動きを持てる。**書いていない形は既定（INSPECTS参照）
+      const q = inspectOf(w.shapeId);
+      const k = 1 - clamp01(this.inspect / q.time);
       // 台形の包絡。上がり(in)・保ち・下がり(out)
-      const ins = k < INSPECT.in ? k / INSPECT.in
-        : k > 1 - INSPECT.out ? (1 - k) / INSPECT.out : 1;
-      // 手前へ引いて少し持ち上げる。**引きすぎると銃口が画面を覆う**ので0.05まで
-      insZ = ins * 0.05;
-      insH = ins * 0.030;
+      const ins = k < q.in ? k / q.in
+        : k > 1 - q.out ? (1 - k) / q.out : 1;
+      // 手前へ引いて少し持ち上げる。**引きすぎると銃口が画面を覆う**ので0.06まで
+      insZ = ins * q.z;
+      insH = ins * q.h;
       // 銃口を左へ振って、天面がこちらを向く程度に傾ける
-      insY = ins * 0.42;
-      insP = -ins * 0.24;
-      insR = ins * INSPECT.tilt;
+      insY = ins * q.yaw;
+      insP = ins * q.pitch;
+      insR = ins * q.tilt;
+      /* 保っている間の震え。**チェーンソーだけが使う。**
+         引き紐を引く動きは作れない（腕を別に動かせない）ので、
+         「回っている機械」であることを震えで出す */
+      if (q.shake > 0) {
+        const t = (q.time - this.inspect) * q.shakeHz * Math.PI * 2;
+        insR += Math.sin(t) * q.shake * ins;
+        insP += Math.sin(t * 1.7) * q.shake * 0.6 * ins;
+      }
     }
 
     // 巻いている間は武器を大きく下げて画面の外へ寄せる。
