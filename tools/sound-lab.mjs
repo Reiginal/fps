@@ -8,7 +8,7 @@
 import { mkdirSync } from 'node:fs';
 import { capture, BANDS } from './sound-measure.mjs';
 import '../server/dom-stub.js';
-import { SWING_HEAVY_TUNE, swingTune, gunTune } from '../src/core/audio.js';
+import { SWING_HEAVY_TUNE, SWING_TUNES, swingTune, gunTune } from '../src/core/audio.js';
 
 const OUT = 'sounds';
 mkdirSync(OUT, { recursive: true });
@@ -72,9 +72,14 @@ for (const [shape, weaponId] of SHAPE_ON) {
     play: (a) => a.gunshot(gunTune(shape, gun.sound), null, null),
   });
 }
-// 形ごとの振る音。**刀は長く澄んで、ダガーは短く高い。**
-// 見た目だけ変えて音が同じだと、持ち替えた実感が出ない
-for (const shape of ['katana', 'dagger']) {
+/* 形ごとの振る音。**刀は長く澄んで、ダガーは短く高い。**
+   見た目だけ変えて音が同じだと、持ち替えた実感が出ない。
+
+   **表そのものから引く。** ここに名前をべた書きしていたせいで、
+   2026-08-11に足した3つ（レイピア・斧・グローブ）が
+   **一度も測られないまま**だった（2026-08-12に気づいた）。
+   音を足した人が測る側にも名前を写す、という手順は必ず片方が抜ける */
+for (const shape of Object.keys(SWING_TUNES)) {
   for (const heavy of [false, true]) {
     targets.push({
       name: `swing-${shape}${heavy ? '-heavy' : ''}`,
