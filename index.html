@@ -110,31 +110,49 @@
   #cross.hit i { background: var(--warn); }
   /* 順位表。ホームの隅に小さく置く。**押せない・邪魔しない。**
      ボタンの列と重ならないよう左下へ寄せてある（ボタンは中央の枠の中） */
+  /* 2026-08-12に左下から右上へ移した（「ランキング画面が変だよ、
+     見栄えが右上とかにしておいて」）。左下は**設定やログの導線と近い**うえ、
+     枠の外に浮いていて置き場所の理由が無かった。
+     右上なら中央の枠とも重ならず、視線の流れ（題→ボタン）の外側に収まる */
   #rank {
-    position: absolute; left: 18px; bottom: 18px; z-index: 2;
-    min-width: 168px; max-width: 220px;
-    padding: 10px 12px 8px;
-    background: rgba(8,10,12,.55); border: 1px solid rgba(255,255,255,.10);
-    border-radius: 6px;
-    font-size: 10px; letter-spacing: .08em; line-height: 1.7;
+    position: absolute; right: 22px; top: 22px; z-index: 2;
+    width: 200px;
+    padding: 12px 14px 10px;
+    background: rgba(10,13,16,.62);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 8px;
+    font-size: 10px; letter-spacing: .06em; line-height: 1.9;
     color: var(--dim); pointer-events: none;
   }
   #rank .rkhead {
-    font-size: 9px; letter-spacing: .18em; color: var(--accent);
-    margin-bottom: 4px;
+    font-size: 9px; letter-spacing: .2em; color: var(--accent);
+    padding-bottom: 6px; margin-bottom: 6px;
+    border-bottom: 1px solid rgba(255,255,255,.08);
   }
   #rank ol { list-style: none; margin: 0; padding: 0; }
+  /* 数字・名前・スコアの3列。**スコアは右端で揃える**（桁が違っても比べられる） */
   #rank li { display: flex; gap: 8px; align-items: baseline; }
-  /* 順位の数字は幅を固定する。桁で名前の左端がずれると読みにくい */
-  #rank li i { font-style: normal; width: 14px; color: rgba(255,255,255,.35); }
+  #rank li i {
+    font-style: normal; width: 12px; text-align: right;
+    color: rgba(255,255,255,.30); font-size: 9px;
+  }
   #rank li b {
     font-weight: normal; color: var(--hud); flex: 1;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  #rank li span { color: rgba(255,255,255,.45); }
+  #rank li span {
+    color: rgba(255,255,255,.50); font-variant-numeric: tabular-nums;
+  }
   /* 1位だけ色を変える。並びの意味が一目で分かる */
   #rank li.top b { color: var(--accent); }
-  #rkFoot { margin-top: 5px; font-size: 9px; color: rgba(255,255,255,.30); }
+  #rank li.top i { color: var(--accent); }
+  #rkFoot {
+    margin-top: 8px; padding-top: 6px;
+    border-top: 1px solid rgba(255,255,255,.06);
+    font-size: 9px; letter-spacing: .1em; color: rgba(255,255,255,.28);
+  }
+  /* 狭い窓では畳む。ホームのボタンに被る方が困る */
+  @media (max-width: 900px), (max-height: 560px) { #rank { display: none; } }
 
   #dot {
     position: absolute; left: -1.5px; top: -1.5px;
