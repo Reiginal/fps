@@ -59,25 +59,6 @@ const PAINT = {
       steel: { color: 0x9aa085, wear: { color: 0xd0d6bc } },
     },
   },
-  /* ジャングル迷彩（拳銃だけ）。ライフルの迷彩と**柄を分ける。**
-     あちらは緑褐色の4色（砂と枯草の土地）、こちらは深緑と黒（濡れた森）。
-     同じ「迷彩」でも、明るいか暗いかで別の物に見える */
-  jungle: {
-    note: '深緑と黒の斑、泥の汚れ。拳銃だけの迷彩',
-    swatch: '#2c3a24',
-    /* 一度全部を暗い緑で塗って**変化64しか出ず落ちた。**
-       アーバン（元は変化30で作り直した）と同じ罠で、
-       **暗い地に暗い色を塗っても何も変わらない。**
-       迷彩は明暗が散っていることが柄の条件なので、
-       樹脂を明るい枯草色まで上げて4段に散らす */
-    over: {
-      enamel: { color: 0x4e6236, wear: { color: 0x8a9a64, amount: 1.1, dust: 0.28, dustColor: 0x6a5c3e } },
-      polymer: { color: 0x8a9660, wear: { color: 0xb4bc8c, dust: 0.32, dustColor: 0x6a5c3e } },
-      anodized: { color: 0x1e2a18, wear: { color: 0x4a5c38 } },
-      phosphate: { color: 0x30401f, wear: { color: 0x62744a, dust: 0.26 } },
-      steel: { color: 0x9aa478, wear: { color: 0xccd4a8 } },
-    },
-  },
   gold: {
     note: '派手枠。一番高い',
     swatch: '#a8811f',
@@ -317,20 +298,6 @@ const SHAPE_LOOK = {
       steel: { color: 0x6a7a48, wear: { color: 0xaebc78 } },
     },
   },
-  skeleton: {
-    note: '透ける樹脂の枠と、中に見える発条と真鍮の弾',
-    swatch: '#d8e4ea',
-    /* **地は明るくしない。** 透ける枠の中に元の部品が見える作りなので、
-       中身が暗い方が枠の透明感が出る。
-       地金だけ明るくして、発条と縁の金属が繋がるようにしてある */
-    over: {
-      enamel: { color: 0x30363c, wear: { color: 0x7e8a94, amount: 0.6 } },
-      anodized: { color: 0x3a4248, wear: { color: 0x8e9aa4 } },
-      polymer: { color: 0x282e34, wear: { color: 0x66727c } },
-      phosphate: { color: 0x2a3036, wear: { color: 0x76828c } },
-      steel: { color: 0xb4c0c8, wear: { color: 0xe8f0f6 } },
-    },
-  },
   astro: {
     note: '白い鏡筒と真鍮の口金、副望遠鏡と赤経環。天体望遠鏡に見立てる',
     swatch: '#12142a',
@@ -374,25 +341,6 @@ const SHAPE_LOOK = {
     },
   },
 
-  chrome: {
-    note: '磨いた銀と象牙の握把、真鍮の撃鉄。品揃えで唯一の明るい拳銃',
-    swatch: '#c8d0d8',
-    /* サイバー（黒＋青緑の光）に対して、こちらは**明るい銀。**
-       **地を明るくするのがこの商品の本体。** 飾りだけ銀にして地を黒く残すと、
-       ボーン（消した物）と同じ「暗い銃に明るい飾り」になって地味に戻る。
-
-       擦れの色を暗くしないのも決めごと。
-       他の商品は全部「使い込んだ物」だが、これは磨いてある物なので、
-       剥げた所も明るいままにする */
-    over: {
-      enamel: { color: 0x9aa4ae, metalness: 1.0, roughness: 0.14, wear: { color: 0xdce4ec, amount: 0.4, rough: 0.10 } },
-      anodized: { color: 0xb4bec8, metalness: 1.0, roughness: 0.10, wear: { color: 0xe8f0f6, amount: 0.35, rough: 0.08 } },
-      polymer: { color: 0x8e98a2, wear: { color: 0xc4ccd4, amount: 0.3 } },
-      phosphate: { color: 0x8a949e, metalness: 1.0, roughness: 0.16, wear: { color: 0xd0d8e0, amount: 0.4 } },
-      // 地金は一番磨かれている所。鏡面の飾り(chrome)と繋がる明るさへ
-      steel: { color: 0xc8d0d8, wear: { color: 0xf4f8fc } },
-    },
-  },
 
   bullpup: {
     note: '弾倉が引金の後ろ。全長は短いのに銃身は長い、機関部が肩まで続く形',
@@ -437,6 +385,21 @@ const SHAPE_LOOK = {
       polymer: { color: 0x1c1814, wear: { color: 0x64583f } },
       brass: { color: 0xc09040, wear: { color: 0xecd490, rough: 0.12 } },
       steel: { color: 0x9a9288, wear: { color: 0xd6d0c4 } },
+    },
+  },
+
+  suppressed: {
+    note: '前へ11cm伸びる消音器。ねじ切りの銃身と、溝の入った太い筒',
+    swatch: '#22262b',
+    /* **地は暗いまま。** 消音器は輪郭で主張する飾りなので、
+       色で足すと筒と本体が別々の物に見える。艶を落として
+       「音を殺す道具」の質感（つや消しの黒）へ寄せるのが仕事 */
+    over: {
+      enamel: { color: 0x16191d, roughness: 0.62, wear: { color: 0x5e6870, amount: 0.7 } },
+      anodized: { color: 0x22262b, roughness: 0.55, wear: { color: 0x6e7880 } },
+      phosphate: { color: 0x1b1f23, roughness: 0.72, wear: { color: 0x66707a, amount: 0.8 } },
+      polymer: { color: 0x191c20, wear: { color: 0x545e66 } },
+      steel: { color: 0x707a84, wear: { color: 0xa8b2bc } },
     },
   },
 

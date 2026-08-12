@@ -72,7 +72,7 @@ function fakeDb(coins = 1000, owned = []) {
   return { query, st, sqls };
 }
 
-const RIFLE_GOLD = skuOf('rifle', 'gold');
+const KNIFE_GOLD = skuOf('knife', 'gold');
 const GOLD = skinInfo('gold').price;
 
 /* ------------------------------------------------------------ 品揃え */
@@ -114,8 +114,8 @@ console.log('\n[1] 品揃えと値段');
 
 console.log('\n[2] 商品の文字列');
 {
-  const it = parseSku(RIFLE_GOLD);
-  ok(!!it && it.weapon === 'rifle' && it.skin === 'gold', 'ちゃんとした物は分解できる');
+  const it = parseSku(KNIFE_GOLD);
+  ok(!!it && it.weapon === 'knife' && it.skin === 'gold', 'ちゃんとした物は分解できる');
   ok(it.price === GOLD, `**値段は表から引く**（${GOLD}コイン）`);
   ok(parseSku('rifle:stock') === null, '標準は商品として存在しない（買えない）');
   ok(parseSku('rocket:gold') === null, '知らない武器は断る');
@@ -140,10 +140,10 @@ console.log('\n[3] 買う — 値段をクライアントから受け取らな�
 console.log('\n[4] 買う — 足りていれば買える');
 {
   const db = fakeDb(5000);
-  const r = await buy(db.query, '7', RIFLE_GOLD);
+  const r = await buy(db.query, '7', KNIFE_GOLD);
   ok(r.ok, `買えた${r.ok ? '' : ` ← ${r.error}`}`);
   ok(r.coins === 5000 - GOLD, `残高が引かれた（5000 → ${r.coins}）`);
-  ok(db.st.owned.has(RIFLE_GOLD), '持ち物に入った');
+  ok(db.st.owned.has(KNIFE_GOLD), '持ち物に入った');
 
   const forms = db.sqls.map((x) => x.s);
   ok(forms[0] === 'BEGIN' && forms[forms.length - 1] === 'COMMIT',
@@ -158,19 +158,19 @@ console.log('\n[4] 買う — 足りていれば買える');
 console.log('\n[5] 買う — 足りなければ買えない、減らない');
 {
   const db = fakeDb(100);
-  const r = await buy(db.query, '7', RIFLE_GOLD);
+  const r = await buy(db.query, '7', KNIFE_GOLD);
   ok(!r.ok && r.error === BUY_ERR.POOR, `断られた（${r.error}）`);
   ok(db.st.coins === 100, '**残高が1枚も減っていない**');
-  ok(!db.st.owned.has(RIFLE_GOLD), '持ち物にも入っていない');
+  ok(!db.st.owned.has(KNIFE_GOLD), '持ち物にも入っていない');
   ok(db.sqls.some((x) => x.s === 'ROLLBACK'), '取り消している');
 }
 
 console.log('\n[6] 買う — 2回は買えない、払わされない');
 {
   const db = fakeDb(5000);
-  await buy(db.query, '7', RIFLE_GOLD);
+  await buy(db.query, '7', KNIFE_GOLD);
   const after1 = db.st.coins;
-  const r = await buy(db.query, '7', RIFLE_GOLD);
+  const r = await buy(db.query, '7', KNIFE_GOLD);
   ok(!r.ok && r.error === BUY_ERR.OWNED, `2回目は断られた（${r.error}）`);
   ok(db.st.coins === after1,
     '**2回目で払わされていない**（取り消したので残高が戻っている）');
@@ -190,8 +190,8 @@ console.log('\n[7] 買う — 変な商品');
 
 console.log('\n[8] 装備 — 持っている物しか着けられない');
 {
-  const db = fakeDb(0, [RIFLE_GOLD]);
-  const good = await equip(db.query, '7', 'rifle', 'gold');
+  const db = fakeDb(0, [KNIFE_GOLD]);
+  const good = await equip(db.query, '7', 'knife', 'gold');
   ok(good.ok, '持っている物は着けられる');
 
   const ng = await equip(db.query, '7', 'pistol', 'gold');
@@ -204,7 +204,7 @@ console.log('\n[8] 装備 — 持っている物しか着けられない');
   ok(!(await equip(db.query, '7', 'rifle', 'diamond')).ok, '知らないスキンは断る');
 
   const now = await equippedOf(db.query, '7');
-  ok(now.rifle === 'gold' && now.pistol === DEFAULT_SKIN, '**武器ごとに別々に残る**');
+  ok(now.knife === 'gold' && now.pistol === DEFAULT_SKIN, '**武器ごとに別々に残る**');
 
   // 着け替えは1本のSQL。消してから入れると、間で落ちた時に裸になる
   const sql = db.sqls.filter((x) => /equipped_skins/.test(x.s)).map((x) => x.s);
@@ -214,9 +214,9 @@ console.log('\n[8] 装備 — 持っている物しか着けられない');
 
 console.log('\n[9] 持ち物の読み取り');
 {
-  const db = fakeDb(0, [RIFLE_GOLD, skuOf('pistol', 'camo')]);
+  const db = fakeDb(0, [KNIFE_GOLD, skuOf('pistol', 'camo')]);
   const list = await ownedOf(db.query, '7');
-  ok(list.length === 2 && list.includes(RIFLE_GOLD), '持っている物が全部返る');
+  ok(list.length === 2 && list.includes(KNIFE_GOLD), '持っている物が全部返る');
   const none = await ownedOf(fakeDb(0, []).query, '7');
   ok(Array.isArray(none) && none.length === 0, '何も持っていなければ空の配列');
 }

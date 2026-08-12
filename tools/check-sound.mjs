@@ -400,7 +400,7 @@ console.log('\n[4.7] 形スキンの銃声が、見た目の通りに鳴って�
       ['桜', 'sakura', 'キャンディ', 'cute', 'rifle'],
       ['サメ', 'shark', 'ウエスタン', 'western', 'shotgun'],
       ['ヴェノム', 'venom', 'アイス', 'ice', 'sniper'],
-      ['クローム', 'chrome', 'サイバー', 'cyber', 'pistol'],
+      ['サイレンサー', 'suppressed', 'サイバー', 'cyber', 'pistol'],
     ];
     for (const [nA, a, nB, b, weapon] of pairs) {
       const base = GUNS.find((g) => g.id === weapon).sound;
@@ -466,10 +466,14 @@ console.log('\n[4.7] 形スキンの銃声が、見た目の通りに鳴って�
     }
     // サイバーは真鍮が跳ねる音を切ってある（電子銃に聞こえないので）
     ok(SHAPE_GUN.cyber.mech === false, 'サイバーは機関部の音を切っている');
-    /* **音程のある層はサイバーだけの手。** クロームで同じ向きに滑らせると
-       同じ系統の音になって、拳銃の2つが区別できなくなる */
-    ok(SHAPE_GUN.chrome.thumpTo < SHAPE_GUN.chrome.thumpFrom,
-      'クロームは音程を上げない（上がるのはサイバーだけ）');
+    /* **音程のある層はサイバーだけの手。** 他の拳銃で同じ向きに滑らせると
+       同じ系統の音になって、拳銃の形が区別できなくなる */
+    ok(SHAPE_GUN.suppressed.thumpTo < SHAPE_GUN.suppressed.thumpFrom,
+      'サイレンサーは音程を上げない（上がるのはサイバーだけ）');
+    /* **サイレンサーだけは音量で分ける。** 他の全部が「大きく・鋭く」を
+       競っているので、小さいことがそのまま商品になる */
+    ok(SHAPE_GUN.suppressed.volume < 0.5,
+      `サイレンサーは一番静か（音量${SHAPE_GUN.suppressed.volume}）`);
   }
 
   /* ---- 同じ武器の形が3つ以上になったので、**全部の組を突き合わせる。**
