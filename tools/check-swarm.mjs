@@ -160,5 +160,39 @@ for (const [w, seed, r] of results) {
   );
 }
 
+console.log('\n[狙撃銃] 1人用では胴に当てれば1発');
+{
+  /* 2026-08-12に足した。「スナイパーを使う旨味があんまりないかもしれん」。
+     弾が全部で10発しかない銃なのに、波が進むと胴2発になっていた。
+
+     **数字を上げる形では守れない。** 敵の体力は波で伸びる（100＋波×12で最大220）ので、
+     固定の威力ではどこかの波で必ず足りなくなる。
+     相手の体力を見て埋める作りになっていることを、ここで確かめる */
+  const { readFileSync } = await import('node:fs');
+  const { WEAPONS } = await import('../src/player/weapons.js');
+  const sniper = WEAPONS.find((w) => w.id === 'sniper');
+  ok(sniper.soloOneShot === true, '狙撃銃に印が付いている');
+  ok(WEAPONS.filter((w) => w.soloOneShot).length === 1,
+    '印が付いているのは狙撃銃だけ（他の銃に広がっていない）');
+
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  ok(/def\.soloOneShot && !head && enemyHit\.part !== 'legs'/.test(main),
+    '**胴だけ**が対象（頭と脚は今まで通り＝狙う所を選ぶ意味が残る）');
+  ok(/dmg = Math\.max\(dmg, enemyHit\.enemy\.maxHealth\)/.test(main),
+    '相手の体力を見て埋めている（固定の数字で上げていない）');
+
+  /* **対戦に持ち込まないこと。** 狙撃銃は今のところ対戦に出ないが、
+     出す時にここが効いていると「1発で倒れる銃」を配ることになる */
+  const sim = readFileSync(new URL('../server/sim.js', import.meta.url), 'utf8');
+  ok(!/soloOneShot/.test(sim), '**サーバー（対戦）はこの印を知らない**');
+
+  // 一番固い敵（第10波以降）でも、埋めた後の威力が足りること
+  const hardest = 100 + 120;
+  ok(Math.max(sniper.damage, hardest) >= hardest,
+    `一番固い敵（体力${hardest}）でも1発で落ちる`);
+  ok(sniper.damage < hardest,
+    `**素の威力では足りない**（${sniper.damage}）＝埋める処理が本当に効いている`);
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);
