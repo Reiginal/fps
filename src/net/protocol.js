@@ -827,6 +827,12 @@ export const SHAPE_LIST = [
   { weapon: 'knife', id: 'rapier', name: 'レイピア', price: 1400 },
   { weapon: 'knife', id: 'axe', name: '斧', price: 1500 },
   { weapon: 'knife', id: 'glove', name: 'パンチグローブ', price: 1100 },
+  /* 2026-08-12に足した2つ。「鎖鎌興味ある」「ちぇんーそーいいね」。
+     それまでの5つは**全部が「刃物か拳」**だった。
+     鎖鎌は刃と分銅が鎖で繋がった物、チェーンソーは機械で、
+     **手に持つ物の系統そのものが違う**（強さは今まで通り全部同じ）*/
+  { weapon: 'knife', id: 'kusarigama', name: '鎖鎌', price: 1700 },
+  { weapon: 'knife', id: 'chainsaw', name: 'チェーンソー', price: 2400 },
   // ライフルは一番見る武器なので高い。飾りの量も多い
   { weapon: 'rifle', id: 'dragon', name: 'ドラゴン', price: 2000 },
   { weapon: 'rifle', id: 'cute', name: 'キャンディ', price: 1600 },
