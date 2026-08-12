@@ -562,6 +562,28 @@ console.log('\n[変化の大きさ] 売る色スキンが、見て分かるほ�
       `${s.name}(${s.price}コイン) … 目で見た変化 ${avg.toFixed(0)}（${FLOOR}以上）`);
   }
 
+  /* **短剣の形違いも同じ物差しで見る。**
+     2026-08-12まで、形違い5つ（日本刀・ダガー・レイピア・斧・グローブ）は
+     **塗りを1つも持っていなかった。** 説明文には
+     「磨いた銀に青の焼き入れ」「錆の入った鉄と焦茶の木」と書いてあるのに、
+     実物は5つとも素の鋼と紺黒で、**形以外は全部同じ色**だった
+     （「ナイフ系のスキン全体的に色とか質感にも変化欲しい」と言われた所）。
+
+     下限は色スキンより緩い。形が違うぶん、色だけで見分ける必要は無い。
+     ここで弾きたいのは「塗りを書き忘れた（＝素のまま）」の方 */
+  const SHAPE_FLOOR = 45;
+  const { SHAPE_LIST: SHAPES } = await import('../src/net/protocol.js');
+  for (const s of SHAPES.filter((x) => x.weapon === 'knife')) {
+    const over = overOf(s.id);
+    const keys = Object.keys(over || {}).filter((k) => BASE[k] != null);
+    ok(keys.length >= MIN_MATS,
+      `${s.name} … 色を変えた材質が ${keys.length} 個（${MIN_MATS}個以上）`);
+    if (!keys.length) continue;
+    const avg = keys.reduce((a, k) => a + dist(BASE[k], over[k]), 0) / keys.length;
+    ok(avg >= SHAPE_FLOOR,
+      `${s.name} … 目で見た変化 ${avg.toFixed(0)}（${SHAPE_FLOOR}以上）`);
+  }
+
   /* **値段が高いほど変わる、までは求めない。**
      ゴールドは金属の光りかたで値打ちを出していて、色の距離では測れない。
      ただ「一番安い物より変わらない一番高い物」は通さない

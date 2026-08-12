@@ -92,15 +92,98 @@ const PAINT = {
 
 /* 形違いの見せ方。塗りは持たない（組み立てが自分で材質を決めている）。
    組み立てそのものは weapons.js の SHAPE_BUILDS */
+/* 形違いも塗り替えを持てる。**飾りを足すだけだと本体が元の紺黒のままで、
+   足した部品だけ浮いて見える。** 組み立て(SHAPE_BUILDS)が飾りを、
+   ここが本体の色を受け持つ */
 const SHAPE_LOOK = {
-  katana: { note: '反りのある片刃と円い鍔。刃渡りが3割長い', swatch: '#b9c2cc' },
-  dagger: { note: '短く幅広い両刃と、横へ張り出したクロスガード', swatch: '#c9a24e' },
-  /* 形違いも塗り替えを持てる。**飾りを足すだけだと本体が元の紺黒のままで、
-     足した部品だけ浮いて見える。** 組み立て(SHAPE_BUILDS)が飾りを、
-     ここが本体の色を受け持つ */
-  rapier: { note: '細長い直刃と椀型の護拳。磨いた銀に青の焼き入れ', swatch: '#b8c4d0' },
-  axe: { note: '幅広い片刃と木の柄、刃の背の打撃面。錆の入った鉄と焦茶の木', swatch: '#5a4636' },
-  glove: { note: '刃を持たない。革のグローブと真鍮の当て金。両拳を構える', swatch: '#6a4a30' },
+  /* ---- 短剣の形違い5つ。**2026-08-12に、5つとも塗りを足した。**
+     「ナイフ系のスキン全体的に色とか質感にも変化欲しい」と言われた所。
+     それまで5つとも**塗りを1つも持っていなかった**ので、
+     形だけ違って**色は全部同じ紺黒＋鋼**だった。
+     説明文には「磨いた銀に青の焼き入れ」「錆の入った鉄と焦茶の木」と
+     書いてあったのに、実際には1面も塗り替えていなかった。
+
+     **5つで系統が被らないように配ってある**（並べた時に選択になるように）:
+       日本刀 … 黒漆と金（和）        ダガー   … 焼けた銅と黒革（古い物）
+       レイピア … 磨いた銀と青焼き（貴族）  斧 … 錆びた鉄と焦茶の木（道具）
+       グローブ … 深い赤と生成りの紐（拳闘）
+
+     **柄の芯(rubber)と革(strap)は擦れを焼いていない材質**なので、
+     色だけ差し替える（wearを足すと amount が無くて黒く潰れる）*/
+  katana: {
+    note: '反りのある片刃に刃文、鎺と鮫皮。黒漆の鞘金具と金',
+    swatch: '#1c1a1e',
+    /* **刃は明るくする方へ動かす。** 日本刀は刃が主役で、
+       ここを暗くすると「黒い棒」になる。金具の側を黒漆で沈めて、
+       刃・鮫皮の白・金の3つだけが光る形にする。
+       刃文(hamon)と鮫皮(ivory)は書いていない＝**元の白のまま出る** */
+    over: {
+      steel: { color: 0x7c8590, wear: { color: 0xd8e0e8, amount: 0.45, rough: 0.20 } },
+      anodized: { color: 0x4a5460, wear: { color: 0x9aa6b4 } },
+      phosphate: { color: 0x18181c, wear: { color: 0xb08a3e, amount: 0.8 } },
+      // 柄巻きは紺。**黒にしない。** 鍔も柄芯も黒で沈めてあるので、
+      // ここまで黒いと握りが1本の黒い棒になって、巻いてあることが読めない
+      enamel: { color: 0x22305c, wear: { color: 0x4e5e90, amount: 0.7 } },
+      brass: { color: 0xc9a24e, wear: { color: 0xf0dca0, rough: 0.12 } },
+      rubber: { color: 0x14141a },
+    },
+  },
+  dagger: {
+    note: '短く幅広い両刃と、横へ張り出したクロスガード。焼けた銅と黒革',
+    swatch: '#8a5a32',
+    /* **銅にしてあるのは、鋼の刃が他に4本あるから。**
+       日本刀・レイピア・ナイフ・斧の刃は全部銀色なので、
+       ここだけ地の色そのものを変えないと「短い刀」で終わる */
+    over: {
+      steel: { color: 0x9a6a3c, metalness: 1.0, roughness: 0.38, wear: { color: 0xe0b070, amount: 0.5 } },
+      anodized: { color: 0x6a4526, wear: { color: 0xba8a50 } },
+      phosphate: { color: 0x241c16, wear: { color: 0x8a6a44, amount: 0.9 } },
+      brass: { color: 0xb8862e, wear: { color: 0xe8c880 } },
+      polymer: { color: 0x1c1814, wear: { color: 0x4a3c2c } },
+      rubber: { color: 0x15120f },
+    },
+  },
+  rapier: {
+    note: '細長い直刃と椀型の護拳。磨いた銀に青の焼き入れ',
+    swatch: '#b8c4d0',
+    /* 説明の通りに塗る。**護拳(phosphate)を青焼きにするのが本体で、**
+       刃を明るくしただけだと「細いナイフ」のまま。
+       焼き入れの青は金物の中で一番珍しい色なので、遠目でも他と混ざらない */
+    over: {
+      steel: { color: 0xb0bac6, metalness: 1.0, roughness: 0.18, wear: { color: 0xeaf2fa, amount: 0.35, rough: 0.12 } },
+      anodized: { color: 0x2a4a86, wear: { color: 0x7098d0 } },
+      phosphate: { color: 0x22345e, metalness: 1.0, roughness: 0.30, wear: { color: 0x6a8cc4, amount: 0.7 } },
+      brass: { color: 0xd8c070, wear: { color: 0xf6ecc0, rough: 0.12 } },
+      rubber: { color: 0x101828 },
+    },
+  },
+  axe: {
+    note: '柄を横切って載る刃頭と長い顎。錆の入った鉄と焦茶の木',
+    swatch: '#5a4636',
+    /* **刃先(chrome)だけ明るく残す。** 錆びた鉄の塊の中で、
+       研いだ縁だけが光っている形にすると「使ってある道具」に見える。
+       chromeは擦れを焼いていない材質なので色だけ差し替える */
+    over: {
+      steel: { color: 0x6a5648, metalness: 1.0, roughness: 0.62, wear: { color: 0xa8724a, amount: 1.2, dust: 0.22, dustColor: 0x6a4a30 } },
+      chrome: { color: 0xc4ccd4 },
+      phosphate: { color: 0x2a2320, wear: { color: 0x8a6a4e, amount: 1.1, dust: 0.20 } },
+      walnut: { color: 0x3a2418, wear: { color: 0x7a4e2e, dust: 0.14 } },
+      strap: { color: 0x3a2a1c },
+      brass: { color: 0x9a7830, wear: { color: 0xd0b060 } },
+    },
+  },
+  glove: {
+    note: '刃を持たない。深い赤の革に生成りの紐と真鍮。両拳を構える',
+    swatch: '#8c2a20',
+    /* **革(mitt)を濃くして、紐(strap)を生成りへ上げる。**
+       全部を赤いままにすると、丸い塊が1色で潰れて風船に見える。
+       紐と縫い目が明るいと、そこが縁になって拳の丸みが読める */
+    over: {
+      mitt: { color: 0x8e1c16, wear: { color: 0xd05a48, amount: 0.45 } },
+      strap: { color: 0xd8d0be },
+      brass: { color: 0xd8b25a, wear: { color: 0xf6e3a8, rough: 0.10 } },
+    },
+  },
 
   dragon: {
     note: '背の棘・銃口の顎・鱗・光る目。暗い赤銅に金の擦れ',
