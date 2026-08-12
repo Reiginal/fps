@@ -2039,30 +2039,34 @@ function addOptic(g, y, z) {
   g.add(sheen);
   g.userData.sheen = sheen;
 
-  /* ---- レティクル。滲みだけだと輪郭が無いので、細いリングと芯のドットで組む */
-  // 滲みは芯に寄せる。リングと同じ大きさまで広げるとリングが滲みに溶けて輪郭が消える。
-  // 芯を実MOAまで細くすると滲みの方が勝って「赤い丸シール」に逆戻りするので、
-  // 滲みも芯に比例して詰める
-  const glow = part(planeG(0.006, 0.006), MATS.dotGlow, 0, cy, z - 0.028);
+  /* ---- レティクル。**点1つだけ。**
+     2026-08-12に輪をやめた。「アサルトのスコープ、まんなかが赤くて全然敵が見えない、
+     もっとシンプルなドットとかでいいよ」と言われた所。
+
+     輪は130MOA（画面上で直径約68px）まで絞ってあったが、
+     **中心へ寄せた輪は「狙う所を囲う」ので、一番見たい所が一番塞がる。**
+     狙撃銃を点だけにした時と同じ話で、倍率の有無に関係なく
+     真ん中は空けておく方が読みやすい。
+
+     滲み(glow)も詰める。加算合成の赤が広いと、点ではなく「赤い丸シール」に見える */
+  const glow = part(planeG(0.0038, 0.0038), MATS.dotGlow, 0, cy, z - 0.028);
   glow.renderOrder = 19;
   glow.userData.keep = true;
   g.add(glow);
-  // 輪。ADSの画角(46度→1px=0.064度)で実測すると、半径0.0105の輪は直径300MOAあった。
-  // EOTechの輪でも68MOAなので、30m先の敵の胴がまるごと入る大きさになっていた。
-  // 130MOA相当（画面上で直径約68px）まで絞る
-  const ring = part(torG(0.0045, 0.00035, 4, 40), MATS.reticle, 0, cy, z - 0.0272);
-  ring.renderOrder = 20;
-  ring.userData.keep = true;
-  g.add(ring);
+  /* 暗い縁。**加算の赤は明るい空で白に溶ける**ので、下に1枚敷いて形を残す
+     （狙撃銃の点と同じ作り。MATS.reticleRimの説明を参照）*/
+  const rim = part(circG(0.0018, 20), MATS.reticleRim, 0, cy, z - 0.0274);
+  rim.renderOrder = 20;
+  rim.userData.keep = true;
+  g.add(rim);
   // 芯。丸マスクの外周は透けるので、板の寸法より実際に光る芯は一回り小さくなる。
-  // 0.0048だと画面上12px＝46MOAで、狙点ではなく的を隠す板になっていた。
-  // 実物のダットは2MOA。720pで潰れない下限（芯が約3px＝12MOA相当）まで細める
-  const dot = part(planeG(0.0013, 0.0013), MATS.dot, 0, cy, z - 0.0268);
-  dot.renderOrder = 20;
+  // 実物のダットは2MOA。720pで潰れない下限（芯が約4px）まで細める
+  const dot = part(planeG(0.0017, 0.0017), MATS.dot, 0, cy, z - 0.0268);
+  dot.renderOrder = 21;
   dot.userData.keep = true;
   g.add(dot);
   g.userData.dotGlow = glow;
-  g.userData.reticle = [glow, ring, dot];
+  g.userData.reticle = [glow, rim, dot];
 
   const sight = new THREE.Object3D();
   sight.position.set(0, cy, z);
