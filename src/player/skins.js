@@ -332,33 +332,45 @@ const SHAPE_LOOK = {
     },
   },
   astro: {
-    note: '紺紫の地に星の粒、対物側に光る環。望遠鏡に見立てる',
-    swatch: '#2a2448',
-    /* **地は紺紫。** 星を置く物なので、夜空の暗さが要る。
-       アイス（明るい白）と正面から逆で、ヴェノム（黄緑）とも色相が離れている */
+    note: '白い鏡筒と真鍮の口金、副望遠鏡と赤経環。天体望遠鏡に見立てる',
+    swatch: '#12142a',
+    /* **2026-08-12に作り直した。**「コンセプトもない」と言われた所。
+       前は紺紫の地に光る粒を12個散らしただけだった。
+
+       今は飾り側(astroDeco)が白い鏡筒と真鍮を持っているので、
+       **ここは架台の黒を作る役。** 19世紀の屈折望遠鏡は
+       「白い筒＋真鍮の金具＋黒い架台」の3色でできていて、
+       架台まで明るくすると筒が浮かなくなる。
+       夜空の名残りで、黒を少しだけ青へ寄せてある */
     over: {
-      enamel: { color: 0x201c3a, wear: { color: 0x6a64a0, amount: 0.8 } },
-      polymer: { color: 0x262046, wear: { color: 0x5e589a } },
-      polymerTan: { color: 0x2a2448, wear: { color: 0x7068ac } },
-      anodized: { color: 0x18142c, wear: { color: 0x58508a } },
-      phosphate: { color: 0x141024, wear: { color: 0x4e4880 } },
-      // 地金は銀へ。光る環と地金が繋がって、飾りが後付けに見えない
-      steel: { color: 0xa8b0c8, wear: { color: 0xdce2f0 } },
+      enamel: { color: 0x13152a, wear: { color: 0xa88c50, amount: 0.9 } },
+      polymer: { color: 0x171930, wear: { color: 0x8a7448 } },
+      polymerTan: { color: 0x1c1e36, wear: { color: 0x9a8250 } },
+      anodized: { color: 0x0f1120, wear: { color: 0x8e7a48 } },
+      phosphate: { color: 0x0d0f1c, wear: { color: 0x7e6c40 } },
+      // 地金は真鍮寄りへ。口金と地金が繋がって、飾りが後付けに見えない
+      steel: { color: 0xa8925c, wear: { color: 0xdcc890 } },
     },
   },
   bamboo: {
-    note: '節が並ぶ竹の銃身、麻紐の巻き。若竹の緑と生成りの白',
-    swatch: '#a8b060',
-    /* **竹そのものは飾り側(bambooDeco)が持っている。**
-       ここが塗るのは金属の側で、竹に合う生成りへ寄せる役。
-       金属を黒く残すと、竹だけ後から被せたように浮く（ウエスタンと同じ理屈） */
+    note: '銃身に沿う弓の弧と弦、籐巻きと朱の房。和弓に見立てる',
+    swatch: '#1c1a16',
+    /* **2026-08-12に作り直した。**「コンセプトもない」と言われた所。
+       前は銃身に竹の筒を被せて節を並べただけで、
+       出来上がりは「緑に塗った狙撃銃」だった。
+
+       今は飾り側(bambooDeco)が弓の弧と弦を持っている。
+       **ここは黒漆を作る役。** 和弓の籐巻きと弭は黒漆で、
+       竹の色はそこに挟まって初めて竹に見える。
+       日本刀（黒漆と金）と同じ系統 */
     over: {
-      enamel: { color: 0x4a4632, wear: { color: 0x9a9468, amount: 1.0, dust: 0.16 } },
-      polymer: { color: 0x585240, wear: { color: 0xa8a078 } },
-      polymerTan: { color: 0x7a7452, wear: { color: 0xc0b888 } },
-      anodized: { color: 0x3e3a2a, wear: { color: 0x8a8460 } },
-      phosphate: { color: 0x363224, wear: { color: 0x7e785a } },
-      steel: { color: 0x8e8a6e, wear: { color: 0xc8c4a2 } },
+      enamel: { color: 0x1c1a16, wear: { color: 0x8a7a4e, amount: 0.9 } },
+      polymer: { color: 0x201d18, wear: { color: 0x74684a } },
+      polymerTan: { color: 0x27231c, wear: { color: 0x8a7c58 } },
+      anodized: { color: 0x161410, wear: { color: 0x6e6244 } },
+      phosphate: { color: 0x13110e, wear: { color: 0x625840 } },
+      // 地金は古い真鍮へ。弓の金具と繋がる
+      steel: { color: 0x9a8a5e, wear: { color: 0xcabb8e } },
     },
   },
 
