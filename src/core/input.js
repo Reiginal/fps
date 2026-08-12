@@ -219,7 +219,16 @@ export class Input {
      LOCK_KEYSの説明にある通り、ESCは**絶対にここへ入れない**。
      対応していないブラウザでは何も起きない（navigator.keyboardが無い） */
   _lockKeyboard() {
-    try { navigator.keyboard?.lock?.(LOCK_KEYS); } catch { /* 借りられないだけ */ }
+    /* **try/catchでは受け止められない。** lock()はpromiseを返すので、
+       断られた時は例外ではなく「拾われなかった約束の失敗」として流れる。
+       行き先はsrc/ui/diag.jsで、遊ぶ側の画面の隅に**英語のまま**出る
+       （2026-08-12に「右上にthis requestみたいなエラー文が出てた」と言われた所。
+         ブラウザは掴み直しのたびに前の申し込みを取り消すので、
+         押し直しただけで "...cancelled by a new lock request" が出る）。
+
+       断られても遊べる（Ctrl+Wが手元に残るだけ）ので、黙って捨てる。
+       tryも残す。**対応していないブラウザではその場で例外**になる */
+    try { navigator.keyboard?.lock?.(LOCK_KEYS)?.catch?.(() => {}); } catch { /* 借りられないだけ */ }
   }
 
   /* 全画面を畳む。既に窓なら何もしない。
