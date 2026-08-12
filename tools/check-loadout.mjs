@@ -290,6 +290,46 @@ console.log('\n[7] 数字キーに載らない枠（Qの狙撃銃・Eのショ�
   }
   ok(!over, over ? `${over} がやりすぎ（傾け1.0rad・引き寄せ0.07mまで）`
     : '傾けも引き寄せも上限の中に収まっている');
+
+  /* **模型ごと回さないこと（回すのは群れだけ）。** 2026-08-12に
+     「ブキミルモーションでその鎖をブンブン回すとかでもいいしね」で
+     鎖鎌の鎖を回す形を足した。腕は武器と同じ群れに入っているので、
+     模型のrotationへ回転を積むと腕まで回る。
+     **回す先が userData の群れ限定**であることを見る */
+  ok(/w\.parts\.chain\.rotation\.z = /.test(src2), '回すのは鎖の群れ（parts.chain）');
+  ok(!/insR \+= [^;]*spin/.test(src2), '模型の傾き(insR)へは回転を積んでいない');
+  // 見るのをやめたら戻すこと。戻さないと回った所で止まったままになる
+  ok(/w\.parts\.chain\.rotation\.z = 0;/.test(src2), 'やめた時に元へ戻している');
+}
+
+console.log('\n[9] パンチグローブは左右交互に打つ');
+{
+  /* 2026-08-12に「左クリックは交互で右左でパンチするようにしてほしいわ。
+     左右左右で」と言われて足した。
+
+     **群れが左右で別々でないと成立しない。** 振りは模型ごと動かす作りなので、
+     打っていない方をその場へ置くには、その拳だけを逆へ戻す必要がある */
+  const { SHAPE_BUILDS: SB, WEAPONS: WP } = await import('../src/player/weapons.js');
+  const knife = WP.find((w) => w.id === 'knife');
+  const gl = SB.glove(knife.view);
+  ok(!!gl.userData.fistR && !!gl.userData.fistL, '左右の拳が別々の群れになっている');
+  ok(gl.userData.handR?.parent === gl.userData.fistR,
+    '**右手が右の拳の群れに入っている**（ミットは止まるのに手だけ出る、を防ぐ）');
+  /* **左手は userData.handL ではない方を見る。**
+     meleeRigが「使わない左手」を作って userData.handL を上書きするので
+     （あちらは画面外へ逃がしてある物で、装填の道筋がそこを動かす）、
+     見えている左手は fistL の中にいる別の手になる。
+     ここでは「左の群れの中に手がある」ことだけ確かめる */
+  let handInL = false;
+  gl.userData.fistL.traverse((o) => { if (o.userData?.isHand) handInL = true; });
+  ok(handInL, '左の拳の群れの中にも手がある');
+
+  // 左クリックのたびに入れ替わること。右クリックは必ず右
+  const src3 = readFileSync(new URL('../src/player/weapons.js', import.meta.url), 'utf8');
+  ok(/this\.punchLeft = kind === 'light' \? !this\.punchLeft : false;/.test(src3),
+    '左クリックで入れ替わり、右クリックは右に戻る');
+  ok(/const idle = this\.punchLeft \? fistR : fistL;/.test(src3),
+    '打っていない方だけをその場へ置いている');
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
