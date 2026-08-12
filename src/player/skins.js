@@ -394,6 +394,52 @@ const SHAPE_LOOK = {
     },
   },
 
+  bullpup: {
+    note: '弾倉が引金の後ろ。全長は短いのに銃身は長い、機関部が肩まで続く形',
+    swatch: '#2e3338',
+    /* **無彩色の樹脂。** ドラゴン(赤銅)・キャンディ(パステル)・
+       装甲(鉄)・桜(白)と色で競わない。この形違いは輪郭で主張する物なので、
+       色は「新しい樹脂の銃」であることだけ出せばいい */
+    over: {
+      polymer: { color: 0x2e3338, wear: { color: 0x76808a } },
+      polymerTan: { color: 0x353b41, wear: { color: 0x828c96 } },
+      enamel: { color: 0x1c2024, wear: { color: 0x68727c, amount: 0.8 } },
+      anodized: { color: 0x262c32, wear: { color: 0x7e8892 } },
+      phosphate: { color: 0x20252a, wear: { color: 0x6e7882 } },
+      steel: { color: 0x8a939c, wear: { color: 0xc8d0d8 } },
+    },
+  },
+  antimat: {
+    note: '太い銃身と大きな制退器、角張った箱の機関部。前へ開いた二脚',
+    swatch: '#3d4238',
+    /* **砂漠の機材色。** 今の狙撃銃は白(氷)・黄緑(毒)・黒(望遠鏡と和弓)なので、
+       くすんだ土色がここだけになる。大きい物は彩度を落とす方が重く見える */
+    over: {
+      anodized: { color: 0x3d4238, wear: { color: 0x8e9484, amount: 1.0, dust: 0.20 } },
+      polymer: { color: 0x363a30, wear: { color: 0x7e8474, dust: 0.18 } },
+      polymerTan: { color: 0x5a5a46, wear: { color: 0xa2a288, dust: 0.22 } },
+      enamel: { color: 0x24261e, wear: { color: 0x6e7464, amount: 0.9 } },
+      phosphate: { color: 0x2a2c24, wear: { color: 0x767c6c, dust: 0.16 } },
+      steel: { color: 0x8a9080, wear: { color: 0xc2c8b4 } },
+    },
+  },
+  hunter: {
+    note: '一体の胡桃の銃床、露出した長い遊底、真鍮の口金と底板',
+    swatch: '#5a3520',
+    /* **木と真鍮。** 飾りは足していない（素朴なのがこの銃の中身）ので、
+       塗りが仕事を全部する。金属は木に合う暖かい黒へ寄せて、
+       真鍮と象牙だけが明るく残る形にしてある */
+    over: {
+      walnut: { color: 0x5a3520, wear: { color: 0x9c6438, dust: 0.10 } },
+      phosphate: { color: 0x1e1a16, wear: { color: 0x7a6a52, amount: 0.9 } },
+      enamel: { color: 0x191512, wear: { color: 0x6a5c46 } },
+      anodized: { color: 0x221d18, wear: { color: 0x7e6e56 } },
+      polymer: { color: 0x1c1814, wear: { color: 0x64583f } },
+      brass: { color: 0xc09040, wear: { color: 0xecd490, rough: 0.12 } },
+      steel: { color: 0x9a9288, wear: { color: 0xd6d0c4 } },
+    },
+  },
+
   /* ---- 2026-08-12に足した2つ。**どちらも形ごと別の銃になる。**
      「ピストルがなんかな。どれもイケてないんだよな」
      「ショットガンもなんか好きに足んないなぁ」と言われた所。

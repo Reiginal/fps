@@ -879,6 +879,9 @@ export const SHAPE_LIST = [
 
      値段は品揃えで一番高い。**持ち替えたら別の銃**なので、
      飾りを足すだけの物より上に置く */
+  { weapon: 'rifle', id: 'bullpup', name: 'ブルパップ', price: 2200 },
+  { weapon: 'sniper', id: 'antimat', name: '対物ライフル', price: 2300 },
+  { weapon: 'sniper', id: 'hunter', name: '猟銃', price: 1800 },
   { weapon: 'pistol', id: 'revolver', name: 'リボルバー', price: 2000 },
   { weapon: 'shotgun', id: 'sawedoff', name: 'ソードオフ', price: 2100 },
   /* **ボーンは2026-08-11に消した。**「マジダサすぎる。いらない」と言われた。
