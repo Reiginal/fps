@@ -180,7 +180,11 @@ console.log('\n[2] 望遠照準（狙撃銃）');
   };
   const plain = blockers(def.build);
   ok(plain.length <= 1, `素のままで線を塞ぐ物は${plain.length}個（照門そのもの）`);
-  for (const [name, id] of [['サイバー', 'cyber'], ['クローム', 'chrome'], ['スケルトン', 'skeleton']]) {
+  /* **並べる形は表から引く。** 名前をべた書きしていると、
+     形を消した時にここが「無い物」を組もうとして落ち、
+     足した時は測られないまま出ていく（2026-08-12に両方踏んだ）*/
+  const { SHAPE_LIST: SLP } = await import('../src/net/protocol.js');
+  for (const { name, id } of SLP.filter((x) => x.weapon === 'pistol')) {
     const got = blockers(SHAPE_BUILDS[id]);
     ok(got.length <= plain.length,
       `${name} … 素のままより増やしていない（${got.length}個 / 素のまま${plain.length}個`

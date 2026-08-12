@@ -363,6 +363,42 @@ export const STEPS = [
       DELETE FROM equipped_skins
             WHERE skin_id = 'camo' AND weapon_id <> 'rifle'`,
   },
+  {
+    n: 16,
+    name: '拳銃の色と飾りの商品を下げて、ゴールドをナイフだけにする',
+    /* 2026-08-12。3つまとめて。**どれも同じ理由で下げている。**
+       この日にリボルバー・ソードオフ・ブルパップ・対物ライフル・猟銃と、
+       **形ごと別の銃になる**形違いを5つ出した所で、
+       「サイバーとリボルバー以外は今の所、削ってもいいぐらい微妙やで」と言われた。
+
+       **クローム（明るさ）とスケルトン（透明）** … 2つとも塗りと小さい飾りで
+       解こうとした商品。拳銃は塗り替えが届く面が12.6%しかないので、
+       原理的に届いていなかった。ボーン(14番)と同じ形の失敗を2回やっていた。
+
+       **ジャングル（拳銃の色）** … 同じ棚の色スキン。形違いが増えたぶん、
+       色だけの商品が一番弱くなっていた。
+
+       **ゴールド** … 「ゴールドも全部にあるけど、どれか1種類でいいよ」。
+       15番で迷彩をライフルだけにしたのと同じ手で、ナイフだけにする。
+       ナイフを選んだのは、色スキンが1つも無い唯一の武器だったから。
+
+       12〜15番と同じやり方（払った額を返してから消す）。
+       **ナイフのゴールドは残す**ので、'%:gold' ではなく列挙で書いてある */
+    sql: `UPDATE wallets w
+             SET coins = w.coins + r.back, updated_at = now()
+            FROM (SELECT user_id, SUM(price) AS back
+                    FROM owned_skins
+                   WHERE sku IN ('pistol:chrome', 'pistol:skeleton', 'pistol:jungle',
+                                 'rifle:gold', 'shotgun:gold', 'pistol:gold', 'sniper:gold')
+                GROUP BY user_id) r
+           WHERE w.user_id = r.user_id;
+      DELETE FROM owned_skins
+            WHERE sku IN ('pistol:chrome', 'pistol:skeleton', 'pistol:jungle',
+                          'rifle:gold', 'shotgun:gold', 'pistol:gold', 'sniper:gold');
+      DELETE FROM equipped_skins WHERE skin_id IN ('chrome', 'skeleton', 'jungle');
+      DELETE FROM equipped_skins
+            WHERE skin_id = 'gold' AND weapon_id <> 'knife'`,
+  },
   // 現金を入れる時の明細(ledger)はここへ足す。上の11には二度と触らない
 ];
 

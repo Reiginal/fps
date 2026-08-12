@@ -168,14 +168,17 @@ console.log("\n[7] 武器ごとに別のスキンを着ける");
   ok(wearSkin('rifle', DEFAULT_SKIN), '標準はいつでも着けられる（買う物ではない）');
 
   // 買ってある状態にする
-  setAccount({ owned: [skuOf('rifle', 'gold'), skuOf('pistol', 'camo')], equipped: {} });
-  ok(hasSkin('rifle', 'gold'), 'ライフルのゴールドを持っている');
-  ok(!hasSkin('pistol', 'gold'), '**ピストルのゴールドは別の商品**（持っていない）');
-  ok(wearSkin('rifle', 'gold'), '持っている物は着けられる');
-  ok(skinFor('rifle') === 'gold' && skinFor('pistol') === DEFAULT_SKIN,
-    '**武器ごとに別々**（ライフルはゴールド、ピストルは標準）');
-  ok(wearSkin('pistol', 'camo') && skinFor('rifle') === 'gold',
-    'ピストルを変えてもライフルは変わらない');
+  /* **どの武器でも売っている色**を使う（2026-08-12にゴールドをナイフ専用にしたので、
+     ここでゴールドを使うと「拳銃では買えない物」を持たせる話になる）。
+     見たいのは「同じ商品でも武器ごとに別の行になる」ことなので、色は何でもいい */
+  setAccount({ owned: [skuOf('rifle', 'camo'), skuOf('knife', 'gold')], equipped: {} });
+  ok(hasSkin('rifle', 'camo'), 'ライフルの迷彩を持っている');
+  ok(!hasSkin('pistol', 'camo'), '**ピストルの迷彩は別の商品**（持っていない）');
+  ok(wearSkin('rifle', 'camo'), '持っている物は着けられる');
+  ok(skinFor('rifle') === 'camo' && skinFor('pistol') === DEFAULT_SKIN,
+    '**武器ごとに別々**（ライフルは迷彩、ピストルは標準）');
+  ok(wearSkin('knife', 'gold') && skinFor('rifle') === 'camo',
+    'ナイフを変えてもライフルは変わらない');
 
   // 台帳側で持ち物を消された時。着せたままにしない
   setAccount({ owned: [], equipped: { rifle: 'gold' } });
@@ -310,8 +313,12 @@ console.log('\n[11] 形違いのスキン');
   ok(!canEquip('rifle', 'katana'), '**ライフルに刀は着けられない**');
   ok(!itemsFor('rifle').some((i) => i.id === 'katana'), 'ライフルの品揃えに刀が並ばない');
   ok(itemsFor('knife').some((i) => i.id === 'katana'), 'ナイフの品揃えには並ぶ');
-  // 色は全武器で売る
-  ok(SKINNABLE.every((w) => itemsFor(w).some((i) => i.id === 'gold')), '色はどの武器でも売っている');
+  /* **色スキンも武器ごとに絞ってある。**
+     2026-08-12に「ゴールドも全部にあるけど、どれか1種類でいいよ」でナイフ専用にした。
+     それまでは5武器すべての棚に同じ金の枠があった */
+  ok(itemsFor('knife').some((i) => i.id === 'gold'), 'ゴールドはナイフで売っている');
+  ok(!itemsFor('rifle').some((i) => i.id === 'gold'), '**ライフルの棚にゴールドは並ばない**');
+  ok(!canEquip('pistol', 'gold'), '拳銃にゴールドは着けられない');
 
   /* 組み上がった物が、武器側の決まりを満たしているか。
      **印が1つでも欠けると、閃光の出所も覗きの逆算も行き先を失う** */
