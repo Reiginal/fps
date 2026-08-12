@@ -416,6 +416,27 @@ export const STEPS = [
       ADD COLUMN earned BIGINT NOT NULL DEFAULT 0 CHECK (earned >= 0);
       UPDATE wallets SET earned = coins`,
   },
+  {
+    n: 18,
+    name: '遊んだ記録（順位表の元）',
+    /* 2026-08-12。17番で足した earned を順位に使ったが、
+       「稼いだコインの総額、微妙だな。俺ら金もらってるからね、DBで」と言われた。
+       **その通りで、コインは台帳から直に足せる。**
+       足せる数字を順位にすると、順位表が記録ではなく飾りになる。
+
+       ここに足す3つは、どれも遊ばないと1つも増えない:
+         wins  … 対戦で1位になった回数（server/index.jsのpayMatchが書く）
+         kills … 撃破の累計（対戦と1人プレイの両方）
+         waves … 1人プレイの到達波の累計
+
+       **earnedは消さない。** 順位には使わないが、
+       「どれだけ受け取ったか」は後から見たくなる種類の数字で、
+       消すと二度と戻せない（明細を持っていないので） */
+    sql: `ALTER TABLE wallets
+      ADD COLUMN wins  INTEGER NOT NULL DEFAULT 0 CHECK (wins  >= 0),
+      ADD COLUMN kills INTEGER NOT NULL DEFAULT 0 CHECK (kills >= 0),
+      ADD COLUMN waves INTEGER NOT NULL DEFAULT 0 CHECK (waves >= 0)`,
+  },
   // 現金を入れる時の明細(ledger)はここへ足す。上の11には二度と触らない
 ];
 

@@ -4,8 +4,10 @@
 // 遊んだ記録はサーバーに1つも残っていない（撃破数も波もその端末の中だけ）ので、
 // 「人が来たかどうか」を知る手立てが今はこれしか無い。
 //
-// 順位は**稼いだコインの総額**で付ける。残高ではない。
-// 残高は買うと減るので、**スキンを買った人ほど下に落ちる表**になる。
+// 順位は**遊んだ量**で付ける（勝利×100・撃破×2・到達波×5。server/wallet.jsのSCORE）。
+// コインでは付けない。残高は買うと減るし、**稼いだ総額は台帳から直に足せる**ので、
+// どちらも「遊んだ記録」にならない
+// （2026-08-12に「稼いだコインの総額、微妙だな。俺ら金もらってるからね、DBで」）。
 //
 // **押せない。** ホームのボタンの上に透明な板を敷かないよう、
 // CSSで pointer-events を切ってある（見るだけの物なので操作は要らない）。
@@ -71,12 +73,20 @@ export class Ranking {
       // innerHTMLで組むと、名前に入れられたタグがそのまま動く
       name.textContent = r.name || '名無し';
       const val = document.createElement('span');
-      val.textContent = Number(r.earned || 0).toLocaleString();
+      val.textContent = Number(r.score || 0).toLocaleString();
+      /* 勝った回数を名前の横に小さく出す。**点だけだと何で上がったか読めない。**
+         0勝の人には出さない（「0勝」と並ぶと、勝てていないことが強調される） */
+      if (Number(r.wins) > 0) {
+        const w = document.createElement('em');
+        w.textContent = `${Number(r.wins)}勝`;
+        name.append(' ');
+        name.append(w);
+      }
       li.append(rank, name, val);
       list.appendChild(li);
     });
     const n = Number(json.players || rows.length);
-    foot.textContent = `登録 ${n}人 ・ 稼いだコインの総額`;
+    foot.textContent = `登録 ${n}人 ・ 勝利×100 撃破×2 波×5`;
   }
 
   hide() { this.el.root?.classList.add('hidden'); }

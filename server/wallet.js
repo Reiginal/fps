@@ -213,37 +213,95 @@ export async function addSoloCoins(query, userId, want, now = new Date()) {
   }
 }
 
-/**
- * 順位表。**稼いだコインの総額の多い順。**
+/* 順位の付け方。**遊んだ量がそのまま出る数字にする。**
  *
- * なぜ残高(coins)ではないか: 買うと減るので、
- * **スキンを買った人ほど下に落ちる表**になる。earnedは減らない。
+ * 2026-08-12に、稼いだコインの総額(earned)から作り直した。
+ * 「稼いだコインの総額、微妙だな。俺ら金もらってるからね、DBで」と言われた所。
+ * コインは台帳から直に足せるので、**順位表の元にすると記録にならない。**
+ *
+ * ここに並べた3つは、どれも遊ばないと1つも増えない。
+ * **勝利を一番重くしてある**（「できれば勝利数が高いほうがいいね」）。
+ *
+ * 重みの決め方: 対戦1勝＝撃破50回＝到達波20。
+ * 1試合で撃破は多くて10前後なので、**勝った試合1つが、負け続けた10試合より上**になる。
+ * 1人プレイは第10波まで行って50点＝勝利0.5回ぶん。
+ * 対戦だけ・1人だけのどちらでも上がるが、対戦の方が伸びる */
+export const SCORE = { WIN: 100, KILL: 2, WAVE: 5 };
+
+/** 1人ぶんの点。画面にも同じ式を出すので、ここが唯一の持ち主 */
+export const scoreOf = ({ wins, kills, waves } = {}) =>
+  Math.max(0, wins | 0) * SCORE.WIN
+  + Math.max(0, kills | 0) * SCORE.KILL
+  + Math.max(0, waves | 0) * SCORE.WAVE;
+
+/**
+ * 遊んだ記録を足す。**対戦の終わりと1人プレイの受け取りから呼ぶ。**
+ *
+ * どれも「増えるだけ」で減らない。
+ * 申告を受け取るのは1人プレイの2つ(waves/kills)だけで、
+ * そちらは呼ぶ側が上限で丸めてから渡す（soloCoinsForと同じ考え方）。
+ *
+ * **財布の行に相乗りしている。** 表を分けると、順位表を出すのに
+ * 結合が1つ増える（Neonが寝ている時はそのぶん待つ）
+ */
+export async function addPlay(query, userId, { wins = 0, kills = 0, waves = 0 } = {}) {
+  const w = Math.max(0, wins | 0);
+  const k = Math.max(0, kills | 0);
+  const v = Math.max(0, waves | 0);
+  if (!w && !k && !v) return;
+  await query(
+    `INSERT INTO wallets (user_id, wins, kills, waves) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (user_id) DO UPDATE
+       SET wins = wallets.wins + EXCLUDED.wins,
+           kills = wallets.kills + EXCLUDED.kills,
+           waves = wallets.waves + EXCLUDED.waves,
+           updated_at = now()`,
+    [userId, w, k, v],
+  );
+}
+
+/**
+ * 順位表。**遊んだ量（勝利・撃破・到達波）の点が高い順。**
+ *
+ * なぜコインではないか: 残高は買うと減るし、
+ * **稼いだ総額は台帳から直に足せる**ので、どちらも遊んだ記録にならない。
  *
  * なぜ要るか（2026-08-12に足した理由）: ホーム画面に常に出しておくと、
  * **誰かが新しく登録してくれた時にそれが分かる。**
  * 今は遊んだ記録がサーバーに1つも残らない（撃破数は端末の中だけ）ので、
  * 「人が来たか」を知る手立てがこれしか無い。
  *
- * **名前とスコアしか返さない。** メールもidも返さない
+ * **名前と点と勝利数しか返さない。** メールもidも返さない
  * （誰でも見える口なので、名前以外を載せると身元が漏れる）。
  *
  * @param limit 何位まで。呼ぶ側が大きい数を渡しても20で止める
- * @returns { rows: [{ name, earned }], players: 登録した人の数 }
+ * @returns { rows: [{ name, score, wins }], players: 登録した人の数 }
  */
 export async function ranking(query, limit = 10) {
   const n = Math.min(20, Math.max(1, Math.round(limit) || 10));
+  /* 点はSQLの中で出す。**JavaScript側で並べ替えない。**
+     並べ替えを外へ持つと、20位までに絞る前に全員を持ち出すことになる */
   const top = await query(
-    `SELECT u.name, COALESCE(w.earned, 0) AS earned
+    `SELECT u.name,
+            COALESCE(w.wins, 0)  AS wins,
+            COALESCE(w.kills, 0) AS kills,
+            COALESCE(w.waves, 0) AS waves,
+            COALESCE(w.wins, 0) * $2 + COALESCE(w.kills, 0) * $3
+              + COALESCE(w.waves, 0) * $4 AS score
        FROM users u
        LEFT JOIN wallets w ON w.user_id = u.id
       WHERE u.verified_at IS NOT NULL
-      ORDER BY earned DESC, u.id ASC
+      ORDER BY score DESC, wins DESC, u.id ASC
       LIMIT $1`,
-    [n],
+    [n, SCORE.WIN, SCORE.KILL, SCORE.WAVE],
   );
   const all = await query('SELECT COUNT(*)::int AS n FROM users WHERE verified_at IS NOT NULL');
   return {
-    rows: (top?.rows ?? []).map((r) => ({ name: String(r.name ?? ''), earned: Number(r.earned ?? 0) })),
+    rows: (top?.rows ?? []).map((r) => ({
+      name: String(r.name ?? ''),
+      score: Number(r.score ?? 0),
+      wins: Number(r.wins ?? 0),
+    })),
     players: Number(all?.rows?.[0]?.n ?? 0),
   };
 }

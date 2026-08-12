@@ -2713,6 +2713,23 @@ class Game {
       const head = enemyHit.part === 'head';
       if (head) dmg *= def.headMult;
       else if (enemyHit.part === 'legs') dmg *= 0.82;
+      /* **1人用では狙撃銃は胴で1発。** 2026-08-12に
+         「ソロプレイの時、スナイパーは敵の胴体一発で倒してほしい。じゃないと、
+         ちょっとスナイパーを使う旨味があんまりないかもしれん」と言われた所。
+
+         数字を上げるだけでは足りない。1人用の敵は波が進むと固くなって
+         （100＋波×12で最大220）、固定の威力ではどこかの波で必ず2発になる。
+         **相手の体力そのものを見て、足りない時だけ埋める。**
+
+         脚は対象外にしてある。全部の当たり所で1発にすると、
+         狙う所を選ぶ意味が消える（頭と胴と脚の区別が無くなる）。
+
+         **対戦には持ち込まない。**狙撃銃はそもそも対戦に出ないが、
+         出す時にここが効いていると「1発で倒れる銃」を配ることになる。
+         判定はこのファイル（1人用の射撃解決）にしか無い */
+      if (def.soloOneShot && !head && enemyHit.part !== 'legs') {
+        dmg = Math.max(dmg, enemyHit.enemy.maxHealth);
+      }
 
       const killed = enemyHit.enemy.hit(dmg, enemyHit.part);
       if (pellet === 0) { this.shotsHit++; this._tally('hits'); }
