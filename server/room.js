@@ -1402,7 +1402,11 @@ export class Room {
     // 幕間に拾えると、次のラウンドの頭に前のラウンドの拾い物を持ち越すことになる
     if (this.phase === PHASE.LIVE) this._stepDrops();
 
-    if (this.phase !== PHASE.WAIT) {
+    /* 局面の残り時間。**撃ち合いの最中だけ、時計を持たない遊び方がある。**
+       幕間と試合後の時計はどの遊び方でも要る（先へ進む合図がそれしか無い）ので、
+       外すのはLIVEの時計だけ。詳しくは modes.js の timed */
+    const untimed = this.phase === PHASE.LIVE && this.rules.timed === false;
+    if (this.phase !== PHASE.WAIT && !untimed) {
       this.timeLeft -= TICK_DT;
       if (this.timeLeft <= 0) {
         if (this.phase === PHASE.LIVE) this._endRound(null, 'time');
@@ -1529,7 +1533,10 @@ export class Room {
   _startRound() {
     this.round++;
     this.phase = PHASE.LIVE;
-    this.timeLeft = MATCH.ROUND_TIME_S;
+    /* 時計を持たない遊び方（ガンゲーム）には0を入れて配る。
+       **Infinityを入れない。** 電文はJSONなので、そのままだとnullになって
+       受け取り側で0との区別が付かなくなる。0なら「時計は無い」を素直に表せる */
+    this.timeLeft = this.rules.timed === false ? 0 : MATCH.ROUND_TIME_S;
     // 前のラウンドで空中に残っていた玉は持ち越さない
     this.nades.length = 0;
     for (const s of this.slots.values()) this._respawn(s);

@@ -866,9 +866,9 @@ export class HUD {
    * デスマッチは3人4人と増えるほど「誰が近いのか」が見えなくなるので、
    * その1点だけは撃ち合いの最中でも分かるようにしておく
    */
-  matchInfo(mine, theirs, limit, phase, left, leader = '') {
+  matchInfo(mine, theirs, limit, phase, left, leader = '', mode = 'dm') {
     const t = Math.max(0, Math.round(left || 0));
-    const key = `${mine}-${theirs}/${limit}/${phase}/${t}/${leader}`;
+    const key = `${mine}-${theirs}/${limit}/${phase}/${t}/${leader}/${mode}`;
     if (key === this._lastMatch) return;   // 毎フレーム呼ばれる。変わった時だけ触る
     this._lastMatch = key;
 
@@ -882,7 +882,17 @@ export class HUD {
     if (phase === 0) sub = '席に着いて準備完了を押してください';
     else if (phase === 2) sub = `次のラウンドまで ${Math.max(1, t)}`;
     else if (phase === 3) sub = '試合終了';
-    else {
+    else if (mode === 'gun') {
+      /* ガンゲームだけは**時計も先取本数も出さない。**
+         時間で切る決まりがサーバー側に無く（modes.jsのtimed:false）、
+         ラウンドが無いので取得本数も誰も増えない。
+         そのまま出していたので「3本先取 ／ 残り 3:00」と、
+         どちらも起きないことを表示していた（2026-08-13に
+         「ガンゲームで時間制限あるの変だし」と言われた所）。
+
+         今どの武器かは別の札(stage)が出しているので、ここは決まりだけを言う */
+      sub = '倒すと次の武器へ。最後の武器で倒したら勝ち';
+    } else {
       const top = Math.max(mine | 0, theirs | 0);
       // 王手。あと1本で試合が決まる状態は、時計より先に知りたい
       if (top >= (limit | 0) - 1 && top > 0) {
