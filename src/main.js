@@ -1483,6 +1483,26 @@ class Game {
   }
 
   /** 毎フレーム（ソロのループから）。課題の判定と的の面倒だけ */
+  /**
+   * その課題を始められる状態を作る。**課題に入る時と、倒れた後の両方から呼ぶ。**
+   *
+   * 2026-08-13に遊んでもらって出た詰み: 包帯の課題の最中に手榴弾で自爆すると、
+   * 倒れない代わりに走る立て直し(_onPlayerDown → refill)が**体力を満タンに戻す。**
+   * 包帯は満タンだと巻き始め自体を断られる(player.startHeal)ので、
+   * そこから先へ**二度と進めない**（最後の課題なので修了もできない）。
+   *
+   * 入る時に1回だけ整える形にしていたのが原因なので、
+   * **立て直しの後にも同じ整えを通す。** 片方だけ直すとまた別の経路で詰む
+   */
+  _tutStepSetup(step) {
+    if (!step) return;
+    // 包帯の課題は、体力が満タンだと巻き始め自体を断られる(startHeal)。
+    // 少し削っておく（チュートリアル中は死なないので安全）
+    if (step.id === 'heal') this.player.health = Math.min(this.player.health, 55);
+    // 手榴弾の課題も同じ理由で配り直す（以後は投げ放題が面倒を見る）
+    if (step.id === 'nade') this.weapons.addNades(NADE.PER_ROUND);
+  }
+
   _tutorialFrame(dt) {
     // 死んだ的だけ動かして倒れ演出を進める。倒れ切ったら少し置いて起き上がる
     // （的が尽きて課題が詰む、を作らない）
@@ -1561,11 +1581,7 @@ class Game {
            増えたのを見届ける間を置いてから修了へ */
         this._tutFinishT = TUT_FINISH_HOLD_S;
       } else {
-        // 包帯の課題は、体力が満タンだと巻き始め自体を断られる(startHeal)。
-        // 課題に入る時に少し削っておく（チュートリアル中は死なないので安全）
-        if (s.id === 'heal') this.player.health = Math.min(this.player.health, 55);
-        // 手榴弾の課題も同じ理由で配り直す（以後は上の投げ放題が面倒を見る）
-        if (s.id === 'nade') this.weapons.addNades(NADE.PER_ROUND);
+        this._tutStepSetup(s);
       }
     }
     if (this._tutFinishT != null) {
@@ -2229,6 +2245,10 @@ class Game {
     if (this.tutorial || this.range) {
       this.player.refill();
       this.damageFlash = 0;
+      /* **立て直したら、今の課題をもう一度始められる状態に戻す。**
+         refillは体力を満タンにするので、包帯の課題の最中に自爆すると
+         そこから先へ二度と進めなくなっていた（_tutStepSetupの説明を参照）*/
+      if (this.tutorial) this._tutStepSetup(this._tutMachine?.step);
       this.hud.banner('大丈夫', this.tutorial ? 'チュートリアル中は倒れない' : '訓練場では倒れない', 1.6);
       return;
     }
@@ -3443,14 +3463,22 @@ class Game {
         leader = TEAM_NAMES[r.team] || '';
       }
     } else {
+      /* ガンゲームだけは撃破数で比べる。**ラウンドが無いので取得本数が誰も増えず、
+         そのままだと最後まで「0 － 0」のまま**だった。
+         この遊び方は倒すたびに次の武器へ進むので、撃破数がそのまま進み具合になる
+         （相手の段は電文に載っていないが、撃破数なら全員ぶん届いている）*/
+      const gun = net.mode === 'gun';
+      const valOf = (r) => (gun ? r.kills : r.rounds) | 0;
       for (const [id, r] of net.players) {
-        if (id === net.id) { mine = r.rounds | 0; continue; }
-        const n = r.rounds | 0;
+        if (id === net.id) { mine = valOf(r); continue; }
+        const n = valOf(r);
         // 先頭の名前も持つ。3人以上いる時、王手なのが誰かを名指しで出すのに要る
         if (n > theirs || !leader) { theirs = Math.max(theirs, n); if (n >= theirs) leader = r.name || ''; }
       }
     }
-    this.hud.matchInfo(mine, theirs, MATCH.ROUND_WINS, net.phase, net.timeLeft, leader);
+    this.hud.matchInfo(
+      mine, theirs, MATCH.ROUND_WINS, net.phase, net.timeLeft, leader, net.mode,
+    );
     // **1回だけ作る。** 名簿と順位表で別々に呼んでいた頃は、
     // 人数ぶんの入れ物を毎フレーム2組作って捨てていた
     const rows = net.scoreRows();

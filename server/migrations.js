@@ -437,6 +437,35 @@ export const STEPS = [
       ADD COLUMN kills INTEGER NOT NULL DEFAULT 0 CHECK (kills >= 0),
       ADD COLUMN waves INTEGER NOT NULL DEFAULT 0 CHECK (waves >= 0)`,
   },
+  {
+    n: 19,
+    name: '入会祝いの増額ぶんを、今いる人にも配る',
+    /* 2026-08-13。祝い金を900から2000へ上げた（server/wallet.jsのCOIN.SIGNUP）。
+       「登録してくれた人は、１つぐらいいいスキン変えてもいいから
+         2000ぐらいコイン配るようにする？」「今いるユーザーにも配っておいて」
+
+       **上げただけだと、今いる人は900のままになる。**
+       これから登録する人だけが得をする形は、
+       先に登録してくれた人に対してちょうど逆向きになる。
+
+       配るのは差額の1100枚。**2000枚ではない。**
+       今いる人は900枚を既に受け取っているので、
+       2000枚配ると「2900枚もらった人」と「2000枚もらう人」に割れる。
+       差額なら全員が同じ「入会祝い2000枚」で揃う。
+
+       earnedにも同じだけ足す（addCoinsと同じ理由。順位表が読む減らない列）。
+       **順位はearnedで付けていないので、順位表は動かない**（18番の3つで付けている）。
+
+       財布の無い人（登録したがまだ財布の行が無い人）にも配る。
+       行はaddCoinsが作る形なので、ここでは INSERT ... SELECT で作りに行く。
+       **ここで漏らすと、その人だけ祝い金が0のままになる** */
+    sql: `INSERT INTO wallets (user_id, coins, earned)
+            SELECT u.id, 1100, 1100 FROM users u
+          ON CONFLICT (user_id) DO UPDATE
+            SET coins  = wallets.coins  + 1100,
+                earned = wallets.earned + 1100,
+                updated_at = now()`,
+  },
   // 現金を入れる時の明細(ledger)はここへ足す。上の11には二度と触らない
 ];
 

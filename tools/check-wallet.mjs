@@ -97,6 +97,27 @@ console.log('\n[6] 台帳の作り');
   ok(/CHECK \(coins >= 0\)/.test(step.sql),
     '**マイナスの残高を台帳が断る**（買い物の実装を間違えても残らない）');
   ok(/ON DELETE CASCADE/.test(step.sql), '会員を消したら財布も消える');
+
+  /* **入会祝いを上げたら、今いる人にも差額を配る手順が要る。**
+     2026-08-13に900から2000へ上げた所で「今いるユーザーにも配っておいて」と言われた。
+     上げただけだと、これから登録する人だけが得をして、
+     先に登録してくれた人にちょうど逆向きの形になる。
+
+     配るのは**差額**であって全額ではない（全額だと今いる人は2900枚になる）。
+     手順の中の枚数と、今の祝い金の差が食い違っていないかを見る */
+  const gift = STEPS.find((s) => /入会祝い/.test(s.name));
+  ok(!!gift, `差額を配る手順がある（${gift?.n}番）`);
+  if (gift) {
+    const amount = Number(/SELECT u\.id, (\d+)/.exec(gift.sql)?.[1] ?? 0);
+    ok(amount > 0 && amount < COIN.SIGNUP,
+      `配るのは差額（${amount}枚 < 祝い金${COIN.SIGNUP}枚）`);
+    ok(/INSERT INTO wallets[\s\S]*FROM users/.test(gift.sql),
+      '**財布がまだ無い人にも配る**（会員の一覧から作りに行く）');
+    ok(/earned\s*=\s*wallets\.earned \+/.test(gift.sql),
+      'earnedにも同じだけ足す（addCoinsと揃える）');
+    ok(gift.n === Math.max(...STEPS.map((s) => s.n)),
+      '手順の一番下に足してある（真ん中に挿し込まない）');
+  }
 }
 
 console.log('\n[7] 部屋は台帳を知らない');
@@ -148,8 +169,33 @@ console.log('\n[9] 値段との釣り合い');
      何が売っているのかを見る前に閉じることになる */
   ok(COIN.SIGNUP >= cheapest,
     `入会祝い(${COIN.SIGNUP}枚)で一番安いスキン(${cheapest}枚)が買える`);
-  ok(COIN.SIGNUP < cheapest * 2,
-    `**ただし2つは買えない**（${COIN.SIGNUP} < ${cheapest * 2}）。1回体験させるための額`);
+
+  /* **棚の上の方から1つ選べること。** 2026-08-13に900から2000へ上げた所で、
+     「登録してくれた人は、１つぐらいいいスキン変えてもいいから
+       2000ぐらいコイン配るようにする？」と言われた。
+
+     ここで見るのは枚数そのものではなく**選ぶ余地**。
+     この店の売りは形ごと別の銃になる物（リボルバー・ソードオフ・対物ライフル…）で、
+     そこへ届かない額だと「見せ場は見せずに余り物だけ買わせる」形になる。
+
+     前はここに「2つは買えない」と書いてあった。1回だけ体験させる額だった頃の線で、
+     上の狙いに変わった今は逆向きになるので外してある */
+  const shapes = SHAPE_LIST.filter((s) => s.price > 0).map((s) => s.price);
+  const cheapestShape = Math.min(...shapes);
+  ok(COIN.SIGNUP >= cheapestShape,
+    `形ごと変わる物(一番安くて${cheapestShape}枚)にも手が届く`);
+  const good = [...paid, ...shapes].filter((p) => p >= 2000);
+  ok(good.length > 0 && COIN.SIGNUP >= Math.min(...good),
+    `棚の上の方（2000枚以上が${good.length}点）からも1つ選べる`);
+
+  /* **ただし全部は買えない。** 祝い金だけで棚が埋まると、
+     そこから先に遊ぶ理由がスキンの側から1つも出てこなくなる */
+  const all = [...paid, ...shapes];
+  const reach = all.filter((p) => p <= COIN.SIGNUP).length;
+  ok(reach < all.length,
+    `棚を全部は買えない（届くのは${reach}/${all.length}点）`);
+  ok(COIN.SIGNUP < dearest,
+    `一番高い物(${dearest}枚)には届かない（貯める理由を残す）`);
 
   // 4人デスマッチ1試合ぶんの目安。wallet.jsの説明に書いてある数字と同じ形で数える
   const win = coinsFor({ kills: 12, rounds: 3 }, 3);

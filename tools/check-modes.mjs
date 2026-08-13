@@ -257,6 +257,58 @@ console.log('\n[9.5] ガンゲームだけ手榴弾を数えない');
   ok(c.slot.nades === 1, `デスマッチでは今まで通り減る（2 → ${c.slot.nades}）`);
 }
 
+console.log('\n[9.7] ガンゲームには制限時間が無い');
+{
+  /* 2026-08-13に「ガンゲームで時間制限あるの変だし」と言われた所。
+
+     時計は**ラウンドの決着が付かない時に切るための物**なので、
+     ラウンドが無いこの遊び方には切る相手が居ない。
+     それでも時計だけが回っていて、3分ごとに「決着なし」でラウンドが終わり、
+     幕間を挟んで全員が湧き直していた。
+     撃ち合いの最中に、理由の分からない仕切り直しが挟まる形。
+
+     **実際に3分以上回して確かめる。** 表のtimedを読むだけでは、
+     部屋の側がそれを見ていない時に素通りする */
+  const modes = modeOf('gun');
+  ok(modes.timed === false, 'ガンゲームの決まりに「時計を持たない」がある');
+  ok(modeOf('dm').timed !== false && modeOf('team').timed !== false,
+    'デスマッチと2対2は今まで通り時計を持つ');
+
+  startWith(['あき', 'ばん'], 'gun');
+  ok(room.phase === PHASE.LIVE, '始まっている');
+  const round = room.round;
+  // 制限時間より長く回す。実時間で回すと3分待つことになるので刻みだけ進める
+  const ticks = Math.ceil((MATCH.ROUND_TIME_S + 20) / TICK_DT);
+  for (let i = 0; i < ticks; i++) room._tick();
+  ok(room.phase === PHASE.LIVE, `${MATCH.ROUND_TIME_S}秒を越えても撃ち合いのまま`);
+  ok(room.round === round, `仕切り直しが挟まっていない（ラウンド ${round} → ${room.round}）`);
+
+  // デスマッチは今まで通り時間で切れる。ここが落ちると決着しない試合ができる
+  startWith(['あき', 'ばん'], 'dm');
+  const r2 = room.round;
+  for (let i = 0; i < ticks; i++) room._tick();
+  ok(room.round > r2 || room.phase !== PHASE.LIVE,
+    'デスマッチは今まで通り時間で切れる');
+  clear();
+}
+
+console.log('\n[9.8] 画面の上帯が、起きないことを出していないか');
+{
+  /* ガンゲームでは取得ラウンドが誰も増えず（rounds: false）、
+     時計も無い。それなのに上帯は「3本先取 ／ 残り 3:00」と出していて、
+     **どちらも起きないこと**を表示していた。
+     今どの武器かは別の札(stage)が持っているので、上帯は決まりだけを言う */
+  const hud = readFileSync(new URL('../src/ui/hud.js', import.meta.url), 'utf8');
+  ok(/matchInfo\(mine, theirs, limit, phase, left, leader = '', mode = '\w+'\)/.test(hud),
+    '上帯が遊び方を受け取っている');
+  ok(/mode === 'gun'[\s\S]{0,900}?sub = '倒すと次の武器へ/.test(hud),
+    'ガンゲームでは先取本数も残り時間も出さない');
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  ok(/matchInfo\([\s\S]{0,160}?net\.mode/.test(main), '遊び方を渡している');
+  ok(/gun \? r\.kills : r\.rounds/.test(main),
+    'ガンゲームでは撃破数で比べる（取得本数は誰も増えないので0対0のままだった）');
+}
+
 console.log('\n[10] 決まりはサーバーだけが持っている');
 // クライアントに決まりを持たせると、そちらを書き換えれば勝てる
 {

@@ -385,6 +385,71 @@ console.log('\n[8.5] 頭が隠れていても、胴が出ていれば撃つ');
   ok(worst >= -0.8, `一番下でも目から${worst}m（足首まで下げていない）`);
 }
 
+console.log('\n[8.6] 射線がちらついても撃てる（窓ごしの睨み合い）');
+{
+  /* 2026-08-13に「やっぱ自分が外で、相手が中にいる時に敵が撃ってこない」
+     と言われた所。窓・戸口・柱の隙間ごしだと、射線は**通ったり切れたりを
+     細かく繰り返す**（CPU自身も横へ動き続けるので、自分から遮蔽へ入り直す）。
+
+     撃ち始めるまでの間(REACT_S)は「見えている間だけ」減るのに、
+     **見失った瞬間に満タンへ戻していた。** だから1.05秒ぶんが最後まで貯まらず、
+     隙間ごしでは一度も撃たないまま立っていることになる。
+     狙いの上下も見失うたびに水平へ戻すので、撃てる形にもならない。
+
+     ここでは**射線を細かく切る地形**を作って、本当に撃つかを見る。
+     切る間隔は0.25秒。人が窓の前を歩く時に起きる程度の長さで、
+     見失いと見なす0.6秒よりは短い */
+  const foe = {
+    id: 2, alive: true,
+    player: { collider: { start: { x: 0, y: 0.4, z: -12 } }, velocity: { x: 0, y: 0, z: 0 } },
+    eye: (out) => { out.set(0, 1.58, -12); return out; },
+  };
+  const me = {
+    alive: true,
+    def: { mag: 25, reloadTime: 2, range: 60 },
+    player: {
+      yaw: 0, pitch: 0,
+      velocity: { x: 0, y: 0, z: 0 },
+      collider: { start: { x: 0, y: 0.4, z: 0 } },
+    },
+    eye: (out) => { out.set(0, 1.58, 0); return out; },
+  };
+
+  /** 一定の周期で射線を通したり切ったりする地形 */
+  const blinking = (periodS) => {
+    let t = 0;
+    return {
+      step: (dt) => { t += dt; },
+      rayIntersect: () => (Math.floor(t / periodS) % 2 === 0 ? null : { distance: 1 }),
+    };
+  };
+
+  const run = (octree, secs) => {
+    const bot = new Bot({ rng: lcg(7) });
+    let fired = 0;
+    for (let i = 0; i < secs * 60; i++) {
+      octree.step?.(1 / 60);
+      const out = bot.think(me, [foe], octree, 1 / 60, true);
+      me.player.yaw = out.yaw;
+      me.player.pitch = out.pitch;
+      if (out.fire) fired++;
+    }
+    return fired;
+  };
+
+  ok(run(blinking(0.25), 8) > 0, `射線が0.25秒ごとに切れても撃つ（${run(blinking(0.25), 8)}発）`);
+  ok(run(blinking(0.12), 8) > 0, 'もっと細かく切れても撃つ');
+
+  /* **物陰に入られた相手には撃たない。** ここが緩むと、
+     隠れているのに壁越しに狙い続けるCPUになる。
+     ずっと遮られている地形で1発も出ないこと */
+  const wall = { rayIntersect: () => ({ distance: 1 }) };
+  ok(run(wall, 8) === 0, 'ずっと遮られていれば1発も撃たない');
+
+  /* 見えている時にはちゃんと撃つ（この場の作りが壊れていないことの裏取り）*/
+  ok(run({ rayIntersect: () => null }, 8) > 0, '素通しなら普通に撃つ');
+}
+
 console.log('\n[9] 器の繋ぎ込み（電文・画面）');
 {
   const proto = readFileSync(new URL('../src/net/protocol.js', import.meta.url), 'utf8');

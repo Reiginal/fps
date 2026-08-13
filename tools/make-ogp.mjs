@@ -15,7 +15,8 @@
 // 文字は5×7のドットで持っている。日本語は形が複雑でこの持ち方では出せないので、
 // 題(BLACKOUT)だけをドットで置き、日本語は札の文章側(index.htmlのog:description)に任せる。
 import { deflateSync } from 'node:zlib';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -239,4 +240,25 @@ const png = Buffer.concat([
 
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, png);
+
+/* **index.htmlのog:imageに、絵の中身から作った目印を打ち直す。**
+
+   LINEやSlackは一度取った絵を**URL単位で覚え込む**ので、
+   中身だけ入れ替えてもURLが同じなら**前の絵が出続ける。**
+   LINEには消してもらう手立てが無い。
+   2026-08-12に絵を差し替えて札が変わらなかったのがこれ。
+
+   なので絵を書き出したら、ここでURLも変える。
+   手で差し替えた時（GitHubの画面から上げた等）はここを通らないので、
+   そちらは tools/check-ogp.mjs が落として、入れる値を出す */
+const stamp = createHash('sha1').update(png).digest('hex').slice(0, 8);
+const htmlPath = `${ROOT}index.html`;
+const html = readFileSync(htmlPath, 'utf8');
+const next = html.replace(
+  /(<meta property="og:image" content="[^"?]+)(\?v=[0-9a-f]+)?"/,
+  `$1?v=${stamp}"`,
+);
+if (next !== html) writeFileSync(htmlPath, next);
+
 console.log(`assets/ogp.png を書いた  ${W}×${H}  ${(png.length / 1024).toFixed(1)}KB`);
+console.log(`index.html の og:image を ?v=${stamp} にした`);

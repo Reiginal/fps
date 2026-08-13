@@ -259,5 +259,64 @@ console.log('\n[7] Commandを離しても、押しっぱなしのキーが落ち
   input.endFrame();
 }
 
+console.log('\n[8] 文字を打っている欄では、どのキーも止めない');
+/* **2026-08-13に遊んでもらって出た不具合。**
+   「新規登録でパスワードにrが打てなかった」。
+
+   受け口には「掴んでいなくても止める」一覧（Space/Tab/KeyR/Ctrl…）があって、
+   そこだけ**打っている最中かどうかを見ていなかった。**
+   preventDefaultされたキーは文字として入らないので、
+   遊ぶ側からは**キーボードのrだけが壊れている**ようにしか見える。
+
+   Rだけの話ではない: Spaceも入らず、Tabで次の欄へも移れなかった。
+   会員証(account.js)はchat.jsと違ってstopPropagationしていないので、
+   ここで止めないと打つ場所が全部これを踏む */
+{
+  globalThis.HTMLElement = globalThis.HTMLElement ?? class {};
+  // 打っている欄のふり。input.jsは tagName と isContentEditable しか見ない
+  class FakeInput extends globalThis.HTMLElement {
+    constructor(tag) { super(); this.tagName = tag; this.isContentEditable = false; }
+  }
+  const typeInto = (tag, code) => {
+    let stopped = false;
+    winKeys.get('keydown')?.({
+      code, repeat: false, target: new FakeInput(tag),
+      preventDefault: () => { stopped = true; },
+    });
+    return stopped;
+  };
+
+  input.keys.clear();
+  input.endFrame();
+  // 打つ場所で止まっていた3つ。ここが本番
+  for (const code of ['KeyR', 'Space', 'Tab']) {
+    ok(!typeInto('INPUT', code), `文字欄の ${code} を止めていない`);
+  }
+  ok(!typeInto('TEXTAREA', 'KeyR'), '複数行の欄でも止めていない');
+  // 掴んでいる時（遊んでいる最中）に打つ欄が出ることもある（発言）
+  input.locked = true;
+  ok(!typeInto('INPUT', 'KeyR'), '掴んでいる最中でも、打つ欄なら止めない');
+  input.locked = false;
+
+  /* 打った文字がゲームの操作へ漏れないこと。
+     ここが漏れると、合言葉に r を打つたびに弾を入れ替える */
+  input.keys.clear();
+  input.endFrame();
+  typeInto('INPUT', 'KeyW');
+  ok(!input.down('KeyW'), '打った文字は移動キーとして数えない');
+  ok(!input.pressed('KeyR') && !typeInto('INPUT', 'KeyR') && !input.pressed('KeyR'),
+    '打った文字は「押した瞬間」の印も立てない');
+
+  // 打つ欄の外では今まで通り止める（スペースでページが動くのを防ぐ側）
+  let stopped = false;
+  winKeys.get('keydown')?.({
+    code: 'Space', repeat: false, target: null,
+    preventDefault: () => { stopped = true; },
+  });
+  ok(stopped, '打つ欄の外では今まで通りSpaceを止める');
+  input.keys.clear();
+  input.endFrame();
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);
