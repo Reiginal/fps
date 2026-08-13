@@ -124,5 +124,43 @@ console.log('\n[5] 画面側');
     '**押せない**（ホームのボタンの上に透明な板を敷かない）');
 }
 
+console.log('\n[6] 付けるclass名が、枠の外の決まりに掴まれていないか');
+{
+  /* **2026-08-13に「ランキングの表示おかしいw」と言われた所。**
+     1位の行に class="top" を付けていたが、index.htmlには
+     **枠を持たない .top（HUDの上帯）が居て、そちらは position:absolute。**
+     掴まれた1位の行だけが順位表の枠から抜けて、
+     枠いっぱいに広がって位置も右端も揃っていなかった。
+
+     同じ罠はスコアボードでも一度踏んでいて、あちらは
+     「class名をtopにするとHUD上部の.topに掴まれて画面の天辺へ飛ぶ」と
+     index.htmlに書き残したうえで .sbrow.win に避けてある。
+     **書き残しただけでは防げなかった**ので、ここで機械に見張らせる。
+
+     決まりは1つ: **順位表が付けるclass名は、#rankの中でしか使われていないこと。**
+     枠の外の決まりが同じ名前を持っていたら落とす */
+  const ui = readFileSync(new URL('../src/ui/ranking.js', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const css = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
+  // 注釈は外す。「class名をtopにすると」のような文中の語を拾わないため
+  const bare = css.replace(/\/\*[\s\S]*?\*\//g, '');
+
+  const names = [...ui.matchAll(/className = '([\w-]+)'/g)].map((m) => m[1]);
+  ok(names.length > 0, `付けているclass名を拾えた（${names.join('、') || 'なし'}）`);
+  for (const n of names) {
+    /* その名前を含む決まりを全部集めて、1つでも #rank の外に居たら落とす。
+       セレクタは「{ の手前」なので、そこだけ見る */
+    const rules = [...bare.matchAll(new RegExp(`([^{}]*\\.${n}\\b[^{}]*)\\{`, 'g'))]
+      .map((m) => m[1].trim().replace(/\s+/g, ' '))
+      // @media の中身も同じ形で拾えるが、@から始まる物は決まりではない
+      .filter((s) => !s.startsWith('@'));
+    const loose = rules.filter((s) => !s.includes('#rank'));
+    ok(loose.length === 0,
+      `.${n} は#rankの中でしか使われていない${loose.length ? `（外にもある: ${loose.join(' / ')}）` : ''}`);
+  }
+  // 実際に踏んだ名前は名指しで塞いでおく。次に誰かが付け直した時に一目で分かる
+  ok(!names.includes('top'), '**topという名前を付けていない**（HUDの上帯に掴まれる）');
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);

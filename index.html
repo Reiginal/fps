@@ -18,7 +18,18 @@
      絵(og:image)はコードで描いて書き出している（tools/make-ogp.mjs）。
      題を変えたら npm run ogp を打ち直す。
      この絵を外へ配るには、serve-rules.js と Dockerfile の両方に
-     assets/ が入っている必要がある。片方だけだと本番でだけ絵が出ない -->
+     assets/ が入っている必要がある。片方だけだと本番でだけ絵が出ない。
+
+     **og:imageの末尾の ?v=... は絵の中身から作った目印で、飾りではない。**
+     LINEやSlackは一度取った絵を**URL単位で覚え込む**ので、
+     絵を差し替えてもURLが同じだと**前の絵が出続ける。**
+     消してもらう手立ては（LINEには）無いので、
+     中身が変わったらURLも変える形にしてある。
+
+     2026-08-12に絵を差し替えたのにLINEの札が変わらなかったのがこれ
+     （「LINEとかに送った時のサムネイルが、なんか新しいのに変わってなかった？」）。
+     目印がずれていたら tools/check-ogp.mjs が落として、
+     入れる値をそのまま出す -->
 
 <meta name="description" content="ブラウザで開くだけで始まるFPS。1人で波を凌ぐか、URLを送って1対1で撃ち合うか。インストールもアカウントも要りません。">
 <meta property="og:type" content="website">
@@ -27,7 +38,7 @@
 <meta property="og:description" content="開くだけで始まります。1人で波を凌ぐか、URLを送って1対1で撃ち合うか。インストールもアカウントも要りません。">
 <meta property="og:url" content="https://blackoutfps.com/">
 <meta property="og:locale" content="ja_JP">
-<meta property="og:image" content="https://blackoutfps.com/assets/ogp.png">
+<meta property="og:image" content="https://blackoutfps.com/assets/ogp.png?v=4576784c">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="BLACKOUT">
@@ -143,19 +154,29 @@
   #rank li span {
     color: rgba(255,255,255,.50); font-variant-numeric: tabular-nums;
   }
-  /* 1位だけ色を変える。並びの意味が一目で分かる */
-  #rank li.top b { color: var(--accent); }
+  /* 1位だけ色を変える。並びの意味が一目で分かる。
+
+     **class名はrk1。topにしてはいけない。** 上の .top（HUDの上帯）は
+     position:absolute なので、掴まれた1位の行だけが枠から抜けて
+     枠いっぱいに広がる。2026-08-12から実際にそうなっていて、
+     「ランキングの表示おかしいw」と言われた（2026-08-13）。
+     同じ罠がスコアボードにもあって、あちらは .sbrow.win で避けてある
+     （そこにも同じ注意書きがある）。**ここの見張りは check-ranking.mjs の[6]** */
+  #rank li.rk1 b { color: var(--accent); }
   /* 勝った回数。名前の後ろに小さく添える */
   #rank li em {
     font-style: normal; font-size: 9px; letter-spacing: .04em;
     color: rgba(255,255,255,.34);
   }
-  #rank li.top i { color: var(--accent); }
+  #rank li.rk1 i { color: var(--accent); }
   #rkFoot {
     margin-top: 8px; padding-top: 6px;
     border-top: 1px solid rgba(255,255,255,.06);
     font-size: 9px; letter-spacing: .1em; color: rgba(255,255,255,.28);
   }
+  /* 点の付き方は行を分ける。1行に混ぜると枠の幅で折り返して、
+     「波」と「×5」が別々の行に割れる（実際そう出ていた） */
+  #rkFoot b { display: block; font-weight: normal; margin-top: 3px; }
   /* 狭い窓では畳む。ホームのボタンに被る方が困る */
   @media (max-width: 900px), (max-height: 560px) { #rank { display: none; } }
 
@@ -1434,7 +1455,8 @@
        狙いは「誰かが新しく登録してくれた時にそれが分かる」こと。
        遊んだ記録はサーバーに1つも残っていない（撃破数は端末の中だけ）ので、
        人が来たかを知る手立てがこれしか無い。
-       順位はコインの残高ではなく**稼いだ総額**で付ける（買うと減る物では順位にならない）。
+       順位は**遊んだ量**で付ける（勝利×100・撃破×2・到達波×5。server/wallet.jsのSCORE）。
+       コインでは付けない。残高は買うと減るし、稼いだ総額は台帳から直に足せる。
        中身の出し入れは src/ui/ranking.js -->
   <div id="rank" class="hidden">
     <div class="rkhead">よく遊んでいる人</div>

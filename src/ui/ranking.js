@@ -65,7 +65,13 @@ export class Ranking {
     list.innerHTML = '';
     rows.forEach((r, i) => {
       const li = document.createElement('li');
-      if (i === 0) li.className = 'top';
+      /* **1位の目印は rk1。top にしてはいけない。**
+         index.html には枠を持たない .top（HUDの上帯）が居て、
+         あちらは position:absolute なので、掴まれた行だけが枠から抜けて
+         枠いっぱいに広がる。2026-08-12から実際にそうなっていて、
+         1位の行だけ位置も右端も揃っていなかった
+         （2026-08-13に「ランキングの表示おかしいw」）*/
+      if (i === 0) li.className = 'rk1';
       const rank = document.createElement('i');
       rank.textContent = String(i + 1);
       const name = document.createElement('b');
@@ -86,7 +92,12 @@ export class Ranking {
       list.appendChild(li);
     });
     const n = Number(json.players || rows.length);
-    foot.textContent = `登録 ${n}人 ・ 勝利×100 撃破×2 波×5`;
+    /* 人数と点の付き方は行を分ける。1行に繋げると枠の幅で折り返して、
+       「波」と「×5」が別々の行に割れていた */
+    foot.textContent = `登録 ${n}人`;
+    const how = document.createElement('b');
+    how.textContent = '勝利×100 撃破×2 波×5';
+    foot.append(how);
   }
 
   hide() { this.el.root?.classList.add('hidden'); }
