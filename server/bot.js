@@ -58,6 +58,19 @@ const WOBBLE_HZ = 2.3;
    人の反応が0.25秒前後なので、CPUに1秒待たせれば
    出会い頭はこちらが先に撃てる */
 const REACT_S = 1.05;
+/* 見失ってから「反応をやり直し」にするまでの間(秒)。
+   **0にしてはいけない。** 2026-08-13に「自分が外で、相手が中にいる時に
+   敵が撃ってこない」と言われた所で、遊ぶ側は建物の外から窓越しに覗いていた。
+
+   窓・戸口・柱の隙間ごしの睨み合いでは、射線が**1刻み単位で通ったり切れたり**する
+   （CPU自身も横へ動き続けるので、自分から遮蔽へ入り直す）。
+   反応の残り(_react)を見失った瞬間に満タンへ戻していたので、
+   **1.05秒ぶんの連続した射線が最後まで貯まらず、一度も撃たないまま**になっていた。
+
+   ちらつきで戻さず、本当に見失った時だけ戻す。0.6秒は「隙間を横切った」と
+   「物陰に入られた」の境で、ここを長くしすぎると、
+   遮蔽に隠れた相手へ出てきた瞬間に即撃ちするCPUになる */
+const LOST_RESET_S = 0.6;
 
 /* 撃つたびに広がる散り(rad)と、収まる速さ(rad/s)、その上限。
    **人には反動があるのにCPUには無かった。** 押しっぱなしで全弾同じ点に飛ぶので、
@@ -190,6 +203,7 @@ export class Bot {
     this._burst = 0;        // この連射であと何発撃つか
     this._pause = 0;        // 連射の区切りの残り秒
     this._pressReload = false;
+    this._lost = LOST_RESET_S;  // 相手を見失っている秒数。ちらつきで反応を戻さないため
   }
 
   /**
@@ -211,6 +225,7 @@ export class Bot {
     // ここで動かすと、幕間に走り回るCPUが全員の画面に映る
     if (!live || !me.alive) {
       this._react = REACT_S;
+      this._lost = LOST_RESET_S;
       return out;
     }
 
@@ -272,14 +287,33 @@ export class Bot {
         wantPitch = a.pitch + Math.cos(this._wobble * 0.7) * WOBBLE * 0.6;
         advance = dist > KEEP_R;
         strafe = true;
+        this._lost = 0;
         this._react = Math.max(0, this._react - dt);
       } else {
-        // 見えていない間は近づくだけ。上下は水平に戻す
-        // （壁越しに相手の高さを狙ったまま歩くと、曲がった瞬間に足元か空を撃つ）
-        wantYaw = aimAt(eye, _look).yaw;
-        wantPitch = 0;
+        /* **一瞬切れただけでは、狙いも反応もやり直しにしない。**
+           2026-08-13に「自分が外で、相手が中にいる時に敵が撃ってこない」
+           と言われた所。窓・戸口・柱の隙間ごしの睨み合いでは、射線が
+           **1刻み単位で通ったり切れたりする**（CPU自身も横へ動き続けるので、
+           自分から遮蔽へ入り直す）。
+
+           前はここで2つとも捨てていた。上下を水平へ戻すので狙いが毎回落ち、
+           反応の残りも満タンへ戻るので、**1.05秒ぶんが最後まで貯まらない。**
+           結果、撃てる形に一度もならないまま立っていた。
+
+           見失って0.6秒までは、相手の胴のあたりへ銃を向けたまま待つ */
+        this._lost += dt;
+        const blink = this._lost < LOST_RESET_S;
+        const a = aimAt(eye, _look);
+        wantYaw = a.yaw;
+        /* 本当に見失ったら上下は水平に戻す。
+           壁越しに相手の高さを狙ったまま歩くと、曲がった瞬間に足元か空を撃つ */
+        wantPitch = blink ? a.pitch : 0;
+        /* **足は止めない。** ちらついている間だけ立ち止まる形も試したが、
+           近い所で射線が切れた時にその場から動かなくなって、
+           **CPU同士が2mの距離で20秒間1発も撃たなくなった**（[5.5]で落ちた）。
+           射線が戻るのは大抵こちらが動いた時なので、止めると自分で塞いでしまう */
         advance = true;
-        this._react = REACT_S;
+        if (!blink) this._react = REACT_S;
       }
     } else {
       // 誰も見えない。うろつく
@@ -291,6 +325,8 @@ export class Bot {
       wantYaw = this._wanderYaw;
       wantPitch = 0;
       advance = true;
+      // 相手が一人も居ない（全員倒れた）。ここは本当に見失っているので戻す
+      this._lost = LOST_RESET_S;
       this._react = REACT_S;
     }
 
@@ -300,14 +336,20 @@ export class Bot {
     const speed = Math.hypot(p.velocity.x, p.velocity.z);
     if (advance && speed < STUCK_SPEED) this._stuck += dt;
     else this._stuck = 0;
+    /* **銃を向けている間か。** 見えている時と、見失って0.6秒までの
+       「ちらついているだけ」の時。ここから下の向きをいじる仕掛けは、
+       どれも狙いを振り回すので、どちらの間も動かさない */
+    const holding = !!target && (seen || this._lost < LOST_RESET_S);
     // 進んでいる最中は前方の詰まりを避ける。**狙っている間は向きを変えない**
     // （向きを変えると狙いごと振り回すことになる。下の引っかかり外しと同じ理由）
-    if (advance && !seen) wantYaw += this._avoid(eye, wantYaw, octree);
+    if (advance && !holding) wantYaw += this._avoid(eye, wantYaw, octree);
 
     /* 相手に近づけているか。近づけないまま時間が経ったら回り込みに切り替える。
        建物を挟んで向かい合うと、まっすぐ向かうだけでは永久に届かない
-       （壁の両側で3m離れたまま30秒動けなかった） */
-    if (target && !seen) {
+       （壁の両側で3m離れたまま30秒動けなかった）。
+       **睨み合いの最中は数えない。** 射線が通っている間は「近づけていない」
+       のが正しい形なので、そこで回り込みに切り替えると狙いを外して歩き出す */
+    if (target && !holding) {
       if (dist < this._best - NOPROG_EPS) { this._best = dist; this._noProg = 0; }
       else this._noProg += dt;
     } else {
@@ -334,7 +376,7 @@ export class Bot {
          なので、引っかかりを向きで外そうとすると狙いごと振り回すことになり、
          壁際のCPUが延々と回るだけで1発も撃たなくなる（実際そうなった）。
          見えている間は横移動キーだけ入れ替えて、狙ったまま横へ滑る */
-      if (seen) {
+      if (holding) {
         strafe = true;
         this._strafe = this._detour > 0 ? 1 : -1;
       } else {
