@@ -560,5 +560,50 @@ console.log('\n[6] 本編との縁切り（戦績・波・死・当たり先）'
     '手榴弾の課題の間は投げ放題（外し続けても詰まない）');
 }
 
+console.log('\n[7] 自爆で立て直しても、今の課題を始められる状態に戻る');
+{
+  /* **2026-08-13に遊んでもらって出た詰み。**
+     「手りゅう弾で自殺したら全回復しちゃって、結果、包帯が巻けなくなり、
+       最後のチュートリアルクリアできなかった」
+
+     チュートリアルは倒れない代わりに立て直す(_onPlayerDown → player.refill)。
+     refillは体力を満タンにするが、**包帯は満タンだと巻き始め自体を断られる。**
+     整えるのを「課題に入った瞬間」に1回だけやっていたので、
+     入った後に自爆すると、最後の課題から**二度と進めなくなる**（修了もできない）。
+
+     ここは2つ見る。順番が大事で、片方だけだと通ってしまう:
+       ・満タンでは本当に巻けないこと（本物のPlayerで確かめる）
+       ・整えを立て直しの後にも通していること（main.jsの形で確かめる） */
+  const { Player } = await import('../src/player/player.js');
+  const THREE = await import('three');
+  /* 地形は要らない（体力と包帯の話しかしない）。
+     ここでbuildWorldを呼ぶと、上のHUDの検査が差し替えた偽のDOMに当たって落ちる */
+  const p = new Player(new THREE.Object3D(), {
+    octree: null, bounds: null, playerSpawn: new THREE.Vector3(0, 0.1, 0),
+  });
+
+  p.refill();
+  ok(p.health === p.maxHealth, `立て直すと体力が満タンに戻る（${p.health}）`);
+  ok(p.startHeal() === false, '**満タンでは包帯を巻き始められない**（ここが詰みの正体）');
+
+  // main.jsが課題に入る時にやっている整えと同じこと
+  p.health = Math.min(p.health, 55);
+  ok(p.startHeal() === true, '少し削ってあれば巻き始められる');
+
+  const src = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  ok(/_tutStepSetup\(step\) \{[\s\S]{0,400}?step\.id === 'heal'/.test(src),
+    '整えが1か所にまとまっている（_tutStepSetup）');
+  /* **立て直しの中から呼んでいること。** ここが今回落ちていた側。
+     「倒れない」の分岐の中に居るかを見る（外に置くと本編の死でも走る） */
+  const down = src.match(/_onPlayerDown\(\) \{[\s\S]*?\n {2}\}/)?.[0] ?? '';
+  ok(/refill\(\)[\s\S]{0,400}?_tutStepSetup\(/.test(down),
+    '**立て直した後にも整えを通している**（refillの後で呼ぶ）');
+  ok(/if \(this\.tutorial\) this\._tutStepSetup\(/.test(down),
+    'チュートリアルの時だけ通す（訓練場と本編は巻き込まない）');
+  // 課題に入る時の呼び出しも残っていること（両方あって初めて塞がる）
+  ok(/res === 'advance'\)[\s\S]{0,1400}?_tutStepSetup\(s\)/.test(src),
+    '課題に入る時にも通している');
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);
