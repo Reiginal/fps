@@ -351,5 +351,83 @@ console.log('\n[5] 狙撃銃の形違いが望遠照準の窓を狭めていな�
   ws.refreshSkins();
 }
 
+console.log('\n[6] 覗きから抜けられること（入り切りと押しっぱなしの両立）');
+/* **2026-08-13にWindowsの人から「スコープを覗いたら移動ができなくなった」。**
+   覗いたまま抜けられていなかった、が正体。
+
+   この操作は入り切り（押すたび反転）で、押しっぱなし方式にしていない理由は
+   Macのトラックパッドが右クリックを押したまま左クリックできないから。
+   ところが世の中のFPSはほぼ押しっぱなし方式なので、
+   押して離した人は「戻したつもり」で覗いたままになる。そこから先は
+   歩きが65%・走れない・倍率が高いと景色が流れない、が重なって
+   **動けなくなったようにしか見えない。**
+
+   しかも**左Shiftが行き止まり**だった。覗いている間は走れず(adsFactor < 0.5)、
+   走っていないと覗きは切れない(canAdsの!player.sprinting)ので、
+   ダッシュを試しても何も起きない。
+
+   ここで見るのは3つ。**素早い1回は今まで通り反転する／長押しは離すと戻る／
+   走ろうとしたら切れる。** 1つ目が落ちるとトラックパッドで覗きながら撃てなくなる */
+{
+  const i = WEAPONS.findIndex((w) => w.id === 'sniper');
+  const press = { ...none, clicked: (b) => b === 2, buttons: [false, false, true] };
+  const hold = { ...none, buttons: [false, false, true] };
+  const up = { ...none, buttons: [false, false, false] };
+  const shiftRun = { ...none, down: (k) => k === 'ShiftLeft', buttons: [false, false, false] };
+
+  const fresh = () => {
+    ws.switchTo(i);
+    ws.switching = 0; ws.index = i; ws._pendingIndex = null;
+    ws.adsHeld = false; ws._adsPress = -1;
+    player.horizontalSpeed = 0;
+  };
+  const step = (inp, sec) => {
+    for (let k = 0; k < Math.round(sec * 120); k++) ws.update(1 / 120, inp, player, {});
+  };
+
+  // 素早く押して離す。トラックパッドの人はこれしか使えない
+  fresh();
+  step(press, 1 / 120);
+  step(up, 0.1);
+  ok(ws.adsHeld === true, '素早い1回で覗きに入る');
+  step(press, 1 / 120);
+  step(up, 0.1);
+  ok(ws.adsHeld === false, '**もう一度素早く押すと戻る**（入り切りは今まで通り）');
+
+  // 押しっぱなし。世の中のFPSと同じ持ち方
+  fresh();
+  step(press, 1 / 120);
+  step(hold, 0.6);
+  ok(ws.adsHeld === true, '押している間は覗いている');
+  step(up, 0.1);
+  ok(ws.adsHeld === false, '**離したら戻る**（ここが今回の不具合）');
+
+  // 既に覗いている人が長押ししても、握っている間は覗いたまま
+  fresh();
+  step(press, 1 / 120); step(up, 0.1);          // 入り切りで覗きに入れておく
+  step(press, 1 / 120); step(hold, 0.6);
+  ok(ws.adsHeld === true, '覗いている状態から握り直しても、握っている間は覗いたまま');
+  step(up, 0.1);
+  ok(ws.adsHeld === false, 'そこから離しても戻る');
+
+  // 走ろうとしたら切れる。左Shiftを行き止まりにしない
+  fresh();
+  step(press, 1 / 120); step(up, 0.1);
+  ok(ws.adsHeld === true, '覗いている');
+  player.horizontalSpeed = 4;
+  step(shiftRun, 0.1);
+  ok(ws.adsHeld === false, '**走ろうとしたら覗きが切れる**（Shiftが効かない行き止まりを塞ぐ）');
+
+  // 止まったままShiftに指を置いているだけでは切らない
+  fresh();
+  step(press, 1 / 120); step(up, 0.1);
+  player.horizontalSpeed = 0;
+  step(shiftRun, 0.2);
+  ok(ws.adsHeld === true, '止まっている間はShiftを押しても覗きは外れない');
+
+  fresh();
+  player.horizontalSpeed = 0;
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);

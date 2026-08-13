@@ -341,6 +341,14 @@ const HEAL_TIME = 2.4;
 // 101cm→88cm、覗いた時が14cm→9cm。tools/check-aim.mjsで測っている
 const MOVE_SPREAD = 0.0028;
 
+/* 右クリックを「押しっぱなしで狙うつもり」と見なす長さ(秒)。
+   これより短ければ今まで通りの入り切り（押すたび反転）、
+   長ければ押している間だけ覗いて離すと戻る。
+   詳しい理由はupdateのADSの所（2026-08-13に
+   「スコープ覗いたら移動ができなくなった」と言われて足した）。
+   0.22秒は「素早く1回押した」と「狙いを定めるつもりで握った」の境 */
+const ADS_HOLD_S = 0.22;
+
 const rand = (s) => (Math.random() - 0.5) * s;
 // pがa..bの区間のどこにいるかを0..1で返す。装填の工程を時間軸に並べるのに使う
 const seg = (p, a, b) => clamp01((p - a) / (b - a));
@@ -5921,6 +5929,9 @@ export class WeaponSystem {
     this.wantAds = false;
     // 覗き込みの入り切り。右クリックを押すたびに反転する
     this.adsHeld = false;
+    /* 右クリックを押している長さ。**押しっぱなしで狙う人のために数える。**
+       -1は押していない（詳しくは下のADSの所） */
+    this._adsPress = -1;
     this.reloading = 0;
     // 1発ずつ入れている途中か。reloadingは「今の1発の残り時間」しか持たないので、
     // 「まだ続きがある」はこちらで持つ。ここを落とすと、途中で持ち替えた後に
@@ -6526,6 +6537,50 @@ export class WeaponSystem {
     if (rightEdge && !d.thrown && !d.melee) this.adsHeld = !this.adsHeld;
     // 覗いた・振った瞬間に眺めるのをやめる。眺めながら覗くと照準が横を向く
     if (rightEdge) this.inspect = 0;
+
+    /* **押しっぱなしでも狙えるようにする（押した長さで意味を変える）。**
+
+       2026-08-13にWindowsの人から「スコープを覗いたら移動ができなくなった」
+       と言われた所。**覗いたまま抜けられていなかった。**
+
+       この操作は入り切り（押すたび反転）で、押しっぱなし方式にしていない理由は
+       Macのトラックパッドが右クリックを押したまま左クリックできないから。
+       ところが世の中のFPSはほぼ押しっぱなし方式なので、
+       **押して離した人は「戻したつもり」で覗いたままになる。**
+       そこから先は:
+         ・歩きが65%まで落ちる（wishSpeed × (1 - adsFactor × 0.35)）
+         ・走れない（player.jsのwantSprintがadsFactor < 0.5を要る）
+         ・倍率の高い照準だと景色がほとんど流れない
+       の3つが重なって、**動けなくなったようにしか見えない。**
+
+       だから長さで分ける。**素早く押して離したら今まで通りの入り切り**
+       （トラックパッドはこちらを使う）。**押し続けたら、離した時に戻す。**
+       境目は0.22秒で、狙いを定めるつもりの押し方はまず超える */
+    const rightDown = !!input.buttons?.[2];
+    const canHoldAds = !d.thrown && !d.melee;
+    if (rightEdge) this._adsPress = 0;
+    else if (rightDown && this._adsPress >= 0) {
+      this._adsPress += dt;
+      // 押し続けている＝「押している間だけ覗く」つもり。入れる側で確定させる。
+      // 入り切りの反転に任せると、既に覗いていた人は押した瞬間に切れてしまう
+      if (this._adsPress >= ADS_HOLD_S && canHoldAds) this.adsHeld = true;
+    }
+    if (!rightDown) {
+      // 離した。長く押していたなら「押している間だけ」だったと解釈して戻す
+      if (this._adsPress >= ADS_HOLD_S) this.adsHeld = false;
+      this._adsPress = -1;
+    }
+
+    /* **走ろうとしたら覗くのをやめる。** 抜け道をもう1本置いておく。
+       覗いている間は走れず(player.jsのwantSprintがadsFactor < 0.5を要る)、
+       走っていないと覗きは切れない(下のcanAdsの!player.sprinting)ので、
+       **そのままだと左Shiftが何をしても効かない行き止まりになる。**
+       上の押し方の話に気づかなかった人が次に試すのはたいていダッシュなので、
+       そこを塞いだままにしない。
+
+       止まっている時は切らない。狙いながら指をShiftに置いている人の
+       覗きが勝手に外れる（走るつもりが無いのに切れるのは別の不具合になる）*/
+    if (input.down?.('ShiftLeft') && player.horizontalSpeed > 1) this.adsHeld = false;
     // 包帯を持っている間は武器そのものを下ろしているので、覗くも撃つも無い
     const busyHealing = this.bandageOut || player.healing > 0;
     // 近接は覗く物が無い。覗けると刃を目の前に構えて視界を塞ぐだけになる
