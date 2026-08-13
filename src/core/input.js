@@ -67,6 +67,20 @@ export class Input {
       const typing = e.target instanceof HTMLElement
         && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable);
       if (this.locked && !typing) e.preventDefault();
+      /* **文字を打っている間は、ここから下も全部素通しする。**
+         2026-08-13に「新規登録でパスワードにrが打てない」と言われた所。
+         下の「掴んでいなくても止める」一覧にKeyRが入っていて、
+         そこには打っている最中かどうかの条件が付いていなかった。
+         止められたキーは1文字も入らないので、遊ぶ側からは
+         **キーボードのrだけが壊れている**ようにしか見えない。
+
+         Rだけの話ではない。Spaceも入らず、Tabで次の欄へ移ることもできなかった。
+         合言葉にスペースを使う人・Tabで欄を送る人は、そちらで詰まっていたはず。
+
+         会員証(account.js)はchat.jsと違ってstopPropagationしていないので、
+         打った物がここまで上がってくる。**打つ場所は他にもある**
+         （合言葉・部屋の合言葉・名前）ので、受け口のこちら側で1回止める */
+      if (typing) return;
       /* 押している集合は、キーリピートでも入れ直す。
          入れ直すのは集合だけで、「押した瞬間」の印は下へ置いたまま。
          あれをリピートで立てると、跳躍も装填も押しっぱなしで連射になる */
