@@ -5940,6 +5940,9 @@ export class WeaponSystem {
     this._ejectDelay = -1;
     this._ejectPos = new THREE.Vector3();
     this._ejectDir = new THREE.Vector3();
+    // リボルバーの装填の振り出し（空薬莢をまとめて捨てる）。仕組みは上と同じ自前タイマー
+    this._dumpDelay = -1;
+    this._dumpCount = 0;
 
     // 環境を照らす発砲光。これがあると夜でなくても迫力が出る
     this.muzzleLight = new THREE.PointLight(0xffb060, 0, 14, 2);
@@ -5982,6 +5985,8 @@ export class WeaponSystem {
     this.onShot = null;
     this.onSound = null;
     this.onEject = null;
+    // リボルバーの装填で空薬莢をまとめて捨てる時。(位置, 発数)で呼ぶ
+    this.onEjectDump = null;
   }
 
   /**
@@ -6137,6 +6142,8 @@ export class WeaponSystem {
     if (this.switching > 0) return false;
     this.reloading = 0;
     this.shellReload = false;
+    // 装填ごと止めるので、予約してあった弾倉の振り出しも止める
+    this._dumpDelay = -1;
     this._shellLower = 0;
     this.switching = 0.42;
     // 持ち替えを跨いで前の武器の状態を残さない。
@@ -6357,6 +6364,14 @@ export class WeaponSystem {
     if (w.ammo >= w.def.mag || w.reserve <= 0) return false;
     this.shellReload = w.def.reloadKind === 'shell';
     this.reloading = this.shellReload ? w.def.shellTime : w.def.reloadTime;
+    /* リボルバーは装填の頭で弾倉を振り出して、空薬莢をまとめて捨てる。
+       放る瞬間は左手が弾倉に届く時（工程表PATH_TACのmag到達＝装填の0.40）に合わせる。
+       数は撃った発数ぶん。ただし6発で頭打ち
+       （弾倉の見た目が6室なので、7発以上こぼれると弾倉より多く出たことになる） */
+    if (!this.shellReload && w.shapeId === 'revolver') {
+      this._dumpCount = Math.min(w.def.mag - w.ammo, 6);
+      this._dumpDelay = w.def.reloadTime * 0.40;
+    }
     return true;
   }
 
@@ -6453,6 +6468,20 @@ export class WeaponSystem {
       if (this._ejectDelay <= 0) {
         this._ejectDelay = -1;
         this.onEject?.(this._ejectPos, this._ejectDir);
+      }
+    }
+
+    /* ---------------------------- リボルバーの装填、弾倉の振り出し */
+    if (this._dumpDelay >= 0) {
+      this._dumpDelay -= dt;
+      if (this._dumpDelay <= 0) {
+        this._dumpDelay = -1;
+        // 装填がまだ続いている時だけ。死んで湧き直した後などに宙で出さない。
+        // 位置は予約時でなくこの瞬間に取る（0.6秒の間に体ごと動いているので）
+        if (this.reloading > 0 && this.current.parts.eject) {
+          const pos = this._viewToWorld(this.current.parts.eject.getWorldPosition(_v3));
+          this.onEjectDump?.(pos, this._dumpCount);
+        }
       }
     }
 
@@ -7525,6 +7554,7 @@ export class WeaponSystem {
     this.magWob = 0; this.magWobV = 0;
     this.trigT = 0; this.trigTarget = 0;
     this._ejectDelay = -1;
+    this._dumpDelay = -1;
     this.flashTimer = 0;
     this.smokeTimer = 0;
     this.muzzleLight.intensity = 0;
