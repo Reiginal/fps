@@ -84,6 +84,8 @@ export const KILL_TUNE = {
  *   air     … 押しのける空気の [開始, 頂点, 終わり] Hz
  *   airGain … 空気の量。**芯に対する比。** ここが1.0だと前の鈍い音に戻る
  *   airDec  … 空気の減衰(秒)
+ *   pulse   … [刻みHz, 深さ0〜1]。音量を矩形波で刻む。**機械の点火の音**なので
+ *             チェーンソーだけが持つ（刃物は連続して空気を切るから刻まない）
  *
  * 数字の当たりは tools/sound-lab.mjs で書き出して測る。
  * **ただし最後は聴いて決める。**測って良く見える音が鈍いことがある（実際そうだった）
@@ -242,19 +244,29 @@ export const SWING_TUNES = {
      Qを一番低くして帯を広げるのが要点で、
      細い帯は「刃が空気を割る」音になるが、広い帯はノイズがそのまま唸る。
      ここは他の武器で全部「避けてきた」作りなので、ここだけ逆を踏む。
-     長さも一番長く取る（動いている物なので、振り終わっても鳴っている）*/
+     長さも一番長く取る（動いている物なので、振り終わっても鳴っている）
+
+     **2026-08-15に脈(pulse)を足した。** 広い帯だけだと「ゴォ」＝風の音と
+     区別が付かず、機械に聞こえていなかった。エンジンは点火が1回ずつ別の
+     破裂なので、音量をその速さで刻むと「ドュルルル」になる。
+     右は左より刻みを遅くする（重く当てると回転が落ちる）*/
   chainsaw: {
     light: {
       band: [260, 1100, 420], at: [0.050, 0.150], q: 0.9,
       gain: 1.44, env: [0.010, 0.230], rate: [0.9, 1.06],
       edge: 0.10,
       air: [160, 480, 200], airGain: 0.60, airDec: 0.26,
+      /* 刻みは最初105Hzに置いたが、帯(260〜1100Hz)のフィルタが谷を均してしまい、
+         包絡で測ると深い谷が9個しか立たなかった。遅くすると谷の幅が広がって
+         均されずに残る（80Hzで14個、右は60Hzで21個。刀は1個）*/
+      pulse: [80, 0.85],
     },
     heavy: {
       band: [200, 860, 330], at: [0.080, 0.240], q: 0.8,
       gain: 1.58, env: [0.012, 0.320], rate: [0.78, 0.94],
       edge: 0.08,
       air: [130, 400, 165], airGain: 0.78, airDec: 0.34,
+      pulse: [60, 0.85],
     },
   },
 
@@ -2431,8 +2443,36 @@ export class AudioEngine {
     bp.frequency.exponentialRampToValueAtTime(u.band[2], t + u.at[1]);
     // Qが低いと帯が広がって、ノイズがそのまま「ゴォ」に聞こえる
     bp.Q.value = u.q;
+
+    /* 機械の脈。**表に pulse がある形（チェーンソー）だけ。**
+       エンジンの点火は1回ずつ別の破裂なので、音量をその速さの矩形波で刻むと、
+       連続の「ゴォ」（風と同じ音）が機械の「ドュルルル」になる。
+       振り終わりへ向けて刻みを少し落とす（振り抜くと回転が落ちる）。
+       芯と空気の両方へ同じ刻みを挟む——片方だけ刻むと、
+       刻まれていない層が隙間を埋めて脈が聞こえなくなる */
+    let pulseDepth = null;
+    if (u.pulse) {
+      const lfo = ctx.createOscillator();
+      lfo.type = 'square';
+      lfo.frequency.setValueAtTime(u.pulse[0] * 1.12, t);
+      lfo.frequency.exponentialRampToValueAtTime(u.pulse[0] * 0.82, t + 0.40);
+      pulseDepth = ctx.createGain();
+      pulseDepth.gain.value = u.pulse[1] / 2;
+      lfo.connect(pulseDepth);
+      lfo.start(t); lfo.stop(t + 0.5);
+    }
+    // 層の出口へ刻みを挟む。中心(1-深さ/2)に±深さ/2が乗り、1-深さ〜1で暴れる
+    const chop = (node) => {
+      if (!pulseDepth) return node;
+      const trem = ctx.createGain();
+      trem.gain.value = 1 - u.pulse[1] / 2;
+      pulseDepth.connect(trem.gain);
+      node.connect(trem);
+      return trem;
+    };
+
     const g = ctx.createGain();
-    src.connect(bp); bp.connect(g);
+    src.connect(bp); chop(bp).connect(g);
     this._env(g, t, u.gain, u.env[0], u.env[1]);
     this._out(g, 0.12, 0.05);
     src.start(t, Math.random()); src.stop(t + 0.4);
@@ -2462,7 +2502,7 @@ export class AudioEngine {
     lp.frequency.exponentialRampToValueAtTime(u.air[2], t + 0.18);
     lp.Q.value = 0.8;
     const ag = ctx.createGain();
-    air.connect(lp); lp.connect(ag);
+    air.connect(lp); chop(lp).connect(ag);
     this._env(ag, t, u.gain * u.airGain, 0.014, u.airDec);
     this._out(ag, 0.10, 0.04);
     air.start(t, Math.random()); air.stop(t + 0.45);
