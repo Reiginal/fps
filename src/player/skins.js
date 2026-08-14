@@ -456,18 +456,21 @@ const SHAPE_LOOK = {
 
   /* ---- 2026-08-15に足したショットガンの2つ（経緯は protocol.js の SHAPE_LIST） */
   lever: {
-    note: '機関部の下の輪っか、露出した撃鉄、青光りする鋼とまっすぐな木の銃床',
-    swatch: '#2c3a48',
-    /* **青光りする鋼（ブルーイング）。** 同じ「昔の銃の木と金属」でも、
-       ウエスタンは真鍮の暖色、ソードオフは傷んだ黒鉄なので、
-       ここは**青へ振った鋼**で3本を分ける。木は赤みの胡桃で鋼の青と対にする */
+    note: '撃つたびに回る輪っか、真鍮の機関部、八角の青い銃身、露出した撃鉄',
+    swatch: '#8a6c2c',
+    /* **真鍮の機関部と青い八角銃身。** 最初は全体を青い鋼にしていたが、
+       「使っている感じでウエスタンとの違いがあんまわかんない」と言われて、
+       構えた画面に常に見える機関部を金色へ振った（2026-08-15）。
+       ウエスタンの真鍮は小物だけ・ソードオフは傷んだ黒鉄なので、面で分かれる。
+       木は赤みの胡桃で真鍮の金と対にする */
     over: {
       enamel: { color: 0x232e3a, metalness: 0.6, roughness: 0.30, wear: { color: 0x6e8296, amount: 0.8 } },
       phosphate: { color: 0x1e2832, wear: { color: 0x64788c } },
       polymer: { color: 0x28303a, wear: { color: 0x5e7080 } },
       walnut: { color: 0x58301c, wear: { color: 0xa06438, dust: 0.10 } },
       steel: { color: 0x8ea0b2, wear: { color: 0xd8e4ee } },
-      brass: { color: 0xa08038, wear: { color: 0xd4b468 } },
+      // 機関部の地。磨いた真鍮の照りを残しつつ、金ぴかの玩具にはしない
+      brass: { color: 0xb08c3c, metalness: 0.8, roughness: 0.30, wear: { color: 0xe0c478, amount: 0.7 } },
     },
   },
   drum: {
