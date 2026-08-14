@@ -745,6 +745,7 @@ function onMessage(conn, raw) {
     case C.THROW: return onThrow(conn, m);
     case C.WEAPON: return onWeapon(conn, m);
     case C.MODE: return onMode(conn, m);
+    case C.MAP: return onMap(conn, m);
     case C.SEAT: return onSeat(conn, m);
     case C.BOT: return onBot(conn, m);
     case C.READY: return onReady(conn, m);
@@ -891,6 +892,13 @@ function onMode(conn, m) {
   if (!conn.slot) return;
   if (typeof m.md !== 'string') return;
   conn.room.setMode(m.md);
+}
+
+// マップを選ぶ。onModeと同じ扱い
+function onMap(conn, m) {
+  if (!conn.slot) return;
+  if (typeof m.mp !== 'string') return;
+  conn.room.setMap(m.mp);
 }
 
 function onWeapon(conn, m) {

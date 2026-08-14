@@ -154,6 +154,19 @@ export const MODE_LIST = [
 export const MODE_IDS = MODE_LIST.map((m) => m.id);
 export const modeName = (id) => (MODE_LIST.find((m) => m.id === id) || MODE_LIST[0]).name;
 
+/* ---------------------------------------------------------- ステージ */
+
+// 部屋のマップ。遊び方と同じく**ロビーで選ぶ**（試合が始まったら変えられない）。
+// 地形そのものはsrc/world/level.jsのbuildLevel()がmapIdで分岐して組む。
+// サーバーが選ばれたidをロビー電文で配り、クライアントは自分で選ばない
+// （地形がクライアントとサーバーで食い違うと、片方だけ壁を素通りすることになる）
+export const MAP_LIST = [
+  { id: 'urban', name: '市街地', desc: 'いつもの廃墟の街' },
+  { id: 'edo', name: '江戸', desc: '板塀と瓦屋根の宿場町' },
+];
+export const MAP_IDS = MAP_LIST.map((m) => m.id);
+export const mapName = (id) => (MAP_LIST.find((m) => m.id === id) || MAP_LIST[0]).name;
+
 // ガンゲームで配る順番。**持ち物(LOADOUT_IDS)とは別物で、こちらは表の全部を使う。**
 // ショットガンは持って出ない武器だが、配られる側なので入る。
 // 最後をナイフにしてあるのは、一番難しい物で締めると盛り上がるため
@@ -282,6 +295,8 @@ export const C = {
   // 遊び方を選ぶ。誰が押しても変わる（身内で遊ぶのに部屋主を作らない）。
   // 試合が始まってからは効かない
   MODE: 'd',      // { t, md:'dm' | 'gun' }
+  // マップを選ぶ。MODEと同じ扱い（誰が押しても変わる／試合が始まってからは効かない）
+  MAP: 'm',       // { t, mp:'urban' | 'edo' }
   /* 空席にCPUを座らせる／その席のCPUを立たせる。**同じ電文でどちらもやる。**
      足すと外すを別の電文にすると、押した時の席の状態を画面側が覚えることになり、
      配られた絵と食い違った瞬間に「押しても何も起きない」が生まれる。
@@ -325,7 +340,7 @@ export const Sv = {
   // 並びは下の LOBBY_ROW で決める。**番号を直に書かない。**
   // チーム制をやめた時、作る側は team を落としたのに読む側は
   // 6項目のまま読んでいて、見た目の番号が1つずれて全員0番の姿になっていた
-  LOBBY: 'L',     // { t, md:遊び方, rows:[[id,name,seat,ready,chr]], why }
+  LOBBY: 'L',     // { t, md:遊び方, mp:マップ, rows:[[id,name,seat,ready,chr]], why }
   // 発言。誰が言ったかは名前で運ぶ。idだけにすると、抜けた人の発言が
   // 名前の引けない状態で画面に残る（誰の発言か分からない行になる）
   CHAT: 'c',      // { t, name, m }

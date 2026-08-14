@@ -704,14 +704,14 @@ roughnessFactor = max( roughnessFactor, uGnd.z );
  *   画面の全フラグメントで評価されるので、設定「影のこまやかさ:低」の端末では
  *   置かずに組む（シェーダの光の本数はコンパイル時に決まるため、起動時の1回だけ）
  */
-export function buildLevel(mats, { lamps = true } = {}) {
+export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
   const root = new THREE.Group();
   const solids = new THREE.Group();   // 衝突に参加するもの
   const props = new THREE.Group();    // 衝突には入れない飾り（電線・アンテナ・路面の貼り分け）
   root.add(solids);
   root.add(props);
 
-  // buildMaterials()は必ず12種すべてを返すので、無かった時の退避は置かない
+  // buildMaterials()は必ず16種すべてを返すので、無かった時の退避は置かない
   const M = {
     concrete: mats.concrete,
     concreteDark: mats.concreteDark,
@@ -725,6 +725,11 @@ export function buildLevel(mats, { lamps = true } = {}) {
     plaster: mats.plaster,
     dirt: mats.dirt,
     corr: mats.corrugated,
+    // 江戸ステージ用（mapId==='edo'の時だけ使う）
+    timber: mats.timberSiding,
+    kawara: mats.kawara,
+    earth: mats.packedEarth,
+    shoji: mats.shojiPaper,
   };
 
   // 全材質に頂点カラーを開ける。emit()が個体ごとに±5%の明度を焼き込むので、
@@ -751,12 +756,16 @@ export function buildLevel(mats, { lamps = true } = {}) {
   addMacroVariation(M.metalRed, 0.38, 0.085);
   addMacroVariation(M.wood, 0.30, 0.090);
   addMacroVariation(M.sandbag, 0.32, 0.090);
+  addMacroVariation(M.timber, 0.30, 0.075);
+  addMacroVariation(M.kawara, 0.40, 0.070);
+  addMacroVariation(M.earth, 0.85, 0.070);
   // 上のaddMacroVariationは、textures側でaddSurfaceShadingが済んでいる材質には効かない
   // （向こうがuserData.macroAppliedを立てて一本化している）。効くのはpatch用のcloneだけ。
   // 地面の4m格子はそのどちらでも壊せないので、専用の混合層をここで足す。
   // 土は水が引かないので粗さの下限を高く、舗装は少しだけ艶を残す
   addGroundBlend(M.asphalt, 0.31, 0.045, 0.54);
   addGroundBlend(M.dirt, 0.37, 0.052, 0.78);
+  addGroundBlend(M.earth, 0.35, 0.050, 0.80);
 
   // 重なる半透明どうしの前後を決める表。材質を作る所とデカールを貼る所の
   // 両方から書くので、材質より先に用意しておく
@@ -1786,6 +1795,164 @@ export function buildLevel(mats, { lamps = true } = {}) {
     mark(x + Math.cos(ry) * 0.35, z - Math.sin(ry) * 0.35, 1.4, 0.85);
   };
 
+  /* 路面の貼り分け板の予約と、影を落とさせない材質の集まり。
+     結合と出力(flush)がmapIdに関係なく参照するので、if/elseの外に置く。
+     板は「置いた物の足跡」が全部出揃ってから作りたいので、生成は最後にまとめて回す。
+     影を落とさせないのは、路面の貼り分け板が床から数cm浮いているだけで、
+     影を落とすと広場一面に自己遮蔽の縞が出るため（材質をclone()するので名指しできる） */
+  const patchJobs = [];
+  const noShadowMats = new Set();
+  const patch = (w, d, mat, x, z, ry, y, uv = 6, order = 1) =>
+    patchJobs.push({ w, d, mat, x, z, ry, y, uv, order });
+
+  if (mapId === 'edo') {
+  /* ================================================================
+     江戸ステージ。市街地(urban)とは別に手書きする（CLAUDE.mdの方針通り、
+     データ駆動化はしない）。共通なのはここまでの部品(box等)と、この
+     if/elseの外にある結合・Octree構築・スポーン登録の型だけ。
+     中身の配置・材質選びは市街地と完全に独立している。
+     ================================================================ */
+
+  /* ------------------------------------------------------------ 地面 */
+  // 市街地と同じ組み方（見た目は420m角・当たり判定は96m角の別板）。
+  // 材質だけ叩き土(M.earth)へ差し替える
+  const groundGeoE = new THREE.PlaneGeometry(420, 420, 48, 48);
+  groundGeoE.rotateX(-Math.PI / 2);
+  scaleUV(groundGeoE, 105, 105);
+  {
+    const gp = groundGeoE.attributes.position;
+    for (let i = 0; i < gp.count; i++) {
+      const gx = gp.getX(i), gz = gp.getZ(i);
+      const dd = Math.hypot(gx, gz);
+      const k = sstep(50, 130, dd);
+      if (k <= 0) continue;
+      const n = fbm2(gx * 0.012, gz * 0.012, 1.0, 4, 5231) - 0.5;
+      gp.setY(i, n * 9.0 * k);
+    }
+    groundGeoE.computeVertexNormals();
+    const gc = new Float32Array(gp.count * 3);
+    for (let i = 0; i < gp.count; i++) {
+      const v = 0.86 + 0.26 * fbm2(gp.getX(i) * 0.014, gp.getZ(i) * 0.014, 1.0, 4, 9137);
+      gc[i * 3] = v; gc[i * 3 + 1] = v; gc[i * 3 + 2] = v;
+    }
+    groundGeoE.setAttribute('color', new THREE.BufferAttribute(gc, 3));
+  }
+  const groundE = new THREE.Mesh(groundGeoE, M.earth);
+  groundE.receiveShadow = true;
+  root.add(groundE);
+
+  const floorGeoE = new THREE.PlaneGeometry(96, 96, 8, 8);
+  floorGeoE.rotateX(-Math.PI / 2);
+  {
+    const fc = new Float32Array(floorGeoE.attributes.position.count * 3);
+    fc.fill(1);
+    floorGeoE.setAttribute('color', new THREE.BufferAttribute(fc, 3));
+  }
+  const floorE = new THREE.Mesh(floorGeoE, M.earth);
+  floorE.visible = false;
+  solids.add(floorE);
+
+  /* -------------------------------------------------------- 建物の型 */
+  // 板塀・柱・棟・屋根(平屋根、瓦仕上げ)を1棟ぶん。doorsはband()と同じ書式
+  // ({side,u,w}の配列。side は 'z-'/'z+'/'x-'/'x+'）
+  const building = (cx, cz, w, d, wallH, doors) => {
+    band(w, d, wallH, 0.14, M.timber, cx, 0, cz, 1.4, doors);
+    const ov = 0.4;
+    boxD(w + ov * 2, 0.16, d + ov * 2, M.kawara, cx, wallH, cz, 0, 1.4);
+    // 破風板。屋根の縁に1段細い板を回すだけで「乗っているだけの蓋」に見えなくなる
+    boxD(w + ov * 2, 0.10, 0.10, M.timber, cx, wallH - 0.02, cz - d / 2 - ov, 0, 1.0);
+    boxD(w + ov * 2, 0.10, 0.10, M.timber, cx, wallH - 0.02, cz + d / 2 + ov, 0, 1.0);
+    boxD(0.10, 0.10, d + ov * 2, M.timber, cx - w / 2 - ov, wallH - 0.02, cz, 0, 1.0);
+    boxD(0.10, 0.10, d + ov * 2, M.timber, cx + w / 2 + ov, wallH - 0.02, cz, 0, 1.0);
+    mark(cx, cz - d / 2, w * 0.5, 0.8);
+    mark(cx, cz + d / 2, w * 0.5, 0.8);
+    mark(cx - w / 2, cz, d * 0.5, 0.8);
+    mark(cx + w / 2, cz, d * 0.5, 0.8);
+  };
+
+  // 板塀の1区間。gapUがあればそこだけ空ける（門）
+  const fenceRun = (cx, cz, ry, len, h, gapU = null, gapW = 0) => {
+    const segs = [];
+    if (gapU === null) segs.push([-len / 2, len / 2]);
+    else {
+      const s = clamp(gapU - gapW / 2, -len / 2, len / 2);
+      const e = clamp(gapU + gapW / 2, -len / 2, len / 2);
+      if (s - (-len / 2) > 0.05) segs.push([-len / 2, s]);
+      if (len / 2 - e > 0.05) segs.push([e, len / 2]);
+    }
+    const dirX = Math.cos(ry), dirZ = -Math.sin(ry);
+    for (const [a, b] of segs) {
+      const w = b - a;
+      if (w <= 0.05) continue;
+      const u = (a + b) / 2;
+      box(w, h, 0.10, M.timber, cx + dirX * u, 0, cz + dirZ * u, ry, 1.4);
+    }
+    const n = Math.max(2, Math.round(len / 2.4));
+    for (let i = 0; i <= n; i++) {
+      const u = (i / n - 0.5) * len;
+      if (gapU !== null && Math.abs(u - gapU) < gapW / 2 + 0.15) continue;
+      box(0.16, h + 0.18, 0.16, M.timber, cx + dirX * u, 0, cz + dirZ * u, ry, 1.0);
+    }
+  };
+
+  // 鳥居。門の目印と、通り抜ける時の遮蔽を兼ねる。朱塗りの色が無いので
+  // 赤みの強い金属材(M.metalRed)を借りている（木材の質感ではないが、
+  // 遠目のシルエットと色味だけ見れば鳥居に読める）
+  const torii = (x, z, ry, w = 4.4, h = 3.4) => {
+    const dirX = Math.cos(ry), dirZ = -Math.sin(ry);
+    for (const s of [-1, 1]) box(0.26, h, 0.26, M.metalRed, x + dirX * s * w / 2, 0, z + dirZ * s * w / 2, ry, 1.0);
+    boxD(w + 0.7, 0.22, 0.32, M.metalRed, x, h - 0.22, z, ry, 1.4);
+    boxD(w + 1.2, 0.16, 0.22, M.metalRed, x, h + 0.06, z, ry, 1.4);
+    mark(x, z, w * 0.5, 0.5);
+  };
+
+  // 石灯籠。竿・中台・火袋・笠を積むだけ。石材が無いのでconcreteで代用
+  const lantern = (x, z) => {
+    cyl(0.13, 0.55, 8, M.concrete, x, 0, z, 2);
+    box(0.46, 0.10, 0.46, M.concrete, x, 0.55, z, 0, 1.4);
+    box(0.32, 0.34, 0.32, M.concrete, x, 0.65, z, 0, 1.2);
+    box(0.56, 0.10, 0.56, M.kawara, x, 0.99, z, Math.PI / 4, 1.4);
+    mark(x, z, 0.5, 0.6);
+  };
+
+  // 酒樽3個の山。木材のcyl置くだけ
+  const barrelStack = (x, z, ry) => {
+    for (let i = 0; i < 3; i++) {
+      const a = ry + i * (Math.PI * 2 / 3);
+      cyl(0.32, 0.62, 10, M.wood, x + Math.cos(a) * 0.30, 0, z + Math.sin(a) * 0.30, 1.6);
+    }
+    mark(x, z, 1.0, 0.6);
+  };
+
+  /* --------------------------------------------------------- 外周 */
+  const half = 34, fenceH = 2.3, gateW = 4.6;
+  fenceRun(0, -half, 0, half * 2, fenceH, 0, gateW);
+  fenceRun(0, half, 0, half * 2, fenceH, 0, gateW);
+  fenceRun(-half, 0, Math.PI / 2, half * 2, fenceH);
+  fenceRun(half, 0, Math.PI / 2, half * 2, fenceH);
+  torii(0, -half, 0);
+  torii(0, half, Math.PI);
+
+  /* ------------------------------------------------------------ 建物 */
+  // 中央: 社（南北2箇所に出入口。奪い合いの掩体という役目は市街地の
+  // 「中央の掩体」と同じ）
+  building(0, 0, 9, 9, 2.9, [{ side: 'z-', u: 0, w: 2.6 }, { side: 'z+', u: 0, w: 2.6 }]);
+  // 四隅の町屋。出入口は必ず中央を向かせる（詰める側が必ず建物の中を通る動線にする）
+  building(-22, 20, 8, 6, 2.6, [{ side: 'z-', u: 0, w: 2.2 }]);
+  building(22, 20, 8, 6, 2.6, [{ side: 'z-', u: 0, w: 2.2 }]);
+  building(-22, -20, 8, 6, 2.6, [{ side: 'z+', u: 0, w: 2.2 }]);
+  building(22, -20, 8, 6, 2.6, [{ side: 'z+', u: 0, w: 2.2 }]);
+
+  /* -------------------------------------------------------- 小物 */
+  lantern(6, -14); lantern(-6, -14); lantern(6, 14); lantern(-6, 14);
+  barrelStack(-14, 4, 0.4); barrelStack(14, -4, 0.4 + Math.PI);
+  barrelStack(-14, -8, 1.0); barrelStack(14, 8, 1.0 + Math.PI);
+  crate(1.1, 1.1, -9, 0, 6, 0.3);
+  crate(1.0, 0.9, 9, 0, -6, 0.9);
+  crate(1.2, 1.0, 16, 0, 14, 0.2);
+  crate(1.1, 1.0, -16, 0, -14, 0.5);
+
+  } else {
   /* ------------------------------------------------------------ 地面 */
   // 見た目の地面はフォグで溶けるところまで伸ばす。狭いと視界の先に板の縁が見えて、
   // 一気に「箱庭に立っている」感じになる。
@@ -1847,16 +2014,6 @@ export function buildLevel(mats, { lamps = true } = {}) {
   // 浮かせると、ポリゴンの辺がそのまま素材の境界になって定規で引いた直線が横切る。
   // alphaMapで外周をfbmに食い破らせ、頂点カラーで隅と物の足元を焼いて沈める。
   // 板は「置いた物の足跡」が全部出揃ってから作りたいので、生成は最後にまとめて回す
-  const patchJobs = [];
-  /* 影を落とさせない材質の集まり。路面の貼り分け板は床から数cm浮いているだけなので、
-     影を落とすと広場一面に自己遮蔽の縞が出る。
-     下のflush()のコメントには最初からそう書いてあったのに、実装は
-     flush(propChunks, props, true)で板にも影を持たせていた（板はプロップと同じ
-     propChunksに入るため）。板は1枚ずつ材質をclone()するので、材質で名指しできる */
-  const noShadowMats = new Set();
-  const patch = (w, d, mat, x, z, ry, y, uv = 6, order = 1) =>
-    patchJobs.push({ w, d, mat, x, z, ry, y, uv, order });
-
   let patchSeed = 3301;
   const buildPatch = ({ w, d, mat, x, z, ry, y, uv, order }) => {
     const seg = clamp(Math.round(Math.max(w, d) / 1.5), 10, 30);
@@ -3858,6 +4015,7 @@ export function buildLevel(mats, { lamps = true } = {}) {
     renderOrders.set(plumeMat, -1);
     renderOrders.set(streakMat, 3);
   }
+  }
 
   /* ------------------------------------------------------- 結合と出力 */
   // 飾りは影を落とさない。特に路面の貼り分けは床から数cm浮いているだけなので、
@@ -3901,7 +4059,53 @@ export function buildLevel(mats, { lamps = true } = {}) {
   buildOctree(octree, solids);
 
   /* -------------------------------------------- スポーン地点と遮蔽情報 */
-  const enemySpawns = [
+  // 江戸ステージは市街地と別のスポーン表を持つ（建物の配置が違うので流用できない）。
+  // ただしarenaSpawns/teamSpawnsの「並び順に意味がある」制約はそのまま守る
+  let enemySpawns, coverPoints, arenaSpawns, teamSpawns;
+
+  if (mapId === 'edo') {
+    // 建物(中央9x9、四隅8x6@(±22,±20))の外を通るように選んだ14箇所
+    enemySpawns = [
+      new THREE.Vector3(-22, 0.1, 0), new THREE.Vector3(22, 0.1, 0),
+      new THREE.Vector3(0, 0.1, -22), new THREE.Vector3(0, 0.1, 22),
+      new THREE.Vector3(-30, 0.1, 30), new THREE.Vector3(30, 0.1, 30),
+      new THREE.Vector3(-30, 0.1, -30), new THREE.Vector3(30, 0.1, -30),
+      new THREE.Vector3(-14, 0.1, 0), new THREE.Vector3(14, 0.1, 0),
+      new THREE.Vector3(0, 0.1, -8), new THREE.Vector3(0, 0.1, 8),
+      new THREE.Vector3(-30, 0.1, 0), new THREE.Vector3(30, 0.1, 0),
+    ];
+
+    coverPoints = [
+      // 社（中央）の出入口前
+      [0, -4.5, 4.0], [0, 4.5, 4.0],
+      // 四隅の町屋の角
+      [-22, 17, 3.4], [-22, 23, 3.4], [-18, 20, 3.0], [-26, 20, 3.0],
+      [22, 17, 3.4], [22, 23, 3.4], [18, 20, 3.0], [26, 20, 3.0],
+      [-22, -17, 3.4], [-22, -23, 3.4], [-18, -20, 3.0], [-26, -20, 3.0],
+      [22, -17, 3.4], [22, -23, 3.4], [18, -20, 3.0], [26, -20, 3.0],
+      // 灯籠・酒樽・木箱
+      [6, -14, 1.6], [-6, -14, 1.6], [6, 14, 1.6], [-6, 14, 1.6],
+      [-14, 4, 2.2], [14, -4, 2.2], [-14, -8, 2.2], [14, 8, 2.2],
+      [-9, 6, 2.0], [9, -6, 2.0], [16, 14, 2.0], [-16, -14, 2.0],
+      // 南北の門（外周の半径。上の建物配置と同じ34を直書き）
+      [0, -34, 3.5], [0, 34, 3.5],
+    ].map(([x, z, r]) => ({ pos: new THREE.Vector3(x, 0, z), radius: r }));
+
+    // 市街地のarenaSpawns/teamSpawnsと同じ並び（中心から11〜18mの環＋
+    // 先頭2つが真向かい35m）をそのまま使う。上で置いた建物(±22,±20の
+    // 8x6と中央9x9)はどれもこの環の外側/外周なので、そのまま流用できる
+    arenaSpawns = [
+      new THREE.Vector3(-17.5, 0.1, 0), new THREE.Vector3(17.5, 0.1, 0),
+      new THREE.Vector3(0, 0.1, -17.5), new THREE.Vector3(0, 0.1, 17.5),
+      new THREE.Vector3(-12, 0.1, -12), new THREE.Vector3(-12, 0.1, 12),
+      new THREE.Vector3(12, 0.1, 12), new THREE.Vector3(12, 0.1, -12),
+    ];
+    teamSpawns = [
+      new THREE.Vector3(-17.5, 0.1, -3), new THREE.Vector3(-17.5, 0.1, 3),
+      new THREE.Vector3(17.5, 0.1, -3), new THREE.Vector3(17.5, 0.1, 3),
+    ];
+  } else {
+  enemySpawns = [
     new THREE.Vector3(-21, 0.1, -22), new THREE.Vector3(23, 0.1, 27),
     new THREE.Vector3(-33, 0.1, 9), new THREE.Vector3(32, 0.1, -12),
     new THREE.Vector3(-10, 0.1, 30), new THREE.Vector3(4, 0.1, -30),
@@ -3914,7 +4118,7 @@ export function buildLevel(mats, { lamps = true } = {}) {
 
   // AIが「ここに寄れば身を隠せる」と判断するための遮蔽物リスト（位置と半径）。
   // 全身が隠れる物と胸の高さの物を混ぜて、詰める側にも寄る場所を用意する
-  const coverPoints = [
+  coverPoints = [
     // 全身が隠れる物（コンテナ・建物の角・小屋）
     [-8, 24, 3.5], [12, -12, 3.5], [-22, 10, 3.5], [-34, -6, 3.5],
     [-14, 20, 3.2], [16, -6, 3.0], [30, 4, 3.0], [4, 32, 3.0], [-26, 6, 3.0],
@@ -3953,7 +4157,7 @@ export function buildLevel(mats, { lamps = true } = {}) {
   // 並び順に意味がある。1対1では席番号でそのまま引くので、
   // 先頭2つが「毎ラウンドの定位置」になる。この2つは中央を挟んで真向かい・35m離れ。
   // 順番を変えると開始位置が近づくので、入れ替える時は距離を測り直すこと
-  const arenaSpawns = [
+  arenaSpawns = [
     new THREE.Vector3(-17.5, 0.1, 0), new THREE.Vector3(17.5, 0.1, 0),
     new THREE.Vector3(0, 0.1, -17.5), new THREE.Vector3(0, 0.1, 17.5),
     new THREE.Vector3(-12, 0.1, -12), new THREE.Vector3(-12, 0.1, 12),
@@ -3972,10 +4176,11 @@ export function buildLevel(mats, { lamps = true } = {}) {
      2人まとめて飛ばない距離（爆風の半径は9.5mだが、中心から6m離れれば
      持っていかれるのは片方だけになる）。
      チーム同士は35mで、これは今までの1対1の開始距離と同じ */
-  const teamSpawns = [
+  teamSpawns = [
     new THREE.Vector3(-17.5, 0.1, -3), new THREE.Vector3(-17.5, 0.1, 3),
     new THREE.Vector3(17.5, 0.1, -3), new THREE.Vector3(17.5, 0.1, 3),
   ];
+  }
 
   return {
     root,
@@ -3988,7 +4193,10 @@ export function buildLevel(mats, { lamps = true } = {}) {
     arenaSpawns,
     teamSpawns,
     coverPoints,
-    playerSpawn: new THREE.Vector3(0, 1.2, 26),
-    bounds: 40,
+    playerSpawn: mapId === 'edo' ? new THREE.Vector3(0, 1.2, 28) : new THREE.Vector3(0, 1.2, 26),
+    // 江戸は板塀が半径34mの正方形なので、その少し外(38)で止める。
+    // 市街地は外周のコンクリ壁がそのまま当たり判定になるので、こちらは
+    // 「壁の外へ出られると興ざめ」の最後の保険（本来は壁で止まる）
+    bounds: mapId === 'edo' ? 38 : 40,
   };
 }

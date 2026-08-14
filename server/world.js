@@ -10,7 +10,7 @@ import { buildLevel } from '../src/world/level.js';
 const SHARED_MAT = new THREE.MeshStandardMaterial();
 const MATS = new Proxy({}, { get: () => SHARED_MAT });
 
-// 組み上がった地形が「いつものマップ」であることの指紋。
+// 組み上がった地形が「いつものマップ」であることの指紋。マップごとに持つ。
 // 地形が変わればここがずれるので、対戦が始まる前に気づける。
 // meshesはlevel.jsの結合の仕方で動くため参考値、
 // 三角形数とOctreeのノード数が形そのものを表す
@@ -18,7 +18,11 @@ const MATS = new Proxy({}, { get: () => SHARED_MAT });
 // 落とした分（軽量化。当たり判定は別の板なのでOctreeのノード数は動いていない）
 // 2026-08-09: 184520→184650。建物A・Bの入口が塞がっていたのを開けた分
 // （基礎の段差の切り欠き＋重なった開口の積み方の直し。壁が細かく割れるので増える）
-const EXPECT = { tris: 184650, nodes: 26234 };
+// 2026-08-14: 江戸ステージ(edo)を追加。urbanの値はそのまま動いていない
+const EXPECT = {
+  urban: { tris: 184650, nodes: 26234 },
+  edo: { tris: 8824, nodes: 2872 },
+};
 
 function measure(level) {
   let meshes = 0;
@@ -37,25 +41,29 @@ function measure(level) {
   return { meshes, tris, nodes };
 }
 
-let cached = null;
+// マップごとに1回だけ組んで使い回す（部屋が増えても地形は共有）
+const cached = new Map();
 
 // Playerのコンストラクタはlevel.octree / level.bounds / level.playerSpawn しか見ないので、
 // この戻り値をそのまま「level」として渡せる
-export function buildWorld() {
-  if (cached) return cached;
+export function buildWorld(mapId = 'urban') {
+  const hit = cached.get(mapId);
+  if (hit) return hit;
 
   const t0 = Date.now();
-  const level = buildLevel(MATS);
+  const level = buildLevel(MATS, { mapId });
   const stats = measure(level);
   const ms = Date.now() - t0;
 
-  console.log(`[world] 地形を組んだ ${ms}ms  メッシュ${stats.meshes} 三角形${stats.tris} Octreeノード${stats.nodes}`);
-  if (stats.tris !== EXPECT.tris || stats.nodes !== EXPECT.nodes) {
-    console.warn(`[world] 警告: 期待値と違う (三角形${EXPECT.tris} ノード${EXPECT.nodes})。`
+  const expect = EXPECT[mapId] || EXPECT.urban;
+  console.log(`[world] 地形を組んだ(${mapId}) ${ms}ms  メッシュ${stats.meshes} 三角形${stats.tris} Octreeノード${stats.nodes}`);
+  if (stats.tris !== expect.tris || stats.nodes !== expect.nodes) {
+    console.warn(`[world] 警告: 期待値と違う (三角形${expect.tris} ノード${expect.nodes})。`
       + 'クライアントと地形がずれている可能性がある');
   }
 
-  cached = {
+  const world = {
+    mapId,
     octree: level.octree,
     bounds: level.bounds,
     playerSpawn: level.playerSpawn,
@@ -68,5 +76,6 @@ export function buildWorld() {
     enemySpawns: level.enemySpawns,
     stats,
   };
-  return cached;
+  cached.set(mapId, world);
+  return world;
 }

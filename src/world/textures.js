@@ -1408,6 +1408,136 @@ function corrugated(u, v, o, seed) {
   o.ao = 1 - valley * 0.22 - lap * 0.4 - screw * 0.35 - rust * 0.12;
 }
 
+/* ------------------------------------------------------------- 江戸ステージ用 */
+
+// 板壁（下見板張り）。横方向に重なる板を並べ、木目と焼け・雨だれを乗せる。
+// 低: 板全体の色ムラ・退色 / 中: 板の重なり段差・継ぎ目・木目 / 高: 導管・ささくれ
+function timberSiding(u, v, o, seed) {
+  const BOARDS = 9;
+  const bIdx = Math.floor(v * BOARDS);
+  const bf = fract(v * BOARDS);
+  // 下見板は下端が少し前に出て影を落とす。継ぎ目そのものは板の下端
+  const edge = smoothstep(0.0, 0.10, bf);
+  const lip = smoothstep(0.10, 0.0, bf) * 0.6;
+  const tone = hash2(bIdx, 5, seed);
+  const off = hash2(bIdx, 11, seed) * 8;
+
+  const grain = fbm(u, v, 20, 4, seed + 3);
+  const rings = Math.sin((u * 14 + off) * Math.PI) * 0.5 + 0.5;
+  const weather = fbm(u, v, 3, 3, seed + 40);   // 板ごとではなく面全体の日焼けムラ
+  const streak = smoothstep(0.55, 0.85, fbmA(u, v, 5, 40, 2, seed + 55)) * (1 - edge); // 雨だれ
+
+  o.h = -lip * 0.35 + (grain - 0.5) * 0.14 + (rings - 0.5) * 0.10 - streak * 0.20;
+
+  // 経年で灰褐色に焼けた杉板。中央が凹むと1枚の板の中間が暗く見えるので
+  // 焼けムラは面全体（weather）に持たせ、板ごとの差は控えめにする
+  const base = 0.30 + tone * 0.09 + (weather - 0.5) * 0.10;
+  let r = base + (rings - 0.5) * 0.05 + (grain - 0.5) * 0.04;
+  let g = base * 0.92 + (rings - 0.5) * 0.045;
+  let b = base * 0.78 + (rings - 0.5) * 0.035;
+  r *= 1 - streak * 0.30; g *= 1 - streak * 0.28; b *= 1 - streak * 0.22;
+  const dk = 1 - lip * 0.5;
+  o.r = r * dk; o.g = g * dk; o.b = b * dk;
+
+  o.rough = clamp01(0.82 + grain * 0.10 - streak * 0.08);
+  o.metal = 0;
+  o.ao = 1 - lip * 0.55 - streak * 0.20;
+}
+
+// 瓦屋根。半円の桟瓦が横一列に並び、段ごとに軒へ向けて重なる。
+// 低: 屋根面全体のコケ・退色 / 中: 瓦の丸み・段差・継ぎ目 / 高: 素焼きの粒・欠け
+function kawara(u, v, o, seed) {
+  const ROWS = 10, COLS = 12;
+  const rowRaw = Math.floor(v * ROWS);
+  const rf = fract(v * ROWS);
+  const row = ((rowRaw % ROWS) + ROWS) % ROWS;
+  // 段ごとに半瓦ずらす（互い違いに葺く本瓦葺きの並び）
+  const cu = u * COLS + (row & 1) * 0.5;
+  const colRaw = Math.floor(cu);
+  const cf = fract(cu);
+  const col = ((colRaw % COLS) + COLS) % COLS;
+  const id = hash2(col, row, seed);
+
+  // 瓦1枚を半円筒として高さ場に落とす（cfが瓦内のU位置）
+  const cc = (cf - 0.5) * 2;
+  const round = Math.sqrt(clamp01(1 - cc * cc));
+  const lap = smoothstep(0.0, 0.18, rf);   // 軒側の瓦が上の瓦の下へ潜り込む段差
+  const chip = smoothstep(0.72, 0.90, fbm(u, v, 30, 2, seed + 60)) * round;
+
+  const moss = smoothstep(0.62, 0.86, fbm(u, v, 5, 3, seed + 20));     // 谷筋のコケ
+  const soot = fbm(u, v, 3, 2, seed + 35);                             // 焼きムラ
+  const grain = fbm(u, v, 150, 2, seed + 70);
+
+  o.h = round * 0.85 - lap * 0.45 - chip * 0.35 + grain * 0.05
+    + moss * 0.10 * round;
+
+  // 焼き瓦のいぶし銀〜青黒。谷筋はコケで緑がかる
+  const base = 0.16 + id * 0.05 + (soot - 0.5) * 0.05;
+  let r = base * (0.92 + round * 0.10);
+  let g = base * (0.96 + round * 0.10);
+  let b = base * (1.05 + round * 0.10);
+  r = lerp(r, 0.44, chip * 0.5); g = lerp(g, 0.42, chip * 0.5); b = lerp(b, 0.38, chip * 0.5);
+  r = lerp(r, 0.14, moss * 0.6 * round); g = lerp(g, 0.22, moss * 0.6 * round); b = lerp(b, 0.13, moss * 0.6 * round);
+  const dk = 1 - lap * 0.35;
+  o.r = r * dk; o.g = g * dk; o.b = b * dk;
+
+  o.rough = clamp01(0.62 + grain * 0.10 - round * 0.06 + moss * 0.15);
+  o.metal = 0;
+  o.ao = 1 - lap * 0.4 - (1 - round) * 0.35 - chip * 0.2;
+}
+
+// 叩き土（三和土風の土間・地面）。締め固めた土の面に小石と踏み跡が入る。
+// dirt()より粒を細かく・色を明るい黄土寄りにして、コンクリの床と読み分ける
+function packedEarth(u, v, o, seed) {
+  const damp = fbm(u, v, 2, 3, seed);
+  const crack = smoothstep(0.72, 0.90, ridged(u, v, 9, 3, seed + 15));
+  const tread = smoothstep(0.50, 0.80, fbmA(u, v, 2, 10, 2, seed + 25));  // 通り道の踏み固め
+
+  const grit = voronoi(u, v, 90, seed + 40);
+  const pebble = smoothstep(0.36, 0.10, grit.d);
+  const fine = fbm(u, v, 160, 2, seed + 55);
+
+  o.h = (damp - 0.5) * 0.30 - tread * 0.20 - crack * 0.45 + pebble * 0.14 + fine * 0.06;
+
+  const base = 0.34 + (damp - 0.5) * 0.10 + fine * 0.05;
+  let r = base, g = base * 0.86, b = base * 0.66;
+  const gr = 0.30 + grit.id * 0.10;
+  r = lerp(r, gr, pebble * 0.6); g = lerp(g, gr * 0.97, pebble * 0.6); b = lerp(b, gr * 0.92, pebble * 0.6);
+  const dk = 1 - tread * 0.14 - crack * 0.30;
+  o.r = r * dk; o.g = g * dk; o.b = b * dk;
+
+  o.rough = clamp01(0.88 - tread * 0.10 + fine * 0.05);
+  o.metal = 0;
+  o.ao = 1 - crack * 0.35 - tread * 0.10 - (1 - pebble) * 0.05;
+}
+
+// 障子紙。木の桟(格子)に紙を張った面。紙は薄く光を透かす見た目にしたいが、
+// 材質としては不透明の壁材と同じ扱いなので、格子の影と紙の毛羽立ちだけを表現する。
+// 低: 紙の日焼けムラ・破れかけの染み / 中: 桟の格子 / 高: 紙の繊維
+function shojiPaper(u, v, o, seed) {
+  const COLS = 4, ROWS = 6;
+  const cx = tri(u * COLS);
+  const cy = tri(v * ROWS);
+  const bar = Math.max(smoothstep(0.46, 0.50, cx), smoothstep(0.46, 0.50, cy));
+
+  const stain = smoothstep(0.62, 0.88, fbm(u, v, 3, 3, seed + 10));   // 日焼け・染み
+  const fiber = fbm(u, v, 110, 3, seed + 30);
+  const fuzz = fbm(u, v, 220, 2, seed + 45);
+
+  o.h = bar * 0.55 + fiber * 0.05 - stain * 0.08;
+
+  // 生成りの白。桟は木肌の色
+  const paper = 0.82 + (fiber - 0.5) * 0.06 - stain * 0.18;
+  let r = paper, g = paper * 0.98, b = paper * 0.90;
+  const wood = 0.30 + fuzz * 0.05;
+  r = lerp(r, wood, bar); g = lerp(g, wood * 0.86, bar); b = lerp(b, wood * 0.66, bar);
+  o.r = r; o.g = g; o.b = b;
+
+  o.rough = clamp01(0.72 + fuzz * 0.12 - bar * 0.20);
+  o.metal = 0;
+  o.ao = 1 - bar * 0.25 - stain * 0.10;
+}
+
 /* ---------------------------------------------------------- sprite maps */
 
 // 中心が白く飛び、外に向かって減衰する丸。閃光・火花・血しぶきの共通素材
@@ -1886,5 +2016,13 @@ export function buildMaterials(renderer) {
     plaster: mk(plaster, 37, 2.2, 1, { aniso: ANISO_WALL, normalScale: 1.05, surf: wall }),
     dirt: mk(dirt, 41, 2.4, 1, { normalScale: 1.2, surf: { ...ground, macroRun: 0.0 } }),
     corrugated: mk(corrugated, 43, 2.6, 1, { aniso: ANISO_WALL, normalScale: 1.0, surf: wall }),
+
+    // ここから江戸ステージ用（やりたいこと.md参照）
+    timberSiding: mk(timberSiding, 53, 1.7, 1, { aniso: ANISO_WALL, normalScale: 0.9, surf: wall }),
+    // 瓦は屋根面(ほぼ上向き)に貼るので、壁と違って視線が寝がち。groundと同じ
+    // 上限のanisoに寄せる
+    kawara: mk(kawara, 59, 2.0, 1, { normalScale: 1.0, surf: { ...ground, macroRun: 0.05 } }),
+    packedEarth: mk(packedEarth, 61, 2.2, 1, { normalScale: 1.1, surf: { ...ground, macroRun: 0.0 } }),
+    shojiPaper: mk(shojiPaper, 67, 1.2, 1, { aniso: ANISO_WALL, normalScale: 0.7, surf: prop }),
   };
 }
