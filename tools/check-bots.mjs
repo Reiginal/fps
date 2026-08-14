@@ -170,8 +170,13 @@ console.log('\n[5] 実際に動いて・撃って・当てる（本物の地形�
   let hitMe = 0;
   const myHp0 = me.slot.sim.player.health;
   // 撃った電文を数える。EV.FIREはpushで溜まるので、配る前に覗く
+  /* 90秒まで回す。前は30秒だったが、2026-08-14の戦域の対称化で中央の遮蔽が
+     増えた（コンテナ・車止め・土嚢が対で並んだ）ぶん、CPUが棒立ちの人へ
+     射線を通すまでの経路が長くなり、初弾が当たるまで実測68秒かかる回があった。
+     見たい性質は「本物の地形でCPUが人を見つけて当てられる」であって速さではないので、
+     窓を伸ばして応える（当たった時点で打ち切るので、普段はそこまで回らない） */
   const seen = new Set();
-  for (let i = 0; i < 30 * 60; i++) {
+  for (let i = 0; i < 90 * 60 && hitMe === 0; i++) {
     room._tick();
     for (const ev of room.events) {
       if (ev.e === 'f' && bots.some((b) => b.id === ev.id)) fired++;
