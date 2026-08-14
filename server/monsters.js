@@ -140,13 +140,22 @@ export class MonsterDirector {
   }
 
   /* 湧き場所。袋から4枚めくって「一番近い人から一番遠い1枚」を採る。
-     誰かの目の前に湧くのが一番白けるので、最悪ケースで選ぶ */
-  _pickSpawn(players) {
+     誰かの目の前に湧くのが一番白けるので、最悪ケースで選ぶ。
+
+     nearを立てると逆に「一番近い1枚（ただしCLOSEST_OKより手前は除く）」を採る。
+     **ボス用。** ボスは体が大きくて路地を素直に通れないうえ、突進も火の玉も
+     視線が要るので、町の反対側から歩かせると山場が始まる前に日が暮れる
+     （実測：外縁の湧き地点から60秒歩かせて、爪が届いたのは
+     市街地14箇所中4箇所・江戸16箇所中3箇所だけだった）。
+     最後の大物が近くに現れるのは、演出としてもそのほうが正しい */
+  _pickSpawn(players, near = false) {
     const spawns = this.level.enemySpawns;
     if (!this._spawnBag || this._spawnBag.length === 0) this._refillSpawnBag();
     const bag = this._spawnBag;
-    const look = Math.min(4, bag.length);
-    let bestAt = 0, bestD = -1;
+    const look = near ? bag.length : Math.min(4, bag.length);
+    // 近い側を採る時の下限。これより手前だと足元に湧いて避けようがない
+    const CLOSEST_OK = 14;
+    let bestAt = 0, bestD = near ? Infinity : -1;
     for (let i = 0; i < look; i++) {
       const sp = spawns[bag[i]];
       let nearest = Infinity;
@@ -154,7 +163,10 @@ export class MonsterDirector {
         const d = sp.distanceToSquared(p.player.collider.start);
         if (d < nearest) nearest = d;
       }
-      if (nearest > bestD) { bestD = nearest; bestAt = i; }
+      if (near) {
+        if (nearest < CLOSEST_OK * CLOSEST_OK) continue;
+        if (nearest < bestD) { bestD = nearest; bestAt = i; }
+      } else if (nearest > bestD) { bestD = nearest; bestAt = i; }
     }
     const pick = bag.splice(bestAt, 1)[0];
     return spawns[pick];
@@ -162,7 +174,8 @@ export class MonsterDirector {
 
   _spawnOne(kind, players, at = null) {
     const mon = this._obtain(kind);
-    mon.spawn(at || this._pickSpawn(players));
+    // ボスだけは近い側から出す（_pickSpawnのnearの説明を読むこと）
+    mon.spawn(at || this._pickSpawn(players, kind === 'boss'));
     mon.state = MSTATE.SEEK;
     const rec = { mid: this.nextMid++, kind, mon, targetSlot: null, deadFor: 0 };
     mon._rec = rec;
