@@ -11,7 +11,7 @@ import {
   TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS, MATCH, PHASE, ZONE, NADE, blastDamage, outsideZone,
   Sv, EV, packPlayer, packMonster, SEATS, SEAT_SPAWN, CHARACTERS, MODE_IDS, MAP_IDS,
   LOBBY_ROW, LOBBY_ROW_LEN, DROP,
-  TEAM_OF_SEAT, TEAM_NAMES, MELEE_HEAVY, MELEE_SWEEP, PART, PART_MUL,
+  TEAM_OF_SEAT, TEAM_NAMES, MELEE_HEAVY, MELEE_SWEEP, PART,
 } from '../src/net/protocol.js';
 import { SimPlayer, resolveShot, rewindMs, originVisible, WEAPONS, heavyDef } from './sim.js';
 import { Bot, forwardOf } from './bot.js';
@@ -39,6 +39,10 @@ const EVENT_MAX = 256;
 const SHOT_ORIGIN_MAX = 0.6;
 
 const nowMs = () => performance.now();
+/* 電文へ載せる座標と向きの丸め。mm単位で足りる（火の玉の絵は各自が
+   まっすぐ飛ばすので、出発点が1mmずれても見た目に出ない）。
+   丸めないと 0.7071067811865476 のような桁がそのままJSONに乗る */
+const r3 = (v) => Math.round(v * 1000) / 1000;
 
 // 爆発の距離を測る時の使い回し。1回ごとに作ると毎爆発でごみが出る
 const _nadeTo = new THREE.Vector3();
@@ -1061,20 +1065,24 @@ export class Room {
       const mres = this.monsters.intersectShot(origin, dir, pad2);
       if (mres && mres.hit.distance <= (def2.range || 100) && mres.hit.distance < res.dist) {
         const partNo = mres.hit.part === 'head' ? PART.HEAD
-          : mres.hit.part === 'legs' ? PART.LEG : PART.CHEST;
-        // 距離減衰と部位倍率は人へ撃った時と同じ式（resolveShotと揃える）
+          : mres.hit.part === 'legs' ? PART.LEG
+            : mres.hit.part === 'weak' ? PART.WEAK : PART.CHEST;
+        // 距離減衰は人へ撃った時と同じ式（resolveShotと揃える）
         const t2 = def2.falloffEnd > def2.falloffStart
           ? Math.min(1, Math.max(0, (mres.hit.distance - def2.falloffStart)
             / (def2.falloffEnd - def2.falloffStart)))
           : 0;
         const mul = 1 + (def2.falloffMin - 1) * t2;
-        const dmg = def2.damage * mul * (PART_MUL[partNo] ?? 1);
+        /* **部位倍率は人の表(PART_MUL)を使わない。**
+           モンスターは当たり所の大きさも意味も人と違う（背中のコブという
+           弱点があり、脚は太くて当たりやすい）ので、倍率はsrc/ai/monster.jsが持つ */
+        const dmg = def2.damage * mul * MonsterDirector.mulOf(mres.hit.part);
         const pt = mres.hit.point;
         this.push({
           e: EV.MHIT, mid: mres.m.mid, by: slot.id,
           dmg: Math.round(dmg * 10) / 10, part: partNo, p: [pt.x, pt.y, pt.z],
         });
-        this.monsters.hit(mres.m, dmg, mres.hit.part, dir, slot);
+        this.monsters.hit(mres.m, dmg, mres.hit.part, slot);
         return;
       }
     }
@@ -1232,9 +1240,9 @@ export class Room {
     if (this.rules.coop && this.monsters && this.phase === PHASE.LIVE) {
       const thrower = this.slots.get(g.by) || null;
       for (const m of [...this.monsters.active]) {
-        const e2 = m.enemy;
-        if (!e2.alive) continue;
-        const c = e2.collider.start;
+        const mon = m.mon;
+        if (!mon.alive) continue;
+        const c = mon.collider.start;
         _nadeTo.set(c.x, c.y + 0.5, c.z);
         const d = _nadeTo.distanceTo(g.pos);
         if (d > NADE.BLAST_R) continue;
@@ -1242,9 +1250,9 @@ export class Room {
         const dmg = blastDamage(d, true);
         this.push({
           e: EV.MHIT, mid: m.mid, by: g.by,
-          dmg: Math.round(dmg * 10) / 10, part: 1, p: [g.pos.x, g.pos.y, g.pos.z],
+          dmg: Math.round(dmg * 10) / 10, part: PART.CHEST, p: [g.pos.x, g.pos.y, g.pos.z],
         });
-        this.monsters.hit(m, dmg, 'chest', null, thrower);
+        this.monsters.hit(m, dmg, 'body', thrower);
       }
     }
   }
@@ -1663,16 +1671,24 @@ export class Room {
     if (!this.monsters) {
       this.monsters = new MonsterDirector(this.world, {
         onSpawn: (m) => {
-          const c = m.enemy.collider.start;
+          const c = m.mon.collider.start;
           this.push({
             e: EV.MSPAWN, mid: m.mid, kind: m.kind, scale: MONSTER_KINDS[m.kind].scale,
-            p: [c.x, m.enemy.feetY, c.z], hp: m.enemy.maxHealth,
+            p: [c.x, m.mon.feetY, c.z], hp: m.mon.maxHealth,
           });
         },
-        onFire: (m) => this.push({ e: EV.MFIRE, mid: m.mid }),
+        onSwing: (m) => this.push({ e: EV.MSWING, mid: m.mid }),
+        onSpit: (m, pos, dir, sp) => this.push({
+          e: EV.MSPIT, mid: m.mid,
+          p: [r3(pos.x), r3(pos.y), r3(pos.z)],
+          d: [r3(dir.x), r3(dir.y), r3(dir.z)], sp,
+        }),
+        onBoom: (pos, r) => this.push({ e: EV.MBOOM, p: [r3(pos.x), r3(pos.y), r3(pos.z)], r }),
+        onStomp: (m, r) => this.push({ e: EV.MSTOMP, mid: m.mid, r }),
+        onRoar: (m) => this.push({ e: EV.MROAR, mid: m.mid }),
         onHitPlayer: (slot, dmg) => this._monsterHitPlayer(slot, dmg),
-        onDeath: (m, by, head) => {
-          this.push({ e: EV.MKILL, mid: m.mid, by: by ? by.id : -1, head: !!head });
+        onDeath: (m, by, part) => {
+          this.push({ e: EV.MKILL, mid: m.mid, by: by ? by.id : -1, part });
           if (by?.sim) by.sim.kills++;
         },
         onWave: (n, boss) => this.push({ e: EV.WAVE, n, of: WAVE_COUNT + 1, boss: boss ? 1 : 0 }),

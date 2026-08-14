@@ -24,7 +24,7 @@ const MATS = new Proxy({}, { get: () => SHARED_MAT });
 // コンテナや木箱や土嚢などの遮蔽を180度回した対で追加。tools/check-arena.mjs参照）
 const EXPECT = {
   urban: { tris: 208102, nodes: 31172 },
-  edo: { tris: 8824, nodes: 2872 },
+  edo: { tris: 52862, nodes: 13640 },
 };
 
 function measure(level) {

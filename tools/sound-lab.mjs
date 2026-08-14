@@ -35,6 +35,19 @@ for (const w of WEAPONS) {
   });
 }
 targets.push({ name: 'explosion', label: '爆発', play: (a) => a.explosion(null, null) });
+
+/* 協力プレイのモンスター。**低い音の取り分がそのまま「大きさ」になる**ので、
+   同じ声を体格違いで3つ書き出して並べて測れるようにしてある
+   （この3つを聴き比べて同じ大きさに聞こえたら、体格の作り分けが効いていない） */
+targets.push({ name: 'mon-growl', label: 'モンスターの唸り(小)', seconds: 1.4, play: (a) => a.monsterVoice('growl', 0.78, null, null) });
+targets.push({ name: 'mon-growl-big', label: 'モンスターの唸り(大)', seconds: 1.8, play: (a) => a.monsterVoice('growl', 1.32, null, null) });
+targets.push({ name: 'mon-roar', label: 'ボスの咆哮', seconds: 3.0, play: (a) => a.monsterVoice('roar', 2.75, null, null) });
+targets.push({ name: 'mon-die', label: 'モンスターが倒れる', seconds: 2.0, play: (a) => a.monsterVoice('die', 1.0, null, null) });
+targets.push({ name: 'mon-swipe', label: '爪を振る', seconds: 1.0, play: (a) => a.monsterSwipe(1.32, null, null) });
+targets.push({ name: 'mon-spit', label: '火の玉を吐く', seconds: 1.2, play: (a) => a.monsterSpit(null, null) });
+targets.push({ name: 'mon-boom', label: '火の玉が弾ける', seconds: 1.6, play: (a) => a.monsterBoom(null, null) });
+targets.push({ name: 'mon-stomp', label: 'ボスの踏みつけ', seconds: 2.0, play: (a) => a.monsterStomp(null, null) });
+targets.push({ name: 'mon-step', label: 'ボスの足音', seconds: 1.4, play: (a) => a.monsterStep(2.75, null, null) });
 // 自分が倒れた時の音。**一番長く聴かされる音**（結果画面まで鳴っている）なのに
 // 一度も測っていなかった。3秒取るのは、耳鳴りの尻尾まで含めて見るため
 targets.push({ name: 'player-down', label: '自分が倒れた', play: (a) => a.playerDown(), seconds: 3.0 });

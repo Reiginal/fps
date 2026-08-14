@@ -681,5 +681,41 @@ console.log('\n[8] 買えた合図が、ロビー入室と混ざらないか');
   ok(buy.lowPct < 5, `低い所で鳴っていない (${buy.lowPct.toFixed(1)}% / 5%未満)`);
 }
 
+console.log('\n[協力プレイのモンスター] 体格が耳で分かるか');
+/* なぜ測るか: モンスターは体高1.26m(小型)から4.5m(ボス)まである。
+   **同じ声の音程違いにすると、大きさが1つも伝わらない。**
+   人が「大きい」と感じるのは低音の取り分と尾の長さなので、そこが
+   体格の順に並んでいることを見張る。キル音で7回外した時と同じ測り方 */
+{
+  const small = await capture((a) => a.monsterVoice('growl', 0.78, null, null), { seconds: 3.4 });
+  // 長さも比べるので、**窓は両方同じにする。**
+  // 短い窓で測ると尾が窓で切れて、どちらも「窓いっぱい」になり比較にならない
+  const big = await capture((a) => a.monsterVoice('growl', 1.32, null, null), { seconds: 3.4 });
+  const roar = await capture((a) => a.monsterVoice('roar', 2.75, null, null), { seconds: 3.4 });
+  ok(big.lowPct > small.lowPct + 3,
+    `大型の唸りは小型より低音が多い（小${small.lowPct.toFixed(0)}% → 大${big.lowPct.toFixed(0)}%）`);
+  ok(roar.lowPct > big.lowPct + 5,
+    `ボスの咆哮が一番低い（${roar.lowPct.toFixed(0)}%）`);
+  ok(roar.lowPct > 45, `咆哮は腹に来る（低音${roar.lowPct.toFixed(0)}% / 45%以上）`);
+  ok(roar.lenMs > big.lenMs * 1.2,
+    `咆哮は尾が長い（唸り${big.lenMs.toFixed(0)}ms → 咆哮${roar.lenMs.toFixed(0)}ms）`);
+  // 1.0に届くと波の頭が潰れて割れる。唸りは何度も鳴るので、咆哮より下に置く
+  ok(small.peak < 0.95 && big.peak < 0.95 && roar.peak < 0.95,
+    `割れていない（小${small.peak.toFixed(2)} 大${big.peak.toFixed(2)} 咆哮${roar.peak.toFixed(2)}）`);
+}
+{
+  /* 爪と刃を混ぜない。**爪は太い腕ごと来るので低い所が要る。**
+     刃の風切り(swing)を流用すると、モンスターがナイフを振っているように聞こえる */
+  const claw = await capture((a) => a.monsterSwipe(1.32, null, null), { seconds: 1.2 });
+  const blade = await capture((a) => a.swing(), { seconds: 1.2 });
+  ok(claw.lowPct > blade.lowPct + 5,
+    `爪は刃より低い（刃${blade.lowPct.toFixed(1)}% → 爪${claw.lowPct.toFixed(1)}%）`);
+  const stomp = await capture((a) => a.monsterStomp(null, null), { seconds: 2.0 });
+  ok(stomp.lowPct > 25, `踏みつけは地面が来る音（低音${stomp.lowPct.toFixed(0)}%）`);
+  const step = await capture((a) => a.monsterStep(2.75, null, null), { seconds: 1.5 });
+  ok(step.lowPct > 40, `ボスの足音は低音が主役（${step.lowPct.toFixed(0)}%）`);
+  ok(step.peak < 0.6, `足音は歩くたびに鳴るので控えめ（山${step.peak.toFixed(2)}）`);
+}
+
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);
 process.exit(bad === 0 ? 0 : 1);

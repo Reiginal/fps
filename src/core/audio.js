@@ -2651,6 +2651,260 @@ export class AudioEngine {
     src.start(t, Math.random()); src.stop(t + 0.7);
   }
 
+  /* ------------------------------------------------ 協力プレイのモンスター */
+
+  /* モンスターの声。**低い音の取り分がそのまま「大きさ」になる。**
+     キル音で7回外した時に測って分かった通り（tools/check-sound.mjs の冒頭）、
+     人が「重い」と感じるのは30〜250Hzの取り分なので、
+     ここが空だと体高4.5mのボスが鳴らしても子犬の唸りにしかならない。
+
+     作りは声帯の物真似。
+       ・基音を2本、わずかにずらして重ねる（唸り＝周波数のうねり）
+       ・それをローパスで丸めて胸郭の共鳴を作る
+       ・上から荒れたノイズを乗せて、声帯が擦れる音を足す
+     体格(scale)で基音を下げ、長さを伸ばす。**同じ音の音程違いにしない。**
+     大きい個体ほど「うねりが遅く、尾が長い」のが、耳から見た大きさの正体
+
+     kind は 'growl'(唸り) | 'roar'(咆哮) | 'die'(倒れる) */
+  monsterVoice(kind = 'growl', scale = 1, position = null, camera = null) {
+    if (!this.ready || !this.enabled) return;
+    const ctx = this.ctx;
+    const dist = this._dist(position, camera);
+    const t = ctx.currentTime + Math.min(0.6, dist / SOUND_SPEED);
+    // 体格で基音を下げる。2.75倍のボスで38Hz前後まで落ちる
+    const f0 = (kind === 'roar' ? 108 : kind === 'die' ? 84 : 96) / Math.pow(scale, 0.85);
+    const len = (kind === 'roar' ? 1.5 : kind === 'die' ? 0.9 : 0.55) * (0.85 + scale * 0.18);
+    /* 音量。**測って決めた。** 最初は roar 0.85 / die 0.5 / growl 0.34 にしていて、
+       tools/sound-lab.mjs で書き出すと山が唸り0.87・倒れる0.88まで行っていた。
+       爆発が0.66、銃声が0.67〜0.78なので、**モンスターが唸るたびに
+       手榴弾より大きい音が鳴る**状態。咆哮だけは試合で一番大きくてよい */
+    const vol = (kind === 'roar' ? 0.72 : kind === 'die' ? 0.34 : 0.23);
+    const bus = ctx.createGain();
+
+    // 基音2本。3〜7Hzずらして重ねると、うねって「生き物の喉」になる。
+    // 1本だとブザーになる（爆発の低音を2本にしたのと同じ理由）
+    for (let i = 0; i < 2; i++) {
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';       // 倍音が要る。sineだと丸すぎて喉に聞こえない
+      const f = f0 * (i === 0 ? 1 : rnd(1.03, 1.09));
+      o.frequency.setValueAtTime(f * (kind === 'roar' ? 0.82 : 1), t);
+      // 咆哮は途中で持ち上げてから落とす。一定だと機械の唸りになる
+      if (kind === 'roar') {
+        o.frequency.linearRampToValueAtTime(f * 1.22, t + len * 0.28);
+        o.frequency.exponentialRampToValueAtTime(f * 0.55, t + len);
+      } else {
+        o.frequency.exponentialRampToValueAtTime(f * 0.72, t + len);
+      }
+      // 胸郭。基音の6倍あたりで切ると、喉から胸へ落ちた音になる
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(f0 * 7, t);
+      lp.frequency.exponentialRampToValueAtTime(f0 * 3.2, t + len);
+      lp.Q.value = 1.4;
+      const g = ctx.createGain();
+      o.connect(lp); lp.connect(g); g.connect(bus);
+      this._env(g, t + i * 0.012, vol * (i === 0 ? 1 : 0.6), kind === 'roar' ? 0.06 : 0.03, len);
+      o.start(t); o.stop(t + len + 0.4);
+    }
+
+    /* 声帯の擦れ。ノイズを基音のあたりに集めて、荒れた息として乗せる。
+       これが無いと合成音の「ブー」で終わる */
+    const rasp = this._noiseSource(rnd(0.5, 0.8));
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(f0 * 4.5, t);
+    bp.frequency.exponentialRampToValueAtTime(f0 * 2.0, t + len);
+    bp.Q.value = 0.7;
+    const rg = ctx.createGain();
+    rasp.connect(bp); bp.connect(rg); rg.connect(bus);
+    this._env(rg, t, vol * 0.5, 0.02, len * 0.9);
+    rasp.start(t, Math.random()); rasp.stop(t + len + 0.3);
+
+    // 咆哮だけ、腹に来る一撃を下に敷く
+    if (kind === 'roar') {
+      const sub = ctx.createOscillator();
+      sub.type = 'sine';
+      sub.frequency.setValueAtTime(f0 * 0.55, t);
+      sub.frequency.exponentialRampToValueAtTime(f0 * 0.30, t + len * 1.2);
+      const sg = ctx.createGain();
+      sub.connect(sg); sg.connect(bus);
+      this._env(sg, t, 0.7, 0.03, len * 1.2);
+      sub.start(t); sub.stop(t + len + 0.6);
+    }
+
+    const out = this._place(bus, position, camera, kind === 'roar' ? 34 : 14, dist);
+    this._out(out, kind === 'roar' ? 0.6 : 0.3, kind === 'roar' ? 0.7 : 0.3);
+  }
+
+  /* 爪を振る音。**刃の風切り(swing)とは別物にする。**
+     刃は薄いので高い所が「シュッ」と鳴るが、爪は太い腕ごと来るので
+     低い所の「ゴッ」が要る。同じ音を流用すると、モンスターがナイフを
+     振っているように聞こえる */
+  monsterSwipe(scale = 1, position = null, camera = null) {
+    if (!this.ready || !this.enabled) return;
+    const ctx = this.ctx;
+    const dist = this._dist(position, camera);
+    const t = ctx.currentTime + Math.min(0.6, dist / SOUND_SPEED);
+    const len = 0.20 * (0.8 + scale * 0.3);
+    const bus = ctx.createGain();
+
+    // 風。帯を上から下へ滑らせると「通り過ぎた」に聞こえる
+    const air = this._noiseSource(rnd(0.85, 1.1));
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(1500 / scale, t);
+    bp.frequency.exponentialRampToValueAtTime(260 / scale, t + len);
+    bp.Q.value = 1.1;
+    const ag = ctx.createGain();
+    air.connect(bp); bp.connect(ag); ag.connect(bus);
+    this._env(ag, t, 0.34, 0.012, len);
+    air.start(t, Math.random()); air.stop(t + len + 0.2);
+
+    // 腕の重み。低い所に短い山を1つ置くだけで、細い風切りが太い腕になる
+    const thud = ctx.createOscillator();
+    thud.type = 'sine';
+    thud.frequency.setValueAtTime(150 / scale, t + len * 0.55);
+    thud.frequency.exponentialRampToValueAtTime(52 / scale, t + len * 1.4);
+    const tg = ctx.createGain();
+    thud.connect(tg); tg.connect(bus);
+    this._env(tg, t + len * 0.55, 0.30, 0.006, len * 0.9);
+    thud.start(t); thud.stop(t + len * 2 + 0.2);
+
+    this._out(this._place(bus, position, camera, 11, dist), 0.3, 0.3);
+  }
+
+  // 火の玉を吐く。濡れた噴き出しと、火が付く一瞬の膨らみ
+  monsterSpit(position = null, camera = null) {
+    if (!this.ready || !this.enabled) return;
+    const ctx = this.ctx;
+    const dist = this._dist(position, camera);
+    const t = ctx.currentTime + Math.min(0.6, dist / SOUND_SPEED);
+    const bus = ctx.createGain();
+
+    // 噴き出し。高い所の擦れを短く
+    const hiss = this._noiseSource(rnd(1.2, 1.5));
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.setValueAtTime(900, t);
+    hp.frequency.exponentialRampToValueAtTime(2600, t + 0.18);
+    const hg = ctx.createGain();
+    hiss.connect(hp); hp.connect(hg); hg.connect(bus);
+    this._env(hg, t, 0.30, 0.004, 0.22);
+    hiss.start(t, Math.random()); hiss.stop(t + 0.5);
+
+    // 着火。低い所が一瞬膨らむ
+    const fl = ctx.createOscillator();
+    fl.type = 'sine';
+    fl.frequency.setValueAtTime(210, t);
+    fl.frequency.exponentialRampToValueAtTime(70, t + 0.3);
+    const fg = ctx.createGain();
+    fl.connect(fg); fg.connect(bus);
+    this._env(fg, t, 0.34, 0.008, 0.3);
+    fl.start(t); fl.stop(t + 0.6);
+
+    this._out(this._place(bus, position, camera, 16, dist), 0.35, 0.35);
+  }
+
+  /* 火の玉が弾けた。手榴弾(explosion)より小さく短い。
+     同じ音にすると、火の玉1発で手榴弾が落ちたのかと身構えることになる */
+  monsterBoom(position = null, camera = null) {
+    if (!this.ready || !this.enabled) return;
+    const ctx = this.ctx;
+    const dist = this._dist(position, camera);
+    const t = ctx.currentTime + Math.min(0.6, dist / SOUND_SPEED);
+    const bus = ctx.createGain();
+
+    const sub = ctx.createOscillator();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(rnd(76, 92), t);
+    sub.frequency.exponentialRampToValueAtTime(28, t + 0.42);
+    const sg = ctx.createGain();
+    sub.connect(sg); sg.connect(bus);
+    this._env(sg, t, 0.52, 0.004, 0.42);
+    sub.start(t); sub.stop(t + 0.9);
+
+    // 火の広がり。帯を落としながら少し長く残す
+    const fire = this._noiseSource(rnd(0.6, 0.85));
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(2400, t);
+    lp.frequency.exponentialRampToValueAtTime(320, t + 0.6);
+    const fg = ctx.createGain();
+    fire.connect(lp); lp.connect(fg); fg.connect(bus);
+    this._env(fg, t, 0.40, 0.003, 0.6);
+    fire.start(t, Math.random()); fire.stop(t + 1.0);
+
+    this._out(this._place(bus, position, camera, 20, dist), 0.5, 0.5);
+  }
+
+  /* 踏みつけ。**地面が来る音。**低い衝撃と、遅れて散る瓦礫。
+     ボスしか鳴らさないので、この音が聞こえたら輪の外へ逃げる合図になる */
+  monsterStomp(position = null, camera = null) {
+    if (!this.ready || !this.enabled) return;
+    const ctx = this.ctx;
+    const dist = this._dist(position, camera);
+    const t = ctx.currentTime + Math.min(0.6, dist / SOUND_SPEED);
+    const bus = ctx.createGain();
+
+    for (const [f, v, d] of [[64, 0.85, 0.5], [102, 0.45, 0.3]]) {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(f * rnd(0.94, 1.06), t);
+      o.frequency.exponentialRampToValueAtTime(f * 0.35, t + d);
+      const g = ctx.createGain();
+      o.connect(g); g.connect(bus);
+      this._env(g, t, v, 0.003, d);
+      o.start(t); o.stop(t + d + 0.5);
+    }
+
+    // 瓦礫。少し遅らせて散らす
+    const deb = this._noiseSource(rnd(0.9, 1.2));
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(1600, t);
+    bp.frequency.exponentialRampToValueAtTime(500, t + 0.5);
+    bp.Q.value = 0.6;
+    const dg = ctx.createGain();
+    deb.connect(bp); bp.connect(dg); dg.connect(bus);
+    this._env(dg, t + 0.03, 0.30, 0.004, 0.55);
+    deb.start(t, Math.random()); deb.stop(t + 0.9);
+
+    this._out(this._place(bus, position, camera, 26, dist), 0.55, 0.6);
+  }
+
+  /* 大型の足音。**小型では鳴らさない**（群れが来た時に音が飽和する）。
+     人の足音(footstep)と作りを変えているのは、重さが「高い音の有無」ではなく
+     「低い所の山の長さ」で決まるため */
+  monsterStep(scale = 1, position = null, camera = null) {
+    if (!this.ready || !this.enabled) return;
+    const ctx = this.ctx;
+    const dist = this._dist(position, camera);
+    const t = ctx.currentTime + Math.min(0.6, dist / SOUND_SPEED);
+    const bus = ctx.createGain();
+    const f = 90 / Math.pow(scale, 0.7);
+
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(f, t);
+    o.frequency.exponentialRampToValueAtTime(f * 0.42, t + 0.16 * scale);
+    const g = ctx.createGain();
+    o.connect(g); g.connect(bus);
+    this._env(g, t, 0.34 * Math.min(1.4, scale), 0.003, 0.16 * scale);
+    o.start(t); o.stop(t + 0.5 * scale);
+
+    // 土と砂利。上に薄く乗せると、低音だけの「ドン」が地面に着いた音になる
+    const grit = this._noiseSource(rnd(0.7, 1.0));
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 1400 / scale;
+    const gg = ctx.createGain();
+    grit.connect(lp); lp.connect(gg); gg.connect(bus);
+    this._env(gg, t, 0.16, 0.002, 0.10);
+    grit.start(t, Math.random()); grit.stop(t + 0.3);
+
+    this._out(this._place(bus, position, camera, 12 * scale, dist), 0.3, 0.3);
+  }
+
   /* ---------------------------------------------------------- 環境音 */
 
   // 遠くの銃声と風。無音だと戦場に見えないので薄く敷く。

@@ -7,6 +7,7 @@
 //
 //   node tools/check-edo.mjs
 import * as THREE from 'three';
+import { Capsule } from 'three/addons/math/Capsule.js';
 import '../server/dom-stub.js';
 import { readFileSync } from 'node:fs';
 import { buildLevel } from '../src/world/level.js';
@@ -47,20 +48,51 @@ console.log('\n[3] 江戸(edo)が組める');
     const g = o.geometry;
     tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
   });
-  ok(tris > 1000, `三角形が組める（${tris.toLocaleString()}）`);
+  /* 密度の下限。**一番最初の江戸はここが8,824三角形しかなかった**
+     （市街地は208,102で、21分の1）。中身は板塀・社1棟・町屋4棟・
+     灯籠4個・酒樽4組・木箱4個だけで、地面の敷き分けが1枚も無く、
+     実際に遊んだ画は「砂漠に木箱が置いてある」だった。
+     形が組めるかどうかだけ見ていても、この状態は通ってしまう */
+  ok(tris > 30000, `町として組み上がっている（${tris.toLocaleString()}三角形。8,824だった頃は砂漠だった）`);
   ok(edo.enemySpawns.length >= 8, `1人用/協力プレイ向けの湧き場所がある（${edo.enemySpawns.length}箇所）`);
-  ok(edo.arenaSpawns.length === 8, `対戦の湧き場所は8箇所（urbanと同じ並びの型を流用）`);
+  ok(edo.arenaSpawns.length === 8, '対戦の湧き場所は8箇所（urbanと同じ並びの型を流用）');
   ok(edo.teamSpawns.length === 4, '2対2の湧き場所は4箇所');
-  ok(edo.coverPoints.length >= 10, `遮蔽物リストがある（${edo.coverPoints.length}箇所）`);
+  ok(edo.coverPoints.length >= 30, `遮蔽物リストがある（${edo.coverPoints.length}箇所）`);
   ok(edo.bounds > 0 && edo.bounds !== 40, `場外の壁は市街地と別の値（${edo.bounds}）`);
   ok(edo.playerSpawn.z !== 26, '1人用の湧き位置も市街地と別');
 
-  // 湧き地点が原点付近の建物(中央9x9、半径4.5)に埋まっていないか。
-  // 江戸の建物配置を変えた時に自分で踏む地雷を、ここで機械的に拾う
-  const insideCenter = (v) => Math.abs(v.x) < 4.5 && Math.abs(v.z) < 4.5;
-  for (const list of [edo.enemySpawns, edo.arenaSpawns, edo.teamSpawns]) {
-    ok(list.every((v) => !insideCenter(v)), '中央の社の中に湧き地点が無い');
-  }
+  /* **湧き地点が地形に埋まっていないか、Octreeに当てて実測する。**
+     「中央の社に入っていないか」だけ見ていた頃は、町屋を建て直した瞬間に
+     4箇所が井戸と19cm重なり、(0,28)の開始位置は町屋の中だった。
+     目分量で座標を書く限り必ずまた踏むので、機械に測らせる */
+  const ray = new THREE.Ray();
+  const cap = new Capsule(new THREE.Vector3(), new THREE.Vector3(), 0.34);
+  const buried = [];
+  const check = (label, list) => {
+    for (const sp of list) {
+      ray.set(new THREE.Vector3(sp.x, 20, sp.z), new THREE.Vector3(0, -1, 0));
+      const hit = edo.octree.rayIntersect(ray);
+      const gy = hit ? 20 - hit.distance : null;
+      if (gy === null) { buried.push(`${label}(${sp.x},${sp.z}) 地面が無い`); continue; }
+      // 屋根の上に湧かせない。立ち姿のカプセルが地形に食い込まないことも見る
+      if (gy > 1.3) { buried.push(`${label}(${sp.x},${sp.z}) 地面が${gy.toFixed(1)}m＝屋根の上`); continue; }
+      cap.start.set(sp.x, gy + 0.34, sp.z);
+      cap.end.set(sp.x, gy + 1.75 - 0.34, sp.z);
+      const stuck = edo.octree.capsuleIntersect(cap);
+      if (stuck && stuck.depth > 0.05) {
+        buried.push(`${label}(${sp.x},${sp.z}) ${stuck.depth.toFixed(2)}m埋まる`);
+      }
+    }
+  };
+  check('敵', edo.enemySpawns);
+  check('対戦', edo.arenaSpawns);
+  check('2対2', edo.teamSpawns);
+  check('開始', [edo.playerSpawn]);
+  ok(buried.length === 0, `湧き地点が地形に埋まっていない${buried.length ? `：${buried.join(' / ')}` : ''}`);
+
+  // 境内の中から湧かない。中央から出てくると、押し寄せてくる形が消える
+  const inPrecinct = (v) => Math.abs(v.x) < 15.5 && Math.abs(v.z) < 15.5;
+  ok(edo.enemySpawns.every((v) => !inPrecinct(v)), '敵は境内の外（町の外縁）から入ってくる');
 }
 
 console.log('\n[4] server/world.jsがマップごとに組み分ける');
