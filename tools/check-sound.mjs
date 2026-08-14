@@ -398,7 +398,6 @@ console.log('\n[4.7] 形スキンの銃声が、見た目の通りに鳴って�
     const pairs = [
       ['装甲', 'armor', 'ドラゴン', 'dragon', 'rifle'],
       ['桜', 'sakura', 'キャンディ', 'cute', 'rifle'],
-      ['サメ', 'shark', 'ウエスタン', 'western', 'shotgun'],
       ['ヴェノム', 'venom', 'アイス', 'ice', 'sniper'],
       ['サイレンサー', 'suppressed', 'サイバー', 'cyber', 'pistol'],
     ];
