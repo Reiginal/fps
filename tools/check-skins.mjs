@@ -379,6 +379,18 @@ console.log('\n[11] 形違いのスキン');
       `${id} … 一番長い辺が元の${ratio.toFixed(2)}倍（幅${c.x.toFixed(3)} 高${c.y.toFixed(3)} 長${c.z.toFixed(3)}）`);
   }
 
+  /* レバーの輪っかは動く部品。**撃った後にポンプと同じ拍で回る。**
+     2026-08-15に「使っている感じでウエスタンとの違いがあんまわかんない」と
+     言われて足した所。輪っかが群れごと消えたり駆動が外れたりすると、
+     また「光るだけの木の銃」に戻るので両方を見張る */
+  {
+    const lev = SHAPE_BUILDS.lever(defOf('lever').view);
+    ok(!!lev.userData.lever, 'レバーアクション … 回る輪っか(lever)を持っている');
+    const wsrc = readFileSync(new URL('../src/player/weapons.js', import.meta.url), 'utf8');
+    ok(/if \(P\.lever\)/.test(wsrc), '輪っかを駆動する所がある（P.lever）');
+    ok(/P\.lever\.rotation\.x = po \* /.test(wsrc), '滑らせずに回している（rotation）');
+  }
+
   // 刀は長く、ダガーは短い。**形が実際に違うことを寸法で押さえる**
   const len = (g) => {
     let min = Infinity; let max = -Infinity;
