@@ -1805,210 +1805,6 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
   const patch = (w, d, mat, x, z, ry, y, uv = 6, order = 1) =>
     patchJobs.push({ w, d, mat, x, z, ry, y, uv, order });
 
-  if (mapId === 'edo') {
-  /* ================================================================
-     江戸ステージ。市街地(urban)とは別に手書きする（CLAUDE.mdの方針通り、
-     データ駆動化はしない）。共通なのはここまでの部品(box等)と、この
-     if/elseの外にある結合・Octree構築・スポーン登録の型だけ。
-     中身の配置・材質選びは市街地と完全に独立している。
-     ================================================================ */
-
-  /* ------------------------------------------------------------ 地面 */
-  // 市街地と同じ組み方（見た目は420m角・当たり判定は96m角の別板）。
-  // 材質だけ叩き土(M.earth)へ差し替える
-  const groundGeoE = new THREE.PlaneGeometry(420, 420, 48, 48);
-  groundGeoE.rotateX(-Math.PI / 2);
-  scaleUV(groundGeoE, 105, 105);
-  {
-    const gp = groundGeoE.attributes.position;
-    for (let i = 0; i < gp.count; i++) {
-      const gx = gp.getX(i), gz = gp.getZ(i);
-      const dd = Math.hypot(gx, gz);
-      const k = sstep(50, 130, dd);
-      if (k <= 0) continue;
-      const n = fbm2(gx * 0.012, gz * 0.012, 1.0, 4, 5231) - 0.5;
-      gp.setY(i, n * 9.0 * k);
-    }
-    groundGeoE.computeVertexNormals();
-    const gc = new Float32Array(gp.count * 3);
-    for (let i = 0; i < gp.count; i++) {
-      const v = 0.86 + 0.26 * fbm2(gp.getX(i) * 0.014, gp.getZ(i) * 0.014, 1.0, 4, 9137);
-      gc[i * 3] = v; gc[i * 3 + 1] = v; gc[i * 3 + 2] = v;
-    }
-    groundGeoE.setAttribute('color', new THREE.BufferAttribute(gc, 3));
-  }
-  const groundE = new THREE.Mesh(groundGeoE, M.earth);
-  groundE.receiveShadow = true;
-  root.add(groundE);
-
-  const floorGeoE = new THREE.PlaneGeometry(96, 96, 8, 8);
-  floorGeoE.rotateX(-Math.PI / 2);
-  {
-    const fc = new Float32Array(floorGeoE.attributes.position.count * 3);
-    fc.fill(1);
-    floorGeoE.setAttribute('color', new THREE.BufferAttribute(fc, 3));
-  }
-  const floorE = new THREE.Mesh(floorGeoE, M.earth);
-  floorE.visible = false;
-  solids.add(floorE);
-
-  /* -------------------------------------------------------- 建物の型 */
-  // 板塀・柱・棟・屋根(平屋根、瓦仕上げ)を1棟ぶん。doorsはband()と同じ書式
-  // ({side,u,w}の配列。side は 'z-'/'z+'/'x-'/'x+'）
-  const building = (cx, cz, w, d, wallH, doors) => {
-    band(w, d, wallH, 0.14, M.timber, cx, 0, cz, 1.4, doors);
-    const ov = 0.4;
-    boxD(w + ov * 2, 0.16, d + ov * 2, M.kawara, cx, wallH, cz, 0, 1.4);
-    // 破風板。屋根の縁に1段細い板を回すだけで「乗っているだけの蓋」に見えなくなる
-    boxD(w + ov * 2, 0.10, 0.10, M.timber, cx, wallH - 0.02, cz - d / 2 - ov, 0, 1.0);
-    boxD(w + ov * 2, 0.10, 0.10, M.timber, cx, wallH - 0.02, cz + d / 2 + ov, 0, 1.0);
-    boxD(0.10, 0.10, d + ov * 2, M.timber, cx - w / 2 - ov, wallH - 0.02, cz, 0, 1.0);
-    boxD(0.10, 0.10, d + ov * 2, M.timber, cx + w / 2 + ov, wallH - 0.02, cz, 0, 1.0);
-    mark(cx, cz - d / 2, w * 0.5, 0.8);
-    mark(cx, cz + d / 2, w * 0.5, 0.8);
-    mark(cx - w / 2, cz, d * 0.5, 0.8);
-    mark(cx + w / 2, cz, d * 0.5, 0.8);
-  };
-
-  // 板塀の1区間。gapUがあればそこだけ空ける（門）
-  const fenceRun = (cx, cz, ry, len, h, gapU = null, gapW = 0) => {
-    const segs = [];
-    if (gapU === null) segs.push([-len / 2, len / 2]);
-    else {
-      const s = clamp(gapU - gapW / 2, -len / 2, len / 2);
-      const e = clamp(gapU + gapW / 2, -len / 2, len / 2);
-      if (s - (-len / 2) > 0.05) segs.push([-len / 2, s]);
-      if (len / 2 - e > 0.05) segs.push([e, len / 2]);
-    }
-    const dirX = Math.cos(ry), dirZ = -Math.sin(ry);
-    for (const [a, b] of segs) {
-      const w = b - a;
-      if (w <= 0.05) continue;
-      const u = (a + b) / 2;
-      box(w, h, 0.10, M.timber, cx + dirX * u, 0, cz + dirZ * u, ry, 1.4);
-    }
-    const n = Math.max(2, Math.round(len / 2.4));
-    for (let i = 0; i <= n; i++) {
-      const u = (i / n - 0.5) * len;
-      if (gapU !== null && Math.abs(u - gapU) < gapW / 2 + 0.15) continue;
-      box(0.16, h + 0.18, 0.16, M.timber, cx + dirX * u, 0, cz + dirZ * u, ry, 1.0);
-    }
-  };
-
-  // 鳥居。門の目印と、通り抜ける時の遮蔽を兼ねる。朱塗りの色が無いので
-  // 赤みの強い金属材(M.metalRed)を借りている（木材の質感ではないが、
-  // 遠目のシルエットと色味だけ見れば鳥居に読める）
-  const torii = (x, z, ry, w = 4.4, h = 3.4) => {
-    const dirX = Math.cos(ry), dirZ = -Math.sin(ry);
-    for (const s of [-1, 1]) box(0.26, h, 0.26, M.metalRed, x + dirX * s * w / 2, 0, z + dirZ * s * w / 2, ry, 1.0);
-    boxD(w + 0.7, 0.22, 0.32, M.metalRed, x, h - 0.22, z, ry, 1.4);
-    boxD(w + 1.2, 0.16, 0.22, M.metalRed, x, h + 0.06, z, ry, 1.4);
-    mark(x, z, w * 0.5, 0.5);
-  };
-
-  // 石灯籠。竿・中台・火袋・笠を積むだけ。石材が無いのでconcreteで代用
-  const lantern = (x, z) => {
-    cyl(0.13, 0.55, 8, M.concrete, x, 0, z, 2);
-    box(0.46, 0.10, 0.46, M.concrete, x, 0.55, z, 0, 1.4);
-    box(0.32, 0.34, 0.32, M.concrete, x, 0.65, z, 0, 1.2);
-    box(0.56, 0.10, 0.56, M.kawara, x, 0.99, z, Math.PI / 4, 1.4);
-    mark(x, z, 0.5, 0.6);
-  };
-
-  // 酒樽3個の山。木材のcyl置くだけ
-  const barrelStack = (x, z, ry) => {
-    for (let i = 0; i < 3; i++) {
-      const a = ry + i * (Math.PI * 2 / 3);
-      cyl(0.32, 0.62, 10, M.wood, x + Math.cos(a) * 0.30, 0, z + Math.sin(a) * 0.30, 1.6);
-    }
-    mark(x, z, 1.0, 0.6);
-  };
-
-  /* --------------------------------------------------------- 外周 */
-  const half = 34, fenceH = 2.3, gateW = 4.6;
-  fenceRun(0, -half, 0, half * 2, fenceH, 0, gateW);
-  fenceRun(0, half, 0, half * 2, fenceH, 0, gateW);
-  fenceRun(-half, 0, Math.PI / 2, half * 2, fenceH);
-  fenceRun(half, 0, Math.PI / 2, half * 2, fenceH);
-  torii(0, -half, 0);
-  torii(0, half, Math.PI);
-
-  /* ------------------------------------------------------------ 建物 */
-  // 中央: 社（南北2箇所に出入口。奪い合いの掩体という役目は市街地の
-  // 「中央の掩体」と同じ）
-  building(0, 0, 9, 9, 2.9, [{ side: 'z-', u: 0, w: 2.6 }, { side: 'z+', u: 0, w: 2.6 }]);
-  // 四隅の町屋。出入口は必ず中央を向かせる（詰める側が必ず建物の中を通る動線にする）
-  building(-22, 20, 8, 6, 2.6, [{ side: 'z-', u: 0, w: 2.2 }]);
-  building(22, 20, 8, 6, 2.6, [{ side: 'z-', u: 0, w: 2.2 }]);
-  building(-22, -20, 8, 6, 2.6, [{ side: 'z+', u: 0, w: 2.2 }]);
-  building(22, -20, 8, 6, 2.6, [{ side: 'z+', u: 0, w: 2.2 }]);
-
-  /* -------------------------------------------------------- 小物 */
-  lantern(6, -14); lantern(-6, -14); lantern(6, 14); lantern(-6, 14);
-  barrelStack(-14, 4, 0.4); barrelStack(14, -4, 0.4 + Math.PI);
-  barrelStack(-14, -8, 1.0); barrelStack(14, 8, 1.0 + Math.PI);
-  crate(1.1, 1.1, -9, 0, 6, 0.3);
-  crate(1.0, 0.9, 9, 0, -6, 0.9);
-  crate(1.2, 1.0, 16, 0, 14, 0.2);
-  crate(1.1, 1.0, -16, 0, -14, 0.5);
-
-  } else {
-  /* ------------------------------------------------------------ 地面 */
-  // 見た目の地面はフォグで溶けるところまで伸ばす。狭いと視界の先に板の縁が見えて、
-  // 一気に「箱庭に立っている」感じになる。
-  // ただしこれをOctreeに入れると巨大な三角形が全ノードに複製されて重くなるので、
-  // 当たり判定は場内だけを覆う見えない板に任せる。
-  // 平らな板を1枚置くと、地平線が定規の直線になって世界が「トレイの底」に見える。
-  // 場外だけ緩くうねらせる。場内(R<50)は完全に平らなままなので当たり判定はずれない
-  /* 分割は48×48（4,608三角形）。前は96×96で18,432三角形あった。
-     この板は420m四方あってバウンディング球の半径が約300mになるので、
-     **視錐台カリングで一度も落ちず、毎フレーム必ず全部描かれる。**
-     どこを向いても背負う固定費なので、分割は要る最低限まで削る。
-     うねりを付けるのはR>50mの外側だけ（下のsstep）で、場内は完全に平ら。
-     細かい割りが要るのはうねりの起伏（波長10m前後）の所だけだが、
-     50m先の丘の起伏が少し鈍っても遊んでいて見分けは付かない。
-     一方この2/3の削りは、影以外の全パスから毎フレーム約14,000三角形を消す */
-  const groundGeo = new THREE.PlaneGeometry(420, 420, 48, 48);
-  groundGeo.rotateX(-Math.PI / 2);
-  scaleUV(groundGeo, 105, 105);
-  {
-    const gp = groundGeo.attributes.position;
-    for (let i = 0; i < gp.count; i++) {
-      const gx = gp.getX(i), gz = gp.getZ(i);
-      const dd = Math.hypot(gx, gz);
-      const k = sstep(50, 130, dd);
-      if (k <= 0) continue;
-      const n = fbm2(gx * 0.012, gz * 0.012, 1.0, 4, 4409) - 0.5;
-      gp.setY(i, n * 9.0 * k);
-    }
-    groundGeo.computeVertexNormals();
-    // 全材質でvertexColorsを開けたので、emitを通らないこの2枚にも色属性が要る。
-    // ついでに「タイル周期よりずっと大きいムラ」を頂点カラーへ焼く。
-    // 420m四方に4m角のタイルを並べているので、これが無いと地平まで縞が読める
-    const gc = new Float32Array(gp.count * 3);
-    for (let i = 0; i < gp.count; i++) {
-      const v = 0.86 + 0.26 * fbm2(gp.getX(i) * 0.014, gp.getZ(i) * 0.014, 1.0, 4, 7717);
-      gc[i * 3] = v; gc[i * 3 + 1] = v; gc[i * 3 + 2] = v;
-    }
-    groundGeo.setAttribute('color', new THREE.BufferAttribute(gc, 3));
-  }
-  const ground = new THREE.Mesh(groundGeo, M.asphalt);
-  ground.receiveShadow = true;
-  root.add(ground);
-
-  // 当たり判定専用の床。1枚の巨大三角形だとOctreeの各ノードに複製されるので、
-  // 場内ぎりぎりの大きさで細かく割っておく
-  const floorGeo = new THREE.PlaneGeometry(96, 96, 8, 8);
-  floorGeo.rotateX(-Math.PI / 2);
-  {
-    const fc = new Float32Array(floorGeo.attributes.position.count * 3);
-    fc.fill(1);
-    floorGeo.setAttribute('color', new THREE.BufferAttribute(fc, 3));
-  }
-  const floor = new THREE.Mesh(floorGeo, M.asphalt);
-  floor.visible = false;          // 描かないがOctreeには入る
-  solids.add(floor);
-
   /* ------------------------------------------------ 路面の貼り分け（板） */
   // 灰色一色だと広場が死ぬので舗装と土を敷き分ける。ただし不透明な板をそのまま
   // 浮かせると、ポリゴンの辺がそのまま素材の境界になって定規で引いた直線が横切る。
@@ -2070,6 +1866,565 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
     noShadowMats.add(pm);
     emit(geo, pm, x, y, z, ry, 0, 0, false, false);
   };
+  if (mapId === 'edo') {
+  /* ================================================================
+     江戸ステージ。市街地(urban)とは別に手書きする（CLAUDE.mdの方針通り、
+     データ駆動化はしない）。共通なのはここまでの部品(box等)と、この
+     if/elseの外にある結合・Octree構築・スポーン登録の型だけ。
+     中身の配置・材質選びは市街地と完全に独立している。
+     ================================================================ */
+
+  /* ------------------------------------------------------------ 地面 */
+  // 市街地と同じ組み方（見た目は420m角・当たり判定は96m角の別板）。
+  // 材質だけ叩き土(M.earth)へ差し替える
+  const groundGeoE = new THREE.PlaneGeometry(420, 420, 48, 48);
+  groundGeoE.rotateX(-Math.PI / 2);
+  scaleUV(groundGeoE, 105, 105);
+  {
+    const gp = groundGeoE.attributes.position;
+    for (let i = 0; i < gp.count; i++) {
+      const gx = gp.getX(i), gz = gp.getZ(i);
+      const dd = Math.hypot(gx, gz);
+      const k = sstep(50, 130, dd);
+      if (k <= 0) continue;
+      const n = fbm2(gx * 0.012, gz * 0.012, 1.0, 4, 5231) - 0.5;
+      gp.setY(i, n * 9.0 * k);
+    }
+    groundGeoE.computeVertexNormals();
+    const gc = new Float32Array(gp.count * 3);
+    for (let i = 0; i < gp.count; i++) {
+      const v = 0.86 + 0.26 * fbm2(gp.getX(i) * 0.014, gp.getZ(i) * 0.014, 1.0, 4, 9137);
+      gc[i * 3] = v; gc[i * 3 + 1] = v; gc[i * 3 + 2] = v;
+    }
+    groundGeoE.setAttribute('color', new THREE.BufferAttribute(gc, 3));
+  }
+  const groundE = new THREE.Mesh(groundGeoE, M.earth);
+  groundE.receiveShadow = true;
+  root.add(groundE);
+
+  const floorGeoE = new THREE.PlaneGeometry(96, 96, 8, 8);
+  floorGeoE.rotateX(-Math.PI / 2);
+  {
+    const fc = new Float32Array(floorGeoE.attributes.position.count * 3);
+    fc.fill(1);
+    floorGeoE.setAttribute('color', new THREE.BufferAttribute(fc, 3));
+  }
+  const floorE = new THREE.Mesh(floorGeoE, M.earth);
+  floorE.visible = false;
+  solids.add(floorE);
+
+  /* -------------------------------------------------------- 建物の型 */
+
+  /* 切妻の瓦屋根。**ここが江戸に見えるかどうかの分かれ目。**
+     前は平らな板を1枚載せていて、実際に遊んだ画を見ると
+     「砂漠に置いた木の箱」にしか見えなかった。日本家屋の輪郭は
+     ほとんど屋根が作っているので、勾配・軒の出・棟・破風を全部入れる。
+
+     pitch は「奥行きの半分に対する高さの比」。0.5で約27度、
+     日本の瓦屋根としてはこのあたりが素直（急にすると寺、緩くすると倉庫に見える）。
+     ryで棟の向きを振る（0なら棟が東西＝X方向に走る） */
+  const gableRoof = (cx, cz, w, d, yEave, pitch, ry = 0, over = 0.55, mat = M.kawara) => {
+    const halfD = d / 2 + over;
+    const rise = halfD * pitch;
+    const slope = Math.hypot(halfD, rise);
+    const ang = Math.atan2(rise, halfD);
+    const wOver = w + over * 2;
+    const cs = Math.cos(ry), sn = Math.sin(ry);
+    // ローカル(dx,dz)を棟の向きへ回して世界へ置く小道具
+    const put = (fn, dx, dz, ...rest) => fn(cx + dx * cs + dz * sn, cz - dx * sn + dz * cs, ...rest);
+
+    for (const s of [-1, 1]) {
+      // 傾けた板。中心は軒と棟の中点
+      const my = yEave + rise / 2;
+      const mz = s * halfD / 2;
+      put((x, z) => boxT(wOver, 0.16, slope, mat, x, my, z, ry, s * ang, 0, 1.8, false), 0, mz);
+      /* 軒先の瓦（万十軒瓦）。屋根の縁に一段太い列を回すと、
+         斜めの板が「屋根」になる。無いと段ボールを立てかけた形のまま */
+      put((x, z) => boxT(wOver + 0.06, 0.13, 0.20, M.kawara, x, yEave + 0.03, z, ry, s * ang, 0, 1.0, false),
+        0, s * halfD);
+    }
+    // 棟（むね）。屋根のてっぺんを一段高く太らせる
+    put((x, z) => boxT(wOver, 0.26, 0.34, M.kawara, x, yEave + rise + 0.10, z, ry, 0, 0, 1.0, false), 0, 0);
+    /* 破風板（はふいた）。妻側の三角の縁に白い板を回す。
+       ここが抜けていると、横から見た時に瓦の断面がそのまま出て板厚が見える */
+    for (const s of [-1, 1]) {
+      const hx = s * (w / 2 + over);
+      for (const t of [-1, 1]) {
+        put((x, z) => boxT(0.10, 0.16, slope, M.plaster, x, yEave + rise / 2 + 0.10, z, ry, t * ang, 0, 1.0, false),
+          hx, t * halfD / 2);
+      }
+    }
+    mark(cx, cz, Math.max(w, d) * 0.55, 0.85);
+  };
+
+  /* 庇（ひさし）。1階の前面に張り出す小さな片流れの屋根。
+     町屋の顔はここで決まる（軒下の暗がりが、平らな壁に奥行きを作る） */
+  const eave = (cx, cz, w, y, ry, depth = 1.1) => {
+    const cs = Math.cos(ry), sn = Math.sin(ry);
+    const px = cx - sn * depth / 2, pz = cz - cs * depth / 2;
+    boxT(w, 0.10, depth * 1.06, M.kawara, px, y + 0.10, pz, ry, 0.22, 0, 1.4, false);
+    // 腕木（うでぎ）。庇を支える横木。これが無いと板が宙に浮く
+    for (const u of [-w / 2 + 0.35, 0, w / 2 - 0.35]) {
+      boxT(0.09, 0.09, depth * 0.9, M.timber,
+        cx + u * cs - sn * depth * 0.45, y - 0.08, cz - u * sn - cs * depth * 0.45, ry, 0, 0, 1.0, false);
+    }
+  };
+
+  /* 格子（こうし）。町屋の1階の前面。細い縦棒を並べるだけだが、
+     **平らな板の壁に「建物の正面」という情報を入れる一番安い手** */
+  const lattice = (cx, cz, w, y, h, ry) => {
+    const cs = Math.cos(ry), sn = Math.sin(ry);
+    const n = Math.max(3, Math.round(w / 0.28));
+    for (let i = 0; i <= n; i++) {
+      const u = (i / n - 0.5) * w;
+      boxT(0.055, h, 0.05, M.timber, cx + u * cs, y + h / 2, cz - u * sn, ry, 0, 0, 1.0, false);
+    }
+    // 上下の横桟
+    for (const yy of [y + 0.02, y + h - 0.02]) {
+      boxT(w, 0.07, 0.06, M.timber, cx, yy, cz, ry, 0, 0, 1.0, false);
+    }
+  };
+
+  // 暖簾（のれん）。入口の上に垂らす布。朱の材質を借りる（布の材質は持っていない）
+  const noren = (cx, cz, w, y, ry) => {
+    boxT(w, 0.52, 0.03, M.metalRed, cx, y - 0.26, cz, ry, 0, 0, 1.2, false);
+    boxT(w + 0.1, 0.07, 0.07, M.timber, cx, y + 0.02, cz, ry, 0, 0, 1.0, false);
+  };
+
+  /* 町屋。**この1つを並べて通りを作る。**
+     妻入り/平入りはryで振る。doorsはband()と同じ書式で、
+     face（正面）の側にだけ庇・格子・暖簾を足す */
+  const machiya = (cx, cz, w, d, h, ry, face = 'z-', doorW = 2.2) => {
+    // 壁。土台は板張り、上は漆喰にして2色にする（1色だと巨大な木箱に戻る）
+    const doors = [{ side: face, u: 0, w: doorW }];
+    band(w, d, 1.5, 0.16, M.timber, cx, 0, cz, 1.6, doors);
+    band(w, d, h - 1.5, 0.16, M.plaster, cx, 1.5, cz, 1.6, doors);
+    // 柱。角と中間に見せ柱を立てると、漆喰の面が板で仕切られて日本家屋になる
+    for (const su of [-1, 1]) {
+      for (const sv of [-1, 1]) {
+        boxT(0.16, h, 0.16, M.timber, cx + su * (w / 2 - 0.08), h / 2, cz + sv * (d / 2 - 0.08), 0, 0, 0, 1.0, false);
+      }
+    }
+    // 貫（ぬき）。胴回りの横木
+    band(w + 0.03, d + 0.03, 0.11, 0.05, M.timber, cx, 1.44, cz, 1.0);
+    gableRoof(cx, cz, w, d, h, 0.52, ry);
+
+    // 正面の造作。faceがどちらを向いているかで、庇と格子の場所が決まる
+    const fz = face === 'z-' ? -1 : face === 'z+' ? 1 : 0;
+    const fx = face === 'x-' ? -1 : face === 'x+' ? 1 : 0;
+    const fw = fz !== 0 ? w : d;
+    const px = cx + fx * (w / 2), pz = cz + fz * (d / 2);
+    const fry = fz !== 0 ? (fz < 0 ? 0 : Math.PI) : (fx < 0 ? -Math.PI / 2 : Math.PI / 2);
+    eave(px, pz, fw + 0.3, 2.05, fry, 1.15);
+    // 入口の左右にだけ格子を入れる（入口の上に格子を張ると通れないように見える）
+    const side = (fw - doorW) / 2 - 0.25;
+    if (side > 0.4) {
+      for (const s of [-1, 1]) {
+        const u = s * (doorW / 2 + 0.12 + side / 2);
+        lattice(px + u * Math.cos(fry), pz - u * Math.sin(fry), side, 0.35, 1.35, fry);
+      }
+    }
+    noren(px, pz, doorW * 0.92, 2.0, fry);
+    mark(cx, cz, Math.max(w, d) * 0.6, 0.9);
+  };
+
+  /* 蔵（くら）。白漆喰のずんぐりした倉。**目印になる。**
+     町屋より背が高くて色が違うので、通りのどこに居るかがこれで分かる */
+  const kura = (cx, cz, ry) => {
+    const w = 6.4, d = 5.2, h = 4.4;
+    band(w, d, h, 0.28, M.plaster, cx, 0, cz, 1.4, [{ side: 'z-', u: 0, w: 1.9 }]);
+    // 腰の海鼠壁（なまこ壁）。下半分だけ材質を替えると、白い箱が蔵になる
+    band(w + 0.04, d + 0.04, 1.5, 0.06, M.brick, cx, 0, cz, 2.4);
+    gableRoof(cx, cz, w, d, h, 0.56, ry, 0.75);
+    // 観音扉。分厚い戸を左右に
+    for (const s of [-1, 1]) {
+      boxT(0.95, 2.2, 0.14, M.timber, cx + s * 0.5, 1.1, cz - d / 2 - 0.06, 0, 0, 0, 1.2, false);
+    }
+    mark(cx, cz, 4.2, 0.9);
+  };
+
+  /* 鳥居。**朱塗りの色を持っていない**ので赤みの強い金属材(M.metalRed)を借りる。
+     笠木を島木と2段にして、左右を少し跳ね上げると（反り）鳥居の形になる。
+     1本の横棒だとサッカーゴールに見える */
+  const torii = (x, z, ry, w = 4.6, h = 3.6) => {
+    const dirX = Math.cos(ry), dirZ = -Math.sin(ry);
+    for (const s of [-1, 1]) {
+      // 柱は上へ行くほど細い。まっすぐの円柱だと配管に見える
+      emit(cylGeo(0.15, 0.19, h, 10, 2), M.metalRed,
+        x + dirX * s * w / 2, h / 2, z + dirZ * s * w / 2, 0, 0, 0, true);
+      // 亀腹（柱の根元の石）
+      cyl(0.26, 0.16, 10, M.concrete, x + dirX * s * w / 2, 0, z + dirZ * s * w / 2, 2, false);
+    }
+    // 貫（ぬき）。柱を横に貫く角材。両端が柱から少し出るのが鳥居の形
+    boxD(w + 0.5, 0.20, 0.20, M.metalRed, x, h - 1.05, z, ry, 1.2);
+    // 額束（がくづか）。貫と島木の間の短い縦材
+    boxD(0.24, 0.72, 0.16, M.metalRed, x, h - 0.85, z, ry, 1.0);
+    // 島木と笠木。2段にして、笠木を少し広く
+    boxD(w + 0.9, 0.20, 0.30, M.metalRed, x, h - 0.22, z, ry, 1.2);
+    boxD(w + 1.3, 0.17, 0.24, M.metalRed, x, h, z, ry, 1.2);
+    // 反り。両端に短い板を跳ね上げて置く
+    for (const s of [-1, 1]) {
+      boxT(0.5, 0.16, 0.24, M.metalRed,
+        x + dirX * s * (w / 2 + 0.72), h + 0.10, z + dirZ * s * (w / 2 + 0.72), ry, 0, s * 0.22, 1.0, false);
+    }
+    mark(x, z, w * 0.5, 0.5);
+  };
+
+  // 石灯籠。竿・中台・火袋・笠を積む。石材が無いのでconcreteで代用
+  const lantern = (x, z) => {
+    cyl(0.16, 0.30, 8, M.concrete, x, 0, z, 2);       // 基礎
+    cyl(0.11, 0.62, 8, M.concrete, x, 0.30, z, 2);    // 竿
+    box(0.44, 0.10, 0.44, M.concrete, x, 0.92, z, 0, 1.4);
+    box(0.30, 0.36, 0.30, M.concrete, x, 1.02, z, 0, 1.2);   // 火袋
+    box(0.56, 0.12, 0.56, M.kawara, x, 1.38, z, Math.PI / 4, 1.4);
+    box(0.14, 0.16, 0.14, M.concrete, x, 1.50, z, Math.PI / 4, 1.0);  // 宝珠
+    mark(x, z, 0.6, 0.6);
+  };
+
+  // 酒樽の山
+  const barrelStack = (x, z, ry) => {
+    for (let i = 0; i < 3; i++) {
+      const a = ry + i * (Math.PI * 2 / 3);
+      cyl(0.32, 0.62, 10, M.wood, x + Math.cos(a) * 0.30, 0, z + Math.sin(a) * 0.30, 1.6);
+    }
+    cyl(0.30, 0.58, 10, M.wood, x, 0.62, z, 1.6);
+    mark(x, z, 1.1, 0.7);
+  };
+
+  /* 井戸。**通りの結節点に置く目印。**屋根付きにすると遠くからでも読める */
+  const well = (x, z) => {
+    cyl(0.85, 0.72, 12, M.concrete, x, 0, z, 3);
+    cyl(0.72, 0.10, 12, M.concrete, x, 0.72, z, 3, false);
+    for (const s of [-1, 1]) boxT(0.12, 1.7, 0.12, M.timber, x + s * 0.78, 0.85, z, 0, 0, 0, 1.0, false);
+    boxT(0.14, 0.14, 1.9, M.timber, x, 1.66, z, 0, 0, Math.PI / 2, 1.0, false);
+    gableRoof(x, z, 2.0, 1.4, 1.72, 0.5, Math.PI / 2, 0.3);
+    mark(x, z, 1.5, 0.8);
+  };
+
+  // 積み俵（米俵の山）。胸の高さの遮蔽
+  const rice = (x, z, ry) => {
+    for (let r = 0; r < 2; r++) {
+      const n = r === 0 ? 3 : 2;
+      for (let i = 0; i < n; i++) {
+        const u = (i - (n - 1) / 2) * 0.62;
+        cylLay(0.28, 0.86, 9, M.sandbag,
+          x + Math.cos(ry) * u, 0.28 + r * 0.5, z - Math.sin(ry) * u, ry + Math.PI / 2, 2);
+      }
+    }
+    mark(x, z, 1.4, 0.8);
+  };
+
+  // 天水桶（防火用の水桶）。町屋の脇に必ず置いてある物
+  const waterTub = (x, z) => {
+    cyl(0.48, 0.86, 12, M.wood, x, 0, z, 2);
+    cyl(0.50, 0.07, 12, M.metal, x, 0.30, z, 2, false);
+    cyl(0.50, 0.07, 12, M.metal, x, 0.72, z, 2, false);
+    mark(x, z, 0.8, 0.7);
+  };
+
+  // 材木置き場。丸太を積む
+  const lumber = (x, z, ry) => {
+    for (let r = 0; r < 3; r++) {
+      const n = 3 - r;
+      for (let i = 0; i < n; i++) {
+        const u = (i - (n - 1) / 2) * 0.42;
+        cylLay(0.19, 3.4, 8, M.timber,
+          x - Math.sin(ry) * u, 0.19 + r * 0.36, z - Math.cos(ry) * u, ry, 4);
+      }
+    }
+    mark(x, z, 2.0, 0.8);
+  };
+
+  // 縁台（店先の腰掛け）。低い遮蔽と、通りの生活感
+  const bench = (x, z, ry) => {
+    boxD(1.7, 0.10, 0.55, M.timber, x, 0.42, z, ry, 1.4);
+    for (const s of [-1, 1]) {
+      boxT(0.09, 0.42, 0.45, M.timber, x + Math.cos(ry) * s * 0.72, 0.21, z - Math.sin(ry) * s * 0.72, ry, 0, 0, 1.0, false);
+    }
+    mark(x, z, 1.1, 0.5);
+  };
+
+  // 竹垣。低い仕切り。通りと敷地の境目を作る
+  const bambooFence = (cx, cz, ry, len, h = 1.25) => {
+    const dirX = Math.cos(ry), dirZ = -Math.sin(ry);
+    box(len, h, 0.09, M.timber, cx, 0, cz, ry, 2.4);
+    const n = Math.max(2, Math.round(len / 1.8));
+    for (let i = 0; i <= n; i++) {
+      const u = (i / n - 0.5) * len;
+      box(0.13, h + 0.14, 0.13, M.timber, cx + dirX * u, 0, cz + dirZ * u, ry, 1.0);
+    }
+    // 上の押縁（横に回す竹）
+    boxD(len, 0.08, 0.13, M.timber, cx, h + 0.03, cz, ry, 1.2);
+  };
+
+  // 板塀の1区間。gapUがあればそこだけ空ける（門）
+  const fenceRun = (cx, cz, ry, len, h, gapU = null, gapW = 0) => {
+    const segs = [];
+    if (gapU === null) segs.push([-len / 2, len / 2]);
+    else {
+      const s = clamp(gapU - gapW / 2, -len / 2, len / 2);
+      const e = clamp(gapU + gapW / 2, -len / 2, len / 2);
+      if (s - (-len / 2) > 0.05) segs.push([-len / 2, s]);
+      if (len / 2 - e > 0.05) segs.push([e, len / 2]);
+    }
+    const dirX = Math.cos(ry), dirZ = -Math.sin(ry);
+    for (const [a, b] of segs) {
+      const w = b - a;
+      if (w <= 0.05) continue;
+      const u = (a + b) / 2;
+      box(w, h, 0.12, M.timber, cx + dirX * u, 0, cz + dirZ * u, ry, 1.6);
+      // 塀の上の瓦。塀の天端が板の切り口のままだと、書き割りの縁に見える
+      boxD(w, 0.12, 0.34, M.kawara, cx + dirX * u, h, cz + dirZ * u, ry, 1.2);
+    }
+    const n = Math.max(2, Math.round(len / 2.4));
+    for (let i = 0; i <= n; i++) {
+      const u = (i / n - 0.5) * len;
+      if (gapU !== null && Math.abs(u - gapU) < gapW / 2 + 0.15) continue;
+      box(0.16, h + 0.10, 0.16, M.timber, cx + dirX * u, 0, cz + dirZ * u, ry, 1.0);
+    }
+  };
+
+  /* -------------------------------------------------------- 外周と門 */
+  const half = 34, fenceH = 2.6, gateW = 5.0;
+  fenceRun(0, -half, 0, half * 2, fenceH, 0, gateW);
+  fenceRun(0, half, 0, half * 2, fenceH, 0, gateW);
+  fenceRun(-half, 0, Math.PI / 2, half * 2, fenceH, 0, gateW);
+  fenceRun(half, 0, Math.PI / 2, half * 2, fenceH, 0, gateW);
+
+  /* 門の屋根（棟門）。塀を切っただけだと「壁の穴」にしか見えない */
+  const gate = (x, z, ry) => {
+    const dirX = Math.cos(ry), dirZ = -Math.sin(ry);
+    for (const s of [-1, 1]) {
+      box(0.32, 3.2, 0.32, M.timber, x + dirX * s * (gateW / 2 + 0.2), 0, z + dirZ * s * (gateW / 2 + 0.2), ry, 1.2);
+    }
+    boxD(gateW + 1.2, 0.26, 0.30, M.timber, x, 3.2, z, ry, 1.2);
+    gableRoof(x, z, gateW + 1.6, 1.6, 3.46, 0.62, ry, 0.5);
+  };
+  gate(0, -half, 0); gate(0, half, 0);
+  gate(-half, 0, Math.PI / 2); gate(half, 0, Math.PI / 2);
+
+  /* ------------------------------------------------------ 中央の境内 */
+  /* 社（やしろ）。**市街地の中央の掩体と同じ役目**——奪い合いの中心。
+     四方から入れて、中で撃ち合える。石段を1段付けて周囲より高くする */
+  {
+    // 基壇（石の台）
+    box(11.4, 0.55, 11.4, M.concrete, 0, 0, 0, 0, 3.0);
+    box(12.4, 0.22, 12.4, M.concrete, 0, 0, 0, 0, 3.0);
+    // 社殿。四方に入口
+    const doors = [
+      { side: 'z-', u: 0, w: 2.6 }, { side: 'z+', u: 0, w: 2.6 },
+      { side: 'x-', u: 0, w: 2.6 }, { side: 'x+', u: 0, w: 2.6 },
+    ];
+    band(9.0, 9.0, 3.2, 0.20, M.timber, 0, 0.55, 0, 1.6, doors);
+    // 内側の柱。中が空洞の箱だと「屋根の付いた四角い部屋」で終わる
+    for (const su of [-1, 1]) {
+      for (const sv of [-1, 1]) {
+        boxT(0.24, 3.2, 0.24, M.metalRed, su * 3.1, 0.55 + 1.6, sv * 3.1, 0, 0, 0, 1.0, false);
+      }
+    }
+    // 縁側（まわりの回り縁）と高欄
+    band(10.6, 10.6, 0.16, 0.7, M.timber, 0, 0.55, 0, 1.6);
+    for (const s of [-1, 1]) {
+      boxD(10.6, 0.09, 0.09, M.metalRed, 0, 1.18, s * 5.2, 0, 1.0);
+      boxD(0.09, 0.09, 10.6, M.metalRed, s * 5.2, 1.18, 0, 0, 1.0);
+    }
+    gableRoof(0, 0, 9.6, 9.6, 3.75, 0.60, 0, 1.10);
+    // 千木（ちぎ）。屋根の上でX字に交わる木。**遠目のシルエットで社と分かる印**
+    for (const s of [-1, 1]) {
+      for (const t of [-1, 1]) {
+        boxT(0.14, 2.0, 0.14, M.timber, s * 4.4, 7.0, t * 0.3, 0, t * 0.34, s * 0.26, 1.0, false);
+      }
+    }
+    // 鰹木（かつおぎ）。棟の上に並ぶ丸太
+    for (const u of [-2.4, -0.8, 0.8, 2.4]) {
+      cylLay(0.16, 1.5, 8, M.timber, u, 6.68, 0, Math.PI / 2, 2, false);
+    }
+    mark(0, 0, 6.4, 1.0);
+  }
+
+  // 玉垣（境内をぐるりと囲む低い石柱の列）。四方の参道だけ空ける
+  {
+    const R = 15.5;
+    for (const [ax, az, ry] of [[0, -R, 0], [0, R, 0], [-R, 0, Math.PI / 2], [R, 0, Math.PI / 2]]) {
+      const dirX = Math.cos(ry), dirZ = -Math.sin(ry);
+      for (let i = -8; i <= 8; i++) {
+        const u = i * 1.75;
+        if (Math.abs(u) < 3.2) continue;      // 参道の口
+        if (Math.abs(u) > R) continue;
+        box(0.22, 1.05, 0.22, M.concrete, ax + dirX * u, 0, az + dirZ * u, ry, 1.0);
+      }
+      // 笠石（柱の上を繋ぐ横石）
+      for (const s of [-1, 1]) {
+        boxD(R - 3.4, 0.13, 0.30, M.concrete,
+          ax + dirX * s * (R + 3.4) / 2, 1.05, az + dirZ * s * (R + 3.4) / 2, ry, 1.2);
+      }
+    }
+  }
+
+  // 四方の鳥居。参道の入口に立てる
+  torii(0, -15.5, 0); torii(0, 15.5, Math.PI);
+  torii(-15.5, 0, Math.PI / 2); torii(15.5, 0, -Math.PI / 2);
+
+  // 参道の石灯籠。左右で対
+  for (const s of [-1, 1]) {
+    lantern(s * 2.4, -12.0); lantern(s * 2.4, 12.0);
+    lantern(-12.0, s * 2.4); lantern(12.0, s * 2.4);
+    lantern(s * 2.4, -18.5); lantern(s * 2.4, 18.5);
+  }
+
+  /* ---------------------------------------------------------- 町並み */
+  /* 通り沿いに町屋を並べる。**正面を必ず通りへ向ける。**
+     背中合わせに並べると、どちらから見ても裏になって書き割りに見える。
+
+     東西の通り(z=±21)と南北の通り(x=±21)を1本ずつ通し、
+     その両側に軒を連ねる。通りの幅は7mで、走って渡ると1秒かからない
+     ——遮蔽から遮蔽へ飛び込める距離にしてある */
+  const ROW = 21;
+  // 南北の通り（x=±ROW）に面する町屋。正面はx方向
+  for (const sx of [-1, 1]) {
+    for (const cz of [-26, -17.5, -9, 9, 17.5, 26]) {
+      // 通りの内側（境内寄り）の列
+      machiya(sx * (ROW - 5.2), cz, 6.2, 7.2, 3.3, Math.PI / 2,
+        sx < 0 ? 'x+' : 'x-', 2.2);
+      // 通りの外側の列
+      machiya(sx * (ROW + 5.2), cz, 6.2, 7.2, 3.1, Math.PI / 2,
+        sx < 0 ? 'x-' : 'x+', 2.2);
+    }
+  }
+  // 東西の通り（z=±ROW）に面する町屋。正面はz方向
+  for (const sz of [-1, 1]) {
+    for (const cx of [-9, 0, 9]) {
+      machiya(cx, sz * (ROW - 5.2), 7.2, 6.2, 3.3, 0, sz < 0 ? 'z+' : 'z-', 2.2);
+      machiya(cx, sz * (ROW + 5.2), 7.2, 6.2, 3.1, 0, sz < 0 ? 'z-' : 'z+', 2.2);
+    }
+  }
+
+  // 四隅の蔵。通りの角の目印
+  kura(-28, -28, 0); kura(28, -28, 0);
+  kura(-28, 28, Math.PI); kura(28, 28, Math.PI);
+
+  /* ------------------------------------------------------------ 小物 */
+  // 井戸は通りの交差点に2つ。ここが待ち合わせと撃ち合いの目印になる
+  well(-ROW, 0); well(ROW, 0);
+  well(0, -ROW); well(0, ROW);
+
+  // 店先まわり。町屋の正面に置いて、通りに「使われている」感じを入れる
+  bench(-ROW + 2.6, -13.5, Math.PI / 2); bench(ROW - 2.6, 13.5, Math.PI / 2);
+  bench(-13.5, ROW - 2.6, 0); bench(13.5, -ROW + 2.6, 0);
+  waterTub(-ROW + 2.2, -21.5); waterTub(ROW - 2.2, 21.5);
+  waterTub(-21.5, ROW - 2.2); waterTub(21.5, -ROW + 2.2);
+  waterTub(-ROW + 2.2, 5.5); waterTub(ROW - 2.2, -5.5);
+
+  // 胸の高さの遮蔽。通りの真ん中に一直線の射線を残さない
+  rice(-ROW, -8.5, 0.3); rice(ROW, 8.5, 0.3);
+  rice(-8.5, ROW, 1.2); rice(8.5, -ROW, 1.2);
+  rice(-ROW - 1.5, 24, 0.9); rice(ROW + 1.5, -24, 0.9);
+  barrelStack(-ROW + 1.8, -30, 0.4); barrelStack(ROW - 1.8, 30, 0.4);
+  barrelStack(-30, ROW - 1.8, 1.0); barrelStack(30, -ROW + 1.8, 1.0);
+  barrelStack(-6.5, -ROW + 1.6, 0.7); barrelStack(6.5, ROW - 1.6, 0.7);
+  lumber(-30.5, 4, 0.15); lumber(30.5, -4, 0.15);
+  lumber(4, -30.5, Math.PI / 2 + 0.1); lumber(-4, 30.5, Math.PI / 2 + 0.1);
+  crate(1.1, 1.1, -ROW - 2.5, 0, -2.5, 0.3);
+  crate(1.0, 0.9, ROW + 2.5, 0, 2.5, 0.9);
+  crate(1.2, 1.0, 2.5, 0, ROW + 2.5, 0.2);
+  crate(1.1, 1.0, -2.5, 0, -ROW - 2.5, 0.5);
+
+  // 敷地の境の竹垣。町屋の裏側に回った時に、抜け道が読めるようにする
+  bambooFence(-30.5, -13, 0, 9, 1.3);
+  bambooFence(30.5, 13, 0, 9, 1.3);
+  bambooFence(-13, 30.5, Math.PI / 2, 9, 1.3);
+  bambooFence(13, -30.5, Math.PI / 2, 9, 1.3);
+  bambooFence(0, -30.5, 0, 12, 1.15);
+  bambooFence(0, 30.5, 0, 12, 1.15);
+
+  /* -------------------------------------------------------- 地面の敷き分け */
+  /* **ここが無かったのが「砂漠に木箱」の正体。**
+     土一色の板が420m四方に1枚あるだけで、通りも境内も同じ色をしていた。
+     石畳の通りと、玉砂利の境内と、その間の土を敷き分ける。
+     板は物の足跡(marks)が出揃ってから焼くので、生成の呼び出しは最後 */
+  patch(9.5, half * 2, M.concrete, -ROW, 0, 0, 0.020, 10, 1);   // 南北の通り（西）
+  patch(9.5, half * 2, M.concrete, ROW, 0, 0, 0.020, 10, 1);    // 南北の通り（東）
+  patch(half * 2, 9.5, M.concrete, 0, -ROW, 0, 0.021, 10, 1);   // 東西の通り（北）
+  patch(half * 2, 9.5, M.concrete, 0, ROW, 0, 0.021, 10, 1);    // 東西の通り（南）
+  patch(34, 34, M.concrete, 0, 0, 0, 0.019, 12, 0);             // 境内の玉砂利
+  // 参道。境内から四方の通りへ抜ける道
+  patch(6.0, 14, M.concrete, 0, -20, 0, 0.024, 5, 2);
+  patch(6.0, 14, M.concrete, 0, 20, 0, 0.024, 5, 2);
+  patch(14, 6.0, M.concrete, -20, 0, 0, 0.024, 5, 2);
+  patch(14, 6.0, M.concrete, 20, 0, 0, 0.024, 5, 2);
+  // 町屋の裏の土。石畳と石畳の間を埋めて、境界が1本の直線にならないようにする
+  patch(16, 16, M.dirt, -29, -29, 0.12, 0.023, 7, 1);
+  patch(16, 16, M.dirt, 29, -29, -0.08, 0.023, 7, 1);
+  patch(16, 16, M.dirt, -29, 29, 0.20, 0.023, 7, 1);
+  patch(16, 16, M.dirt, 29, 29, -0.15, 0.023, 7, 1);
+  patch(12, 9, M.dirt, -30.5, 4, 0.10, 0.026, 5, 2);
+  patch(12, 9, M.dirt, 30.5, -4, -0.10, 0.026, 5, 2);
+  patch(9, 12, M.dirt, 4, -30.5, 0.05, 0.026, 5, 2);
+  patch(9, 12, M.dirt, -4, 30.5, -0.05, 0.026, 5, 2);
+  // 通りの交わる所の踏み固め。人の通る所ほど土が出る
+  patch(8, 8, M.dirt, -ROW, -ROW, 0.3, 0.028, 4, 3);
+  patch(8, 8, M.dirt, ROW, ROW, -0.3, 0.028, 4, 3);
+
+  for (const job of patchJobs) buildPatch(job);
+  patchJobs.length = 0;
+
+  } else {
+  /* ------------------------------------------------------------ 地面 */
+  // 見た目の地面はフォグで溶けるところまで伸ばす。狭いと視界の先に板の縁が見えて、
+  // 一気に「箱庭に立っている」感じになる。
+  // ただしこれをOctreeに入れると巨大な三角形が全ノードに複製されて重くなるので、
+  // 当たり判定は場内だけを覆う見えない板に任せる。
+  // 平らな板を1枚置くと、地平線が定規の直線になって世界が「トレイの底」に見える。
+  // 場外だけ緩くうねらせる。場内(R<50)は完全に平らなままなので当たり判定はずれない
+  /* 分割は48×48（4,608三角形）。前は96×96で18,432三角形あった。
+     この板は420m四方あってバウンディング球の半径が約300mになるので、
+     **視錐台カリングで一度も落ちず、毎フレーム必ず全部描かれる。**
+     どこを向いても背負う固定費なので、分割は要る最低限まで削る。
+     うねりを付けるのはR>50mの外側だけ（下のsstep）で、場内は完全に平ら。
+     細かい割りが要るのはうねりの起伏（波長10m前後）の所だけだが、
+     50m先の丘の起伏が少し鈍っても遊んでいて見分けは付かない。
+     一方この2/3の削りは、影以外の全パスから毎フレーム約14,000三角形を消す */
+  const groundGeo = new THREE.PlaneGeometry(420, 420, 48, 48);
+  groundGeo.rotateX(-Math.PI / 2);
+  scaleUV(groundGeo, 105, 105);
+  {
+    const gp = groundGeo.attributes.position;
+    for (let i = 0; i < gp.count; i++) {
+      const gx = gp.getX(i), gz = gp.getZ(i);
+      const dd = Math.hypot(gx, gz);
+      const k = sstep(50, 130, dd);
+      if (k <= 0) continue;
+      const n = fbm2(gx * 0.012, gz * 0.012, 1.0, 4, 4409) - 0.5;
+      gp.setY(i, n * 9.0 * k);
+    }
+    groundGeo.computeVertexNormals();
+    // 全材質でvertexColorsを開けたので、emitを通らないこの2枚にも色属性が要る。
+    // ついでに「タイル周期よりずっと大きいムラ」を頂点カラーへ焼く。
+    // 420m四方に4m角のタイルを並べているので、これが無いと地平まで縞が読める
+    const gc = new Float32Array(gp.count * 3);
+    for (let i = 0; i < gp.count; i++) {
+      const v = 0.86 + 0.26 * fbm2(gp.getX(i) * 0.014, gp.getZ(i) * 0.014, 1.0, 4, 7717);
+      gc[i * 3] = v; gc[i * 3 + 1] = v; gc[i * 3 + 2] = v;
+    }
+    groundGeo.setAttribute('color', new THREE.BufferAttribute(gc, 3));
+  }
+  const ground = new THREE.Mesh(groundGeo, M.asphalt);
+  ground.receiveShadow = true;
+  root.add(ground);
+
+  // 当たり判定専用の床。1枚の巨大三角形だとOctreeの各ノードに複製されるので、
+  // 場内ぎりぎりの大きさで細かく割っておく
+  const floorGeo = new THREE.PlaneGeometry(96, 96, 8, 8);
+  floorGeo.rotateX(-Math.PI / 2);
+  {
+    const fc = new Float32Array(floorGeo.attributes.position.count * 3);
+    fc.fill(1);
+    floorGeo.setAttribute('color', new THREE.BufferAttribute(fc, 3));
+  }
+  const floor = new THREE.Mesh(floorGeo, M.asphalt);
+  floor.visible = false;          // 描かないがOctreeには入る
+  solids.add(floor);
+
 
   patch(38, 34, M.concrete, 0, 0, 0, 0.020, 9);            // 中央広場の舗装
   patch(26, 20, M.dirt, -29, 18, 0.12, 0.024, 7);          // 廃墟まわりの土
@@ -4125,36 +4480,58 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
   let enemySpawns, coverPoints, arenaSpawns, teamSpawns;
 
   if (mapId === 'edo') {
-    // 建物(中央9x9、四隅8x6@(±22,±20))の外を通るように選んだ14箇所
+    /* モンスターと1人用の敵が出てくる場所。**町の外縁から入ってくる形にする。**
+       四方の門・裏通り・町外れの空き地に散らしてあり、境内(半径15.5m)の
+       中には1つも置いていない——中央から湧くと、押し寄せてくる感じが消える。
+       座標は tools/check-edo.mjs が「地形に埋まっていないか」を毎回測っている
+       （前の並びは井戸と重なって4箇所が19cm埋まっていた） */
     enemySpawns = [
-      new THREE.Vector3(-22, 0.1, 0), new THREE.Vector3(22, 0.1, 0),
-      new THREE.Vector3(0, 0.1, -22), new THREE.Vector3(0, 0.1, 22),
-      new THREE.Vector3(-30, 0.1, 30), new THREE.Vector3(30, 0.1, 30),
-      new THREE.Vector3(-30, 0.1, -30), new THREE.Vector3(30, 0.1, -30),
-      new THREE.Vector3(-14, 0.1, 0), new THREE.Vector3(14, 0.1, 0),
-      new THREE.Vector3(0, 0.1, -8), new THREE.Vector3(0, 0.1, 8),
-      new THREE.Vector3(-30, 0.1, 0), new THREE.Vector3(30, 0.1, 0),
+      // 四方の門の内側
+      new THREE.Vector3(0, 0.1, -31.5), new THREE.Vector3(0, 0.1, 31.5),
+      new THREE.Vector3(-31.5, 0.1, 0), new THREE.Vector3(31.5, 0.1, 0),
+      // 町外れの四隅
+      new THREE.Vector3(-31.5, 0.1, -20), new THREE.Vector3(31.5, 0.1, 20),
+      new THREE.Vector3(-20, 0.1, -31.5), new THREE.Vector3(20, 0.1, 31.5),
+      // 通りの端
+      new THREE.Vector3(-21, 0.1, -31.5), new THREE.Vector3(21, 0.1, 31.5),
+      new THREE.Vector3(-31.5, 0.1, 21), new THREE.Vector3(31.5, 0.1, -21),
+      // 蔵の脇の空き地
+      new THREE.Vector3(-24.5, 0.1, -24.5), new THREE.Vector3(24.5, 0.1, 24.5),
+      new THREE.Vector3(-24.5, 0.1, 24.5), new THREE.Vector3(24.5, 0.1, -24.5),
     ];
 
+    /* 1人用のAIが「ここに寄れば身を隠せる」と判断する遮蔽の一覧。
+       協力プレイのモンスターは隠れないので使わない（monster.jsは隠れる状態を持たない）。
+       町屋の角・井戸・積み俵・蔵の角を並べる */
     coverPoints = [
-      // 社（中央）の出入口前
-      [0, -4.5, 4.0], [0, 4.5, 4.0],
-      // 四隅の町屋の角
-      [-22, 17, 3.4], [-22, 23, 3.4], [-18, 20, 3.0], [-26, 20, 3.0],
-      [22, 17, 3.4], [22, 23, 3.4], [18, 20, 3.0], [26, 20, 3.0],
-      [-22, -17, 3.4], [-22, -23, 3.4], [-18, -20, 3.0], [-26, -20, 3.0],
-      [22, -17, 3.4], [22, -23, 3.4], [18, -20, 3.0], [26, -20, 3.0],
-      // 灯籠・酒樽・木箱
-      [6, -14, 1.6], [-6, -14, 1.6], [6, 14, 1.6], [-6, 14, 1.6],
-      [-14, 4, 2.2], [14, -4, 2.2], [-14, -8, 2.2], [14, 8, 2.2],
-      [-9, 6, 2.0], [9, -6, 2.0], [16, 14, 2.0], [-16, -14, 2.0],
-      // 南北の門（外周の半径。上の建物配置と同じ34を直書き）
-      [0, -34, 3.5], [0, 34, 3.5],
+      // 社（中央）の四方の入口前
+      [0, -6.5, 4.0], [0, 6.5, 4.0], [-6.5, 0, 4.0], [6.5, 0, 4.0],
+      // 南北の通りに面した町屋の角（x=±15.8 と ±26.2 の列）
+      [-15.8, -26, 3.4], [-15.8, -17.5, 3.4], [-15.8, -9, 3.4],
+      [-15.8, 9, 3.4], [-15.8, 17.5, 3.4], [-15.8, 26, 3.4],
+      [15.8, -26, 3.4], [15.8, -17.5, 3.4], [15.8, -9, 3.4],
+      [15.8, 9, 3.4], [15.8, 17.5, 3.4], [15.8, 26, 3.4],
+      [-26.2, -17.5, 3.2], [-26.2, 9, 3.2], [26.2, 17.5, 3.2], [26.2, -9, 3.2],
+      // 東西の通りに面した町屋の角（z=±15.8 と ±26.2 の列）
+      [-9, -15.8, 3.4], [0, -15.8, 3.4], [9, -15.8, 3.4],
+      [-9, 15.8, 3.4], [0, 15.8, 3.4], [9, 15.8, 3.4],
+      [-9, -26.2, 3.2], [9, 26.2, 3.2],
+      // 四隅の蔵
+      [-28, -28, 3.6], [28, -28, 3.6], [-28, 28, 3.6], [28, 28, 3.6],
+      // 井戸（通りの交差点）
+      [-21, 0, 2.0], [21, 0, 2.0], [0, -21, 2.0], [0, 21, 2.0],
+      // 胸の高さの遮蔽（積み俵・酒樽・材木・木箱）
+      [-21, -8.5, 2.0], [21, 8.5, 2.0], [-8.5, 21, 2.0], [8.5, -21, 2.0],
+      [-19.2, -30, 1.8], [19.2, 30, 1.8], [-30, 19.2, 1.8], [30, -19.2, 1.8],
+      [-30.5, 4, 2.4], [30.5, -4, 2.4], [4, -30.5, 2.4], [-4, 30.5, 2.4],
+      // 四方の門
+      [0, -34, 3.5], [0, 34, 3.5], [-34, 0, 3.5], [34, 0, 3.5],
     ].map(([x, z, r]) => ({ pos: new THREE.Vector3(x, 0, z), radius: r }));
 
-    // 市街地のarenaSpawns/teamSpawnsと同じ並び（中心から11〜18mの環＋
-    // 先頭2つが真向かい35m）をそのまま使う。上で置いた建物(±22,±20の
-    // 8x6と中央9x9)はどれもこの環の外側/外周なので、そのまま流用できる
+    /* 対戦の湧き地点。市街地と同じ並び（中心から11〜18mの環＋
+       先頭2つが真向かい35m）をそのまま使える。
+       町屋の列は x=±15.8/±26.2、z=±15.8/±26.2 に置いてあり、
+       この環の点はどれも通りか境内の中に落ちる（tools/check-edo.mjsで実測） */
     arenaSpawns = [
       new THREE.Vector3(-17.5, 0.1, 0), new THREE.Vector3(17.5, 0.1, 0),
       new THREE.Vector3(0, 0.1, -17.5), new THREE.Vector3(0, 0.1, 17.5),
@@ -4262,7 +4639,10 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
     arenaSpawns,
     teamSpawns,
     coverPoints,
-    playerSpawn: mapId === 'edo' ? new THREE.Vector3(0, 1.2, 28) : new THREE.Vector3(0, 1.2, 26),
+    /* 江戸は南の門の内側から始める。**入ってきた所から参道が中央の社まで
+       まっすぐ通っている**ので、初めて入った人でも進む先に迷わない
+       （前は(0,28)で、町屋を建てた後はその建物の中だった） */
+    playerSpawn: mapId === 'edo' ? new THREE.Vector3(0, 1.2, 31.5) : new THREE.Vector3(0, 1.2, 26),
     // 江戸は板塀が半径34mの正方形なので、その少し外(38)で止める。
     // 市街地は外周のコンクリ壁がそのまま当たり判定になるので、こちらは
     // 「壁の外へ出られると興ざめ」の最後の保険（本来は壁で止まる）
