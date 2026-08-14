@@ -14,7 +14,7 @@ import { PHASE, EV, MODE_IDS } from '../src/net/protocol.js';
 
 const { getRoom } = await import('../server/room.js');
 const { buildWorld } = await import('../server/world.js');
-const { MonsterDirector, MONSTER_KINDS, WAVE_COUNT } = await import('../server/monsters.js');
+const { MONSTER_KINDS, WAVE_COUNT } = await import('../server/monsters.js');
 const { modeOf } = await import('../server/modes.js');
 
 const world = buildWorld();
