@@ -336,5 +336,48 @@ console.log('\n[9] パンチグローブは左右交互に打つ');
     '打っていない方だけをその場へ置いている');
 }
 
+console.log('\n[10] リボルバーの装填は空薬莢をまとめて捨てる');
+{
+  /* 「リロードの時、弾がピョンって出るようにしたらかっこいい」（2026-08-15）。
+     絵そのものはここでは見えないので、**予約の理屈**を見る:
+       ・リボルバーを着けたピストルだけが振り出しを予約する
+       ・放る数は撃った発数ぶん（弾倉の見た目に合わせて6発まで）
+       ・持ち替えたら装填ごと消える（宙に浮いた予約が後から発火しない） */
+  const cam = new THREE.PerspectiveCamera(75, 1.6, 0.05, 900);
+  const ws = new WeaponSystem(new THREE.Scene(), cam,
+    new THREE.PerspectiveCamera(55, 1.6, 0.002, 12), new THREE.Scene());
+  /* switchToは予約(_pendingIndex)で、実際に替わるのはupdateの中。
+     ここでは動きを回さないので、握っている武器を直接ピストルにする */
+  ws.index = ids.indexOf('pistol');
+  const w = ws.current;
+
+  // 素のピストルは振り出さない（自動拳銃は弾倉ごと抜くので薬莢は出ない）
+  w.ammo -= 4;
+  ok(ws.reload() === true, '装填を始められる');
+  ok(ws._dumpDelay < 0, '素のピストルは振り出しを予約しない');
+  ws.reloading = 0;
+
+  // リボルバーを着けると、撃った発数ぶんを予約する
+  w.shapeId = 'revolver';
+  w.ammo = w.def.mag - 4;
+  ok(ws.reload() === true, 'リボルバーでも装填を始められる');
+  ok(ws._dumpDelay > 0, '振り出しを予約する');
+  ok(ws._dumpCount === 4, `放る数は撃った発数ぶん（${ws._dumpCount}発）`);
+  ok(Math.abs(ws._dumpDelay - w.def.reloadTime * 0.40) < 1e-9,
+    '放る瞬間は左手が弾倉に届く時（装填の0.40）');
+  ws.reloading = 0;
+
+  // たくさん撃っていても、見た目の弾倉（6室）より多くは出さない
+  w.ammo = w.def.mag - 11;
+  ws.reload();
+  ok(ws._dumpCount === 6, `11発撃った後でも6発で頭打ち（${ws._dumpCount}発）`);
+
+  // 持ち替えたら装填ごと予約も消える
+  ws.switching = 0;
+  ws.switchTo(ids.indexOf('rifle'));
+  ok(ws._dumpDelay < 0, '持ち替えたら予約も消える');
+  w.shapeId = null;
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);

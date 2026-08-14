@@ -892,6 +892,8 @@ class Game {
     // （本編では未使用の口。player.js側が呼んでくれる）
     this.player.onHealDone = () => { if (this.tutorial) this._tutFlags.healed = true; };
     this.weapons.onEject = (pos, dir) => this.effects.ejectCasing(pos, dir, camera);
+    // リボルバーの装填。弾倉を振り出して空薬莢をまとめて捨てる
+    this.weapons.onEjectDump = (pos, n) => this.effects.ejectCasingDump(pos, n, camera);
     this.effects.onCasingLand = (pos) => this.audio.click(4200, 0.16, 0.05, pos, camera);
     this.director.onEnemyShoot = (...a) => this._enemyShot(...a);
     this.director.onEnemyDeath = (e) => this._onKill(e);

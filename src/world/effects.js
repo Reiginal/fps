@@ -949,6 +949,33 @@ class Casings {
     it.mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
   }
 
+  /* 装填で弾倉から空薬莢をまとめて振り出す（リボルバー用）。
+     1発ずつの排莢(eject)は右横へ強く弾くが、こちらは**上へポンと放って周りへ散らす**。
+     同じ向きへ6発続けて弾くと、振り出しではなく連射の排莢にしか見えない */
+  dump(pos, n, camera) {
+    _v2.set(0, 1, 0).applyQuaternion(camera.quaternion);
+    for (let i = 0; i < n; i++) {
+      const it = this.items[this.index];
+      this.index = (this.index + 1) % this.max;
+      it.mesh.position.copy(pos);
+      // 水平はでたらめな向きへ少しずつ。上向きが主役
+      const a = Math.random() * Math.PI * 2;
+      it.vel.set(Math.cos(a), 0, Math.sin(a)).multiplyScalar(0.3 + Math.random() * 0.7)
+        .addScaledVector(_v2, 1.6 + Math.random() * 0.9);
+      it.spin.set(
+        (Math.random() - 0.5) * 26,
+        (Math.random() - 0.5) * 26,
+        (Math.random() - 0.5) * 26,
+      );
+      it.life = 4.5;
+      it.bounced = 0;
+      it.rest = false;
+      it.mesh.visible = true;
+      it.mesh.scale.set(1, 1, 1);
+      it.mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+    }
+  }
+
   update(dt, octree, onLand, camPos) {
     for (const it of this.items) {
       if (!it.mesh.visible) continue;
@@ -1470,6 +1497,20 @@ export class Effects {
   }
 
   tracer(from, to, width, color) { this.tracers.add(from, to, width, color); }
+
+  /* リボルバーの装填。弾倉を振り出して空薬莢をまとめて捨てる。
+     熱気は1粒ずつ出さず、弾倉の所に一塊だけ（6発ぶん出すと煙幕になる） */
+  ejectCasingDump(pos, n, camera) {
+    this.casings.dump(pos, n, camera);
+    this.smoke.spawn({
+      x: pos.x, y: pos.y, z: pos.z,
+      vx: (Math.random() - 0.5) * 0.3, vy: 0.4, vz: (Math.random() - 0.5) * 0.3,
+      r: 0.6, g: 0.6, b: 0.58, r1: 0.4, g1: 0.4, b1: 0.4,
+      size0: 0.06, size1: 0.30, life: 0.6 + Math.random() * 0.3,
+      rot: Math.random() * 6.28, spin: (Math.random() - 0.5) * 2, gravity: -0.4, drag: 3,
+      fade: FADE_INOUT, alpha: 0.12,
+    });
+  }
 
   ejectCasing(pos, dir, camera) {
     this.casings.eject(pos, dir, camera);
