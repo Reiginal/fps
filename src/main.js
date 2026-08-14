@@ -41,6 +41,7 @@ import { CharView } from './ui/charview.js';
 import { NetClient } from './net/client.js';
 import { RemotePlayers } from './net/remote.js';
 import { RemoteMonsters } from './net/remoteMonsters.js';
+import { MONSTER_KINDS, MONSTER_NAMES } from './ai/monster.js';
 import { preloadCharModel, SOLO_MODEL } from './ai/glbchar.js';
 import { FarShadowGate } from './world/shadowgate.js';
 import {
@@ -3263,17 +3264,27 @@ class Game {
 
       /* ---------------- ここから協力プレイ（対モンスター） ---------------- */
 
-      case EV.MSPAWN:
+      case EV.MSPAWN: {
         this.remoteMonsters?.spawn(ev.mid, ev.kind, ev.scale, ev.p);
+        /* 湧いた所で唸らせる。**距離で自然に減衰する**ので、遠い所の分は
+           ほとんど聞こえない。近くに出た時だけ「後ろから来た」が耳で分かる */
+        if (this._vecOf(this._evPos, ev.p)) {
+          this._evPos.y += 1.0;
+          this.audio.monsterVoice('growl', ev.scale || 1, this._evPos, this.camera);
+        }
         break;
+      }
 
       case EV.MHIT: {
-        // 自分が当てた時の手応えは対人のHITと同じにする
+        // 自分が当てた時の手応えは対人のHITと同じにする。
+        // **弱点(ボスの背中のコブ)は頭と同じ扱いで返す。**
+        // 3倍入っているのに普通のヒットマーカーだと、どこを撃てば効くのかが
+        // 画面から一生分からない
+        const weak = ev.part === PART.HEAD || ev.part === PART.WEAK;
         if (ev.by === me) {
           this.shotsHit++; this._tally('hits');
-          const head = ev.part === PART.HEAD;
-          this.hud.hitmarker(head);
-          this.audio.hitmarker(head);
+          this.hud.hitmarker(weak);
+          this.audio.hitmarker(weak);
         }
         if (this._vecOf(this._evPos, ev.p)) {
           this._evNormal.subVectors(this.camera.position, this._evPos).normalize();
@@ -3283,36 +3294,68 @@ class Game {
       }
 
       case EV.MKILL: {
-        this.remoteMonsters?.kill(ev.mid);
         const r = this.remoteMonsters?.get(ev.mid);
-        this.audio.death(r?.headPos ?? this.camera.position, this.camera);
+        const at = r?.headPos ? this._evPos.copy(r.headPos) : this.camera.position;
+        // 倒れる声。**体格で鳴り方が変わる**ので、種類から倍率を引いて渡す
+        this.audio.monsterVoice('die', MONSTER_KINDS[r?.kind]?.scale ?? 1, at, this.camera);
+        this.remoteMonsters?.kill(ev.mid);
         if (ev.by === me) {
+          const weak = ev.part === 'head' || ev.part === 'weak';
           this.kills++;
           this._tally('kills');
           this.streak++;
           this._tallyBest('bestStreak', this.streak);
-          if (ev.head) { this.headshots++; this._tally('headshots'); }
-          this.audio.kill(!!ev.head);
-          this.hud.elim('モンスター', !!ev.head);
+          if (ev.part === 'head') { this.headshots++; this._tally('headshots'); }
+          this.audio.kill(weak);
+          this.hud.elim(MONSTER_NAMES[r?.kind] ?? 'モンスター', weak);
         }
         break;
       }
 
-      case EV.MFIRE: {
+      case EV.MSWING: {
         const r = this.remoteMonsters?.get(ev.mid);
         if (!r) break;
-        this.audio.gunshot(
-          { volume: 0.55, bodyFreq: 300, crackFreq: 2400, bodyDecay: 0.18, tailDecay: 0.32, thumpFrom: 95, thumpTo: 40 },
-          r.headPos, this.camera,
-        );
+        this.audio.monsterSwipe(MONSTER_KINDS[r.kind]?.scale ?? 1, r.headPos, this.camera);
+        break;
+      }
+
+      case EV.MSPIT: {
+        this.remoteMonsters?.spit(ev.p, ev.d, ev.sp);
+        if (this._vecOf(this._evPos, ev.p)) this.audio.monsterSpit(this._evPos, this.camera);
+        break;
+      }
+
+      case EV.MBOOM: {
+        this.remoteMonsters?.boom(ev.p);
+        if (this._vecOf(this._evPos, ev.p)) {
+          this.audio.monsterBoom(this._evPos, this.camera);
+          // 火の広がりは手榴弾の煙より小さく。effectsは同じ道具を使い回す
+          this._evNormal.set(0, 1, 0);
+          this.effects.impact(this._evPos, this._evNormal, 'concrete');
+        }
+        break;
+      }
+
+      case EV.MSTOMP: {
+        const r = this.remoteMonsters?.get(ev.mid);
+        if (!r) break;
+        this.audio.monsterStomp(r.headPos, this.camera);
+        break;
+      }
+
+      case EV.MROAR: {
+        const r = this.remoteMonsters?.get(ev.mid);
+        if (!r) break;
+        this.audio.monsterVoice('roar', MONSTER_KINDS[r.kind]?.scale ?? 1, r.headPos, this.camera);
         break;
       }
 
       case EV.WAVE: {
         const boss = !!ev.boss;
         this.hud.banner(
-          boss ? 'ボスが来る' : `第${ev.n}波`,
-          boss ? '大物を全員で削り切れ' : `全${ev.of}波`, 2.2,
+          boss ? 'ボスが来た' : `第${ev.n}波`,
+          boss ? '背中のコブが弱点。誰かが引きつけて、誰かが後ろへ回れ' : `全${ev.of}波`,
+          boss ? 3.4 : 2.2,
         );
         break;
       }

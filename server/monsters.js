@@ -1,98 +1,130 @@
-// 協力プレイのモンスター。**サーバーだけが動かす。**
+// 協力プレイの進行。**サーバーだけが動かす。**
 //
 // 判定を持つのはサーバー、という決まり（src/net/protocol.jsの冒頭）はモンスターでも
 // 変えない。クライアントに動かさせると、書き換えた人の画面でだけモンスターが
 // 棒立ちになり、その人だけ安全に稼げる。
 //
-// AIの中身は1人用の敵（src/ai/enemy.js の Enemy クラス）をそのまま使う。
-// server/dom-stub.js の上で本物のクラスがヘッドレスに動くことは実測済みで、
-// 1体あたり update() 約0.17ms/フレーム、10体でも1ティック2ms弱に収まる。
-// 状態機械（索敵→追跡→交戦→遮蔽）・視線判定・分離力を書き直さずに済むのが
-// 一番大きい（あそこは1人用で長く調整してきた部分で、書き直すと必ず劣化する）。
+// ここが持つのは「試合の進行」だけ。1体ぶんの姿と動きは src/ai/monster.js。
+//   ・波を組む → 湧かせる → 全部倒したら次の波 → 最後にボス
+//   ・モンスターの攻撃（爪・火の玉・踏みつけ・咆哮）をプレイヤーへの被害に変える
+//   ・弾と手榴弾がモンスターに当たったかを答える
 //
-// 1人用との違いは2つだけ:
-//   ・狙う相手が複数いる。毎ティック「一番近い生きているプレイヤー」を選んで渡す
-//   ・見た目の大小（小型・大型・ボス）を bodyScale で振る。
-//     当たり判定も銃口の位置も骨から取っているので、縮尺を掛けるだけで全部ついてくる
+// **見た目はサーバーで1つも組まない。** Monsterはvisual:falseで作れて、
+// 当たり判定は位置と向きから計算で出る。前は兵士(Enemy)を流用していたので
+// サーバーが骨とメッシュを1体ずつ組んでいた（1体20ms）。
 import './dom-stub.js';
-import { Enemy } from '../src/ai/enemy.js';
+import * as THREE from 'three';
+import { Monster, MONSTER_KINDS, MSTATE } from '../src/ai/monster.js';
 
-/* 種類ごとの体格と強さ。
-   scaleは見た目と当たり判定の倍率（intersect()がbodyScaleを掛ける）。
-   小型は速くて脆い・大型は遅くて硬い、で役割を分ける。
-   ボスは1体だけの大物。体力は「4人で撃って十数秒」を目安に置いた */
-export const MONSTER_KINDS = {
-  grunt: {
-    scale: 0.82, health: 70, speed: 4.2, damage: 5, accuracy: 0.26, fireRate: 0.18, radius: 0.28,
-  },
-  brute: {
-    scale: 1.38, health: 260, speed: 2.7, damage: 11, accuracy: 0.34, fireRate: 0.30, radius: 0.47,
-  },
-  boss: {
-    scale: 2.0, health: 1500, speed: 2.5, damage: 15, accuracy: 0.42, fireRate: 0.24, radius: 0.60,
-  },
-};
+export { MONSTER_KINDS, MSTATE };
 
 // 波の数。この数を凌いだらボス戦。
 // 長丁場にしない（1試合10分を超えると、負けた時にもう1回が重くなる）
 export const WAVE_COUNT = 3;
 
+/* 同時に生かしておく上限。**遊びやすさとサーバーの負荷の両方の話。**
+   上限が無いと、湧いた数がそのまま画面の敵の数になって、
+   遮蔽から出た瞬間に全方位から削られる（凌ぎようが無い）。
+   倒すたびに待っている個体が出てくるので、総数は減らない */
+const ALIVE_CAP = 14;
+
+/* 波が終わらない時の保険。**生き残りが0にならないと次の波へ進まない**作りなので、
+   どこかで1体でも取り残されると試合がそこで止まる。
+   1体ぶんの脱出（monster.jsの_unstick）で拾えない形——たとえば
+   誰も居ない方向で延々と壁を回っている——のために、ここでも見張る */
+const WAVE_STALL_S = 75;
+
+const _v = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
+const _ray = new THREE.Ray();
+
+/* 火の玉。**サーバーが飛ばして当たり判定も持つ。**
+   クライアントへは「吐いた瞬間の出発点と向き」だけ送って、
+   同じ速さでまっすぐ飛ぶ絵を各自に描かせる（曳光弾と同じ考え方）。
+   毎フレーム位置を配ると、4体が吐いただけで位置の定期便が倍になる */
+class Spit {
+  constructor(mid, pos, dir, def) {
+    this.mid = mid;
+    this.pos = pos.clone();
+    this.vel = dir.clone().multiplyScalar(def.speed);
+    this.damage = def.damage;
+    this.splash = def.splash;
+    this.life = 2.6;
+  }
+}
+
 export class MonsterDirector {
   /**
-   * worldはbuildWorld()の戻り値（octree / bounds / enemySpawns / coverPoints）。
+   * worldはbuildWorld()の戻り値（octree / bounds / enemySpawns）。
    * 出来事は全部コールバックで部屋へ返す。こちらから部屋の中身は触らない
    * （触り始めると、部屋とモンスターのどちらが試合を進めているのか読めなくなる）
-   *   onSpawn(m)              … 湧いた。mはこのファイルが持つ管理レコード
-   *   onFire(m)               … 撃った（音と光のため。当たったかは別）
-   *   onHitPlayer(slot, dmg)  … プレイヤーに当てた
-   *   onDeath(m, bySlot, head)… 倒された
-   *   onWave(n, boss)         … 波が進んだ
-   *   onCleared()             … ボスまで全部倒した（勝ち）
+   *   onSpawn(m)                  … 湧いた
+   *   onHitPlayer(slot, dmg, kind)… プレイヤーに当てた。kindは 'claw'|'fire'|'stomp'
+   *   onSpit(m, pos, dir)         … 火の玉を吐いた（絵と音）
+   *   onBoom(pos, r)              … 火の玉が弾けた
+   *   onSwing(m)                  … 爪を振った（音）
+   *   onStomp(m, r)               … 踏みつけた
+   *   onRoar(m)                   … 咆哮した
+   *   onDeath(m, bySlot, part)    … 倒された
+   *   onWave(n, boss)             … 波が進んだ
+   *   onCleared()                 … ボスまで倒し切った（勝ち）
    */
   constructor(world, cb = {}) {
     this.world = world;
     this.cb = cb;
-    // Enemyが見る「レベル」。1人用と同じ項目名で渡す
+    // Monsterが見る「レベル」。隠れないのでcoverPointsは要らない
     this.level = {
       octree: world.octree,
       bounds: world.bounds,
-      coverPoints: world.coverPoints || [],
       enemySpawns: world.enemySpawns,
     };
-    this.pool = [];
-    this.active = [];   // { mid, kind, enemy, targetSlot, deadFor }
+    this.pool = new Map();    // kind -> Monster[]（体格が違うので種類別に使い回す）
+    this.active = [];         // { mid, kind, mon, targetSlot, deadFor }
+    this.spits = [];
     this.wave = 0;
     this.bossWave = false;
     this.cleared = false;
-    this.queue = [];    // これから湧く種類の並び
+    this.queue = [];
     this.spawnTimer = 0;
     this.betweenWaves = 3.0;
     this.nextMid = 1;
     this._spawnBag = null;
+    this._waveT = 0;
+    // Monster.update()へ毎ティック渡す標的。使い回して確保を避ける
+    this._target = { pos: new THREE.Vector3(), eyeY: 0, alive: false };
+    this._others = [];
   }
 
-  /* Enemyは組むのに20msかかる（骨とメッシュ）ので、倒れた個体を使い回す。
-     1人用のDirector._obtainと同じ考え方。死体の表示はクライアントが
-     自分で面倒を見る（MKILLを受けて倒し、時間で消す）ので、
-     サーバー側は死んだらすぐプールへ返してよい */
-  _obtain() {
-    let e = this.pool.find((x) => !x._coopInUse);
-    if (!e) {
-      e = new Enemy(this.level);
-      this.pool.push(e);
+  /* 倒れた個体を使い回す。姿を持たない（visual:false）ので組み直しは軽いが、
+     それでもカプセルと当たり所の確保はゼロにできる */
+  _obtain(kind) {
+    let arr = this.pool.get(kind);
+    if (!arr) this.pool.set(kind, (arr = []));
+    let m = arr.find((x) => !x._inUse);
+    if (!m) {
+      m = new Monster(this.level, kind, { visual: false });
+      arr.push(m);
     }
-    e._coopInUse = true;
-    return e;
+    m._inUse = true;
+    return m;
   }
 
   /** 波の中身。人数が多いほど数を足す（1人で4人分の群れは凌げない） */
   _composition(wave, playerCount) {
     const extra = Math.max(0, playerCount - 1);
     const list = [];
-    const grunts = 4 + wave * 2 + extra * 2;
-    const brutes = Math.max(0, wave - 1) + (wave >= 2 ? extra : 0);
-    for (let i = 0; i < grunts; i++) list.push('grunt');
-    for (let i = 0; i < brutes; i++) list.push('brute');
+    // 小型。波が進むほど増える
+    const crawlers = 5 + wave * 3 + extra * 2;
+    // 大型（火を吐く方）は2波目から。1波目から遠距離が居ると、
+    // 遊び方を覚える前に見えない所から焼かれる
+    const spitters = wave >= 2 ? (wave - 1) + (extra > 1 ? 1 : 0) : 0;
+    for (let i = 0; i < crawlers; i++) list.push('crawler');
+    for (let i = 0; i < spitters; i++) list.push('spitter');
+    // 並べ替える。同じ種類が固まって出ると波の中で難度が階段状になる
+    for (let i = list.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [list[i], list[j]] = [list[j], list[i]];
+    }
     return list;
   }
 
@@ -107,8 +139,7 @@ export class MonsterDirector {
     this._spawnBag = bag;
   }
 
-  /* 湧き場所。1人用のDirector._spawnOneと同じ「袋から4枚めくって一番遠い1枚」。
-     遠さは「全プレイヤーの中で一番近い人との距離」で測る。
+  /* 湧き場所。袋から4枚めくって「一番近い人から一番遠い1枚」を採る。
      誰かの目の前に湧くのが一番白けるので、最悪ケースで選ぶ */
   _pickSpawn(players) {
     const spawns = this.level.enemySpawns;
@@ -129,49 +160,102 @@ export class MonsterDirector {
     return spawns[pick];
   }
 
-  _spawnOne(kind, players) {
-    const def = MONSTER_KINDS[kind];
-    const e = this._obtain();
+  _spawnOne(kind, players, at = null) {
+    const mon = this._obtain(kind);
+    mon.spawn(at || this._pickSpawn(players));
+    mon.state = MSTATE.SEEK;
+    const rec = { mid: this.nextMid++, kind, mon, targetSlot: null, deadFor: 0 };
+    mon._rec = rec;
 
-    /* 体格を先に入れる。spawn()がthis.heightからカプセルを組むので、順番が逆だと
-       大型の当たり判定だけ小型のままになる。
-       radiusも変える——2倍のボスが0.34mの芯で歩くと、見た目の体の半分が
-       壁にめり込んで見える */
-    e.bodyScale = def.scale;
-    e.height = 1.78 * def.scale;
-    e.radius = def.radius;
-    e.collider.radius = def.radius;
-    e.root.scale.setScalar(def.scale);
-
-    e.maxHealth = def.health;
-    e.speed = def.speed * (0.92 + Math.random() * 0.16);
-    e.damage = def.damage;
-    e.accuracy = def.accuracy * (0.85 + Math.random() * 0.3);
-    e.fireRate = def.fireRate * (0.9 + Math.random() * 0.25);
-
-    e.spawn(this._pickSpawn(players));
-
-    const m = {
-      mid: this.nextMid++, kind, enemy: e, targetSlot: null, deadFor: 0,
+    // 出来事の受け口。**当たったかどうかの判定はここで持つ**
+    // （Monster側は「爪が出た」までしか知らない。誰に当たったかは試合の話）
+    mon.onMelee = (self, dmg, reach) => {
+      this.cb.onSwing?.(rec);
+      this._clawHit(rec, dmg, reach);
     };
-    /* 撃った時。狙いは「このティックにupdate()へ渡した相手」なので、
-       当たったかどうかもその人に入れる。dmgが0の回は外した弾（音と光だけ） */
-    e.onShoot = (_en, _origin, _dir, dmg) => {
-      this.cb.onFire?.(m);
-      if (dmg > 0 && m.targetSlot) this.cb.onHitPlayer?.(m.targetSlot, dmg);
+    mon.onSpit = (self, origin, dir) => {
+      this.spits.push(new Spit(rec.mid, origin, dir, self.def.ranged));
+      this.cb.onSpit?.(rec, origin, dir, self.def.ranged.speed);
     };
-    e.onDeath = () => {
-      this.cb.onDeath?.(m, m.lastHitBy || null, m.lastHitHead || false);
+    mon.onStomp = (self, radius, dmg) => {
+      this.cb.onStomp?.(rec, radius);
+      this._stompHit(rec, radius, dmg);
     };
-    this.active.push(m);
-    this.cb.onSpawn?.(m);
-    return m;
+    mon.onRoar = () => {
+      this.cb.onRoar?.(rec);
+      this._roarSpawn(rec);
+    };
+    mon.onDeath = () => {
+      this.cb.onDeath?.(rec, rec.lastHitBy || null, rec.lastPart || 'body');
+    };
+    mon.onStep = () => { this.cb.onStep?.(rec); };
+
+    this.active.push(rec);
+    this.cb.onSpawn?.(rec);
+    return rec;
+  }
+
+  /* 爪。**振った瞬間に、間合いと向きの中に居る人へ入る。**
+     飛び道具と違って避けようが無いので、溜め(WINDUP)が見えることが公平さの担保 */
+  _clawHit(rec, dmg, reach) {
+    const mon = rec.mon;
+    const c = mon.collider.start;
+    // 前方だけ。真後ろに立っている人まで薙ぐと、避けた意味が消える
+    const fx = -Math.sin(mon.yaw), fz = -Math.cos(mon.yaw);
+    for (const p of this._players) {
+      if (!p.player.alive) continue;
+      const px = p.player.collider.start.x - c.x, pz = p.player.collider.start.z - c.z;
+      const d = Math.hypot(px, pz);
+      if (d > reach) continue;
+      if (d > 0.1 && (px / d) * fx + (pz / d) * fz < 0.25) continue;   // 正面120度ぶん
+      this.cb.onHitPlayer?.(p.slot, dmg, 'claw');
+    }
+  }
+
+  /* 踏みつけ。**周囲を薙ぐので向きは見ない。**
+     そのかわり届く距離をはっきり決めて、外へ逃げれば必ず避けられるようにする */
+  _stompHit(rec, radius, dmg) {
+    const c = rec.mon.collider.start;
+    for (const p of this._players) {
+      if (!p.player.alive) continue;
+      const d = Math.hypot(p.player.collider.start.x - c.x, p.player.collider.start.z - c.z);
+      if (d > radius) continue;
+      // 縁ほど軽い。ぎりぎりで逃げた人が丸ごと食らわない
+      const k = 1 - Math.max(0, (d - radius * 0.4) / (radius * 0.6)) * 0.55;
+      this.cb.onHitPlayer?.(p.slot, dmg * k, 'stomp');
+    }
+  }
+
+  /* 咆哮。**小型を呼ぶ。**ボスの周りが一度空っぽになると、
+     4人で囲んで削るだけの作業になるので、定期的に手を増やさせる */
+  _roarSpawn(rec) {
+    const c = rec.mon.collider.start;
+    let n = 3;
+    for (let i = 0; i < n; i++) {
+      if (this._aliveCount() >= ALIVE_CAP) break;
+      const a = Math.random() * Math.PI * 2;
+      const r = 6 + Math.random() * 4;
+      _v.set(c.x + Math.cos(a) * r, 0.1, c.z + Math.sin(a) * r);
+      // 湧く先が地形の中だと即座に詰まるので、上から地面を探して足元へ置く
+      _ray.origin.set(_v.x, 6, _v.z);
+      _ray.direction.set(0, -1, 0);
+      const g = this.level.octree.rayIntersect(_ray);
+      if (!g || 6 - g.distance > 1.5) { n++; continue; }   // 屋根の上などは避けて引き直す
+      _v.y = 6 - g.distance;
+      this._spawnOne('crawler', this._players, _v);
+    }
   }
 
   /** 生きている数（湧き待ちも数える。0になったら波が片付いたという意味なので） */
   get remaining() {
     let n = this.queue.length;
-    for (const m of this.active) if (m.enemy.alive) n++;
+    for (const m of this.active) if (m.mon.alive) n++;
+    return n;
+  }
+
+  _aliveCount() {
+    let n = 0;
+    for (const m of this.active) if (m.mon.alive) n++;
     return n;
   }
 
@@ -181,11 +265,11 @@ export class MonsterDirector {
    */
   update(dt, players) {
     if (this.cleared) return;
+    this._players = players;
 
-    // 波の進行。今の波が片付いたら次を用意する
+    /* ------------------------------------------------------ 波の進行 */
     if (this.queue.length === 0 && this.remaining === 0) {
       if (this.bossWave) {
-        // ボスまで倒し切った。勝ち
         this.cleared = true;
         this.cb.onCleared?.();
         return;
@@ -194,65 +278,134 @@ export class MonsterDirector {
       if (this.betweenWaves <= 0) {
         this.wave++;
         this.betweenWaves = 6.0;
+        this._waveT = 0;
         if (this.wave > WAVE_COUNT) {
           // ボス戦。1体の大物と、脇を固める小型
           this.bossWave = true;
-          this.queue = ['boss', 'grunt', 'grunt'];
+          this.queue = ['boss', 'crawler', 'crawler', 'crawler'];
         } else {
           this.queue = this._composition(this.wave, players.length);
         }
         this.spawnTimer = 0;
         this.cb.onWave?.(Math.min(this.wave, WAVE_COUNT + 1), this.bossWave);
       }
+    } else {
+      this._waveT += dt;
     }
 
-    // 湧かせる。一斉に出すと群れて歩いてくるので間隔を空ける（1人用と同じ）
-    if (this.queue.length > 0) {
+    // 湧かせる。一斉に出すと群れて歩いてくるので間隔を空ける
+    if (this.queue.length > 0 && this._aliveCount() < ALIVE_CAP) {
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) {
-        this.spawnTimer = 0.7;
+        this.spawnTimer = 0.8;
         this._spawnOne(this.queue.shift(), players);
       }
     }
 
-    // 1体ずつ、一番近い生きているプレイヤーを狙わせる。
-    // Enemy.update()は「1人のプレイヤー」を前提に書かれているので、
-    // 相手の選び直しをここでやれば中身はそのまま使える
+    /* -------------------------------------------------- 1体ずつ動かす */
+    // 分離に渡す並び。毎ティック作り直すが、配列は使い回す
+    this._others.length = 0;
+    for (const m of this.active) if (m.mon.alive) this._others.push(m.mon);
+    const ctx = { others: this._others };
+
     for (const m of this.active) {
-      const e = m.enemy;
-      if (!e.alive) {
-        // 死んだ個体はすぐ回収する。死体の絵はクライアントが自分で持つ
+      const mon = m.mon;
+      if (!mon.alive) {
+        // 死んだ個体はすぐ回収する。倒れる絵はクライアントが自分で持つ
         m.deadFor += dt;
-        if (m.deadFor > 0.5) { e._coopInUse = false; }
+        if (m.deadFor > 0.5) mon._inUse = false;
         continue;
       }
+      // 一番近い生きている人を狙う
       let best = null, bestD = Infinity;
       for (const p of players) {
         if (!p.player.alive) continue;
-        const d = e.collider.start.distanceToSquared(p.player.collider.start);
+        const d = mon.collider.start.distanceToSquared(p.player.collider.start);
         if (d < bestD) { bestD = d; best = p; }
       }
       m.targetSlot = best ? best.slot : null;
-      // 全員倒れている間も、動きは止めない（すぐ誰かが復活してくる）。
-      // 生きている人がいないティックは最後に狙っていた姿勢のまま歩かせたいが、
-      // update()にはplayerが必須なので、誰でもいいから渡す（alive:falseなら撃たない）
-      const target = best ? best.player : players[0]?.player;
-      if (!target) continue;
-      e.update(dt, target, { enemies: this._aliveEnemies() });
+      const t = this._target;
+      if (best) {
+        t.pos.copy(best.player.collider.start);
+        t.eyeY = best.player.feetY + best.player.height - 0.16;
+        t.alive = true;
+      } else {
+        // 全員倒れている間も動きは止めない（数秒で誰かが復活してくる）。
+        // 狙う相手が居ないので、その場で待つ姿になる
+        t.alive = false;
+      }
+      mon.update(dt, t, ctx);
     }
 
-    // 回収済みをactiveから外す（詰め直しはここでしか起きないので毎ティックでも安い）
+    this._stepSpits(dt, players);
+
+    /* -------------------------------------------------- 取り残しの保険 */
+    // 波が長引いたら、遠くで迷っている個体を湧き直させて人の方へ寄せる。
+    // ボスは動かさない（目の前から消えたら山場が壊れる）
+    if (this._waveT > WAVE_STALL_S && this.remaining > 0) {
+      this._waveT = 0;
+      for (const m of this.active) {
+        if (!m.mon.alive || !m.mon.canBurrow) continue;
+        let near = Infinity;
+        for (const p of players) {
+          const d = m.mon.collider.start.distanceTo(p.player.collider.start);
+          if (d < near) near = d;
+        }
+        if (near > 22) { m.mon.spawn(this._pickSpawn(players)); m.mon.state = MSTATE.SEEK; }
+      }
+    }
+
+    // 回収済みをactiveから外す
     for (let i = this.active.length - 1; i >= 0; i--) {
       const m = this.active[i];
-      if (!m.enemy.alive && !m.enemy._coopInUse) this.active.splice(i, 1);
+      if (!m.mon.alive && !m.mon._inUse) this.active.splice(i, 1);
     }
   }
 
-  // 分離力（仲間と離れて歩く）用。Enemyのupdateがctx.enemiesを見る
-  _aliveEnemies() {
-    const out = [];
-    for (const m of this.active) if (m.enemy.alive) out.push(m.enemy);
-    return out;
+  /* 火の玉を進める。壁に当たるか、人の近くを通ったら弾ける。
+     弾けた所から半径splashぶんに被害が入る（手榴弾より狭くて軽い） */
+  _stepSpits(dt, players) {
+    for (let i = this.spits.length - 1; i >= 0; i--) {
+      const s = this.spits[i];
+      s.life -= dt;
+      const move = _v.copy(s.vel).multiplyScalar(dt);
+      const len = move.length();
+      let hitAt = null;
+      if (len > 1e-4) {
+        _ray.origin.copy(s.pos);
+        _ray.direction.copy(move).divideScalar(len);
+        const h = this.level.octree.rayIntersect(_ray);
+        if (h && h.distance <= len) hitAt = _v2.copy(s.pos).addScaledVector(_ray.direction, h.distance);
+      }
+      if (!hitAt) {
+        // 人に直接触れたか。胸の高さで見る
+        for (const p of players) {
+          if (!p.player.alive) continue;
+          const c = p.player.collider.start;
+          const d = Math.hypot(s.pos.x - c.x, s.pos.z - c.z);
+          if (d < 0.8 && Math.abs(s.pos.y - (c.y + 0.4)) < 1.2) {
+            hitAt = _v2.copy(s.pos);
+            break;
+          }
+        }
+      }
+      s.pos.add(move);
+      s.vel.y -= 5.5 * dt;    // 少しだけ落ちる。まっすぐ飛ぶと弾に見える
+
+      if (hitAt || s.life <= 0) {
+        const at = hitAt || s.pos;
+        this.cb.onBoom?.(at, s.splash);
+        for (const p of players) {
+          if (!p.player.alive) continue;
+          const c = p.player.collider.start;
+          const d = Math.hypot(at.x - c.x, at.z - c.z, at.y - (c.y + 0.4));
+          if (d > s.splash) continue;
+          const k = 1 - (d / s.splash) * 0.6;
+          this.cb.onHitPlayer?.(p.slot, s.damage * k, 'fire');
+        }
+        this.spits.splice(i, 1);
+      }
+    }
   }
 
   /**
@@ -263,45 +416,44 @@ export class MonsterDirector {
   intersectShot(origin, dir, pad = 0) {
     let best = null;
     for (const m of this.active) {
-      const h = m.enemy.intersect(origin, dir, pad);
+      const h = m.mon.intersect(origin, dir, pad);
       if (h && (!best || h.distance < best.hit.distance)) best = { m, hit: h };
     }
     return best;
   }
 
   /** モンスターに当てた。倒し切ったらtrue（onDeathも飛ぶ） */
-  hit(m, dmg, part, dir, bySlot) {
+  hit(m, dmg, part, bySlot) {
     m.lastHitBy = bySlot;
-    m.lastHitHead = part === 'head';
-    return m.enemy.hit(dmg, part, dir);
+    m.lastPart = part;
+    return m.mon.hit(dmg, part);
   }
+
+  /** 部位ごとの倍率。room.jsが威力を出す時に掛ける */
+  static mulOf(part) { return Monster.mulOf(part); }
 
   /** スナップショットに載せる中身（protocol.jsのpackMonsterへ渡す形） */
   packSource() {
     const out = [];
     for (const m of this.active) {
-      const e = m.enemy;
-      if (!e.alive) continue;
-      out.push({
-        mid: m.mid,
-        x: e.collider.start.x, y: e.feetY, z: e.collider.start.z,
-        yaw: e.aimYaw, pitch: e.aimPitch,
-        state: e.state, hp: e.health,
-      });
+      if (!m.mon.alive) continue;
+      out.push(m.mon.packSource(m.mid));
     }
     return out;
   }
 
   /** 試合を畳む。全部プールへ返して次の試合に備える */
   reset() {
-    for (const m of this.active) { m.enemy.alive = false; m.enemy._coopInUse = false; }
+    for (const m of this.active) { m.mon.alive = false; m.mon._inUse = false; }
     this.active.length = 0;
     this.queue.length = 0;
+    this.spits.length = 0;
     this.wave = 0;
     this.bossWave = false;
     this.cleared = false;
     this.spawnTimer = 0;
     this.betweenWaves = 3.0;
+    this._waveT = 0;
     this._spawnBag = null;
   }
 }
