@@ -150,6 +150,11 @@ export const MODE_LIST = [
     name: '2対2',
     desc: '左の2席と右の2席でチーム。味方は撃てない。先に3ラウンド取ったら勝ち',
   },
+  {
+    id: 'coop',
+    name: '協力',
+    desc: '全員で1チーム。モンスターの波を凌いで、最後のボスを倒したら勝ち',
+  },
 ];
 export const MODE_IDS = MODE_LIST.map((m) => m.id);
 export const modeName = (id) => (MODE_LIST.find((m) => m.id === id) || MODE_LIST[0]).name;
@@ -313,7 +318,7 @@ export const Sv = {
   // 「残り3秒」だけでは、それがラウンドの残りなのか次が始まるまでなのか
   // 受け取る側に判別できず、同じ数字が2つの意味で画面に出る。
   // 20Hzで数バイト増えるだけなので、専用の電文を増やすより安い
-  SNAPSHOT: 'S',  // { t, tk, now, ack, left, ph, ps:[...] }
+  SNAPSHOT: 'S',  // { t, tk, now, ack, left, ph, ps:[...], ms?:[...] } msは協力プレイのモンスター（packMonster）
   EVENT: 'E',     // { t, e:[...] } 起きたこと（下のEV参照）をまとめて配る
   // rows の並びは [id, kills, deaths, ping, rounds]。roundsが取ったラウンド数で、
   // 画面の上にずっと出ている点数はこれ。killsとは別に持つ必要がある
@@ -392,6 +397,22 @@ export const EV = {
   DROP: 'd',      // { e:'d', did, w:武器番号, n:手榴弾の数, p:[x,y,z] }
   // 拾われた／時間切れで消えた。byが無い時は時間切れ
   TAKE: 't',      // { e:'t', did, by? }
+
+  /* ---- ここから協力プレイ（対モンスター）のイベント ----
+     モンスターのidはプレイヤーのidと別の空間（mid）。同じ空間に混ぜると、
+     KILLのbyがどちらを指しているのか受け取る側が読めなくなる。
+     位置は20HzのスナップショットのmsA配列（packMonster）で届くので、
+     ここに流れるのは「起きた瞬間」の出来事だけ */
+  // 湧いた。kindは 'grunt'(小) | 'brute'(大) | 'boss'。scaleは見た目と当たり判定の体格倍率
+  MSPAWN: 'ms',   // { e:'ms', mid, kind, scale, p:[x,y,z], hp }
+  // モンスターに当たった。プレイヤーのHITと分けるのは、対象の引き当て先が違うため
+  MHIT: 'mh',     // { e:'mh', mid, by, dmg, part, p:[x,y,z] }
+  // モンスターが倒れた
+  MKILL: 'mk',    // { e:'mk', mid, by, head }
+  // モンスターが撃った。音とマズルフラッシュ用（プレイヤーのFIREと同じ役目）
+  MFIRE: 'mf',    // { e:'mf', mid }
+  // 波が進んだ。n=今の波、of=全部の波数。bossが立っていたらボス戦
+  WAVE: 'wv',     // { e:'wv', n, of, boss? }
 };
 
 /* 地面に落ちている物。**サーバーが持ち主で、拾えたかどうかもサーバーが決める。**
@@ -435,6 +456,30 @@ export function unpackPlayer(a) {
     x: a[1], y: a[2], z: a[3],
     yaw: a[4], pitch: a[5],
     state: a[6], hp: a[7], weapon: a[8],
+  };
+}
+
+/* 協力プレイのモンスター1体ぶん。スナップショットのmsに並ぶ。
+   kind/scaleは湧いた時のMSPAWNで一度だけ届く（毎スナップショットに
+   載せると、動かない値のぶん帯域を20Hzで払い続けることになる）。
+   並びは [mid, x, y, z, yaw, pitch, state, hp]
+   stateは敵AIの状態番号（0:IDLE 1:ALERT 2:CHASE 3:ENGAGE 4:DEAD 5:COVER）。
+   見た目の姿勢（歩く・構える・倒れる）はこれと位置の変化から作る */
+export function packMonster(m) {
+  return [
+    m.mid,
+    qPos(m.x), qPos(m.y), qPos(m.z),
+    qAng(m.yaw), qAng(m.pitch),
+    m.state | 0, Math.round(m.hp),
+  ];
+}
+
+export function unpackMonster(a) {
+  return {
+    mid: a[0],
+    x: a[1], y: a[2], z: a[3],
+    yaw: a[4], pitch: a[5],
+    state: a[6], hp: a[7],
   };
 }
 

@@ -9,13 +9,15 @@ import * as THREE from 'three';
 import { Capsule } from 'three/addons/math/Capsule.js';
 import {
   TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS, MATCH, PHASE, ZONE, NADE, blastDamage, outsideZone,
-  Sv, EV, packPlayer, SEATS, SEAT_SPAWN, CHARACTERS, MODE_IDS, MAP_IDS, LOBBY_ROW, LOBBY_ROW_LEN, DROP,
-  TEAM_OF_SEAT, TEAM_NAMES, MELEE_HEAVY, MELEE_SWEEP,
+  Sv, EV, packPlayer, packMonster, SEATS, SEAT_SPAWN, CHARACTERS, MODE_IDS, MAP_IDS,
+  LOBBY_ROW, LOBBY_ROW_LEN, DROP,
+  TEAM_OF_SEAT, TEAM_NAMES, MELEE_HEAVY, MELEE_SWEEP, PART, PART_MUL,
 } from '../src/net/protocol.js';
 import { SimPlayer, resolveShot, rewindMs, originVisible, WEAPONS, heavyDef } from './sim.js';
 import { Bot, forwardOf } from './bot.js';
 import { modeOf } from './modes.js';
 import { buildWorld } from './world.js';
+import { MonsterDirector, MONSTER_KINDS, WAVE_COUNT } from './monsters.js';
 import { logs } from './logs.js';
 
 const TICK_MS = 1000 / TICK_HZ;
@@ -100,6 +102,8 @@ export class Room {
     // マップも同じ扱い。地形はコンストラクタに渡されたworldをそのまま初期値にする
     // （index.jsが起動時に組んだ既定マップ）。setMap()で選び直すとbuildWorld()を呼び直す
     this.map = MAP_IDS[0];
+    // 協力プレイのモンスター。coopの試合が始まる時に作る（それ以外の遊び方では触らない）
+    this.monsters = null;
   }
 
   /** 今の遊び方の決まり */
@@ -295,6 +299,11 @@ export class Room {
    */
   teamOf(slot) {
     if (!this.rules.teams) return `p${slot.id}`;
+    // 遊び方が自分でチーム割りを持つならそちら（協力プレイ: 全員が同じチーム）。
+    // 席に着いていない人はここでも「誰の味方でもない」に落とす
+    if (this.rules.teamOf) {
+      return slot.seat === null ? `p${slot.id}` : this.rules.teamOf(slot.seat);
+    }
     const t = TEAM_OF_SEAT(slot.seat);
     // 席に着いていない人は誰の味方でもない（試合には出ていない）
     return t === null ? `p${slot.id}` : `t${t}`;
@@ -534,14 +543,17 @@ export class Room {
     if (this.phase !== PHASE.WAIT) return '';
     const seated = this._seated();
     if (seated.length === 0) return '席に着いてください';
-    if (seated.length < 2) return 'あと1人来れば始められます';
+    // 協力プレイは相手がモンスターなので1人でも始められる。
+    // 対人の遊び方は相手が要る（1人で始まっても撃つ相手がいない）
+    if (!this.rules.coop && seated.length < 2) return 'あと1人来れば始められます';
     /* CPUだけでは始めない。**これが無いと、CPUを2体入れた瞬間に、
        まだ席に着いていない本人を置いて試合が始まる**（実際に始まった）。
        試合は人のためにあるので、席に人が1人も居なければ待つ */
     if (!seated.some((s) => !s.bot)) return '席に着いてください（CPUだけでは始まりません）';
     /* チーム戦は両側に人が要る。片側だけに全員が座っていると、
-       始まった瞬間に「相手が全員倒れている」状態になって即決着する */
-    if (this.rules.teams) {
+       始まった瞬間に「相手が全員倒れている」状態になって即決着する。
+       協力プレイはteams:trueでも全員が同じ側なので、この検査は要らない */
+    if (this.rules.teams && !this.rules.teamOf) {
       const sides = new Set(seated.map((s) => TEAM_OF_SEAT(s.seat)));
       if (sides.size < 2) return `${TEAM_NAMES[sides.has(0) ? 1 : 0]}側の席にも座ってください`;
     }
@@ -1039,6 +1051,34 @@ export class Room {
       pad: sim.def.melee ? (strong ? MELEE_SWEEP.HEAVY.pad : MELEE_SWEEP.LIGHT.pad) : 0,
     });
 
+    /* 協力プレイではモンスターも標的。resolveShotの結果（人・壁・外れ）と
+       「一番手前のモンスター」の距離を比べて、手前の方に当てる。
+       resolveShotの中に混ぜないのは、モンスターがpose履歴（巻き戻し）を
+       持たないため——撃つ相手がAIなので、遅延の公平を取る必要が無い */
+    if (this.rules.coop && this.monsters) {
+      const def2 = strong ? heavyDef(sim.def) : sim.def;
+      const pad2 = sim.def.melee ? (strong ? MELEE_SWEEP.HEAVY.pad : MELEE_SWEEP.LIGHT.pad) : 0;
+      const mres = this.monsters.intersectShot(origin, dir, pad2);
+      if (mres && mres.hit.distance <= (def2.range || 100) && mres.hit.distance < res.dist) {
+        const partNo = mres.hit.part === 'head' ? PART.HEAD
+          : mres.hit.part === 'legs' ? PART.LEG : PART.CHEST;
+        // 距離減衰と部位倍率は人へ撃った時と同じ式（resolveShotと揃える）
+        const t2 = def2.falloffEnd > def2.falloffStart
+          ? Math.min(1, Math.max(0, (mres.hit.distance - def2.falloffStart)
+            / (def2.falloffEnd - def2.falloffStart)))
+          : 0;
+        const mul = 1 + (def2.falloffMin - 1) * t2;
+        const dmg = def2.damage * mul * (PART_MUL[partNo] ?? 1);
+        const pt = mres.hit.point;
+        this.push({
+          e: EV.MHIT, mid: mres.m.mid, by: slot.id,
+          dmg: Math.round(dmg * 10) / 10, part: partNo, p: [pt.x, pt.y, pt.z],
+        });
+        this.monsters.hit(mres.m, dmg, mres.hit.part, dir, slot);
+        return;
+      }
+    }
+
     if (res.kind === 'player') {
       const tslot = this.slots.get(res.target.id);
       if (!tslot) return;
@@ -1185,6 +1225,28 @@ export class Room {
         else this._killByFall(s);
       }
     }
+
+    // 協力プレイではモンスターも爆風に巻き込む。判定の式は人と同じ
+    // （胸の高さ・遮蔽チェック・距離減衰）。手榴弾が効かないと、
+    // 群れに囲まれた時の切り札が無くなる
+    if (this.rules.coop && this.monsters && this.phase === PHASE.LIVE) {
+      const thrower = this.slots.get(g.by) || null;
+      for (const m of [...this.monsters.active]) {
+        const e2 = m.enemy;
+        if (!e2.alive) continue;
+        const c = e2.collider.start;
+        _nadeTo.set(c.x, c.y + 0.5, c.z);
+        const d = _nadeTo.distanceTo(g.pos);
+        if (d > NADE.BLAST_R) continue;
+        if (!originVisible(this.world.octree, g.pos, _nadeTo)) continue;
+        const dmg = blastDamage(d, true);
+        this.push({
+          e: EV.MHIT, mid: m.mid, by: g.by,
+          dmg: Math.round(dmg * 10) / 10, part: 1, p: [g.pos.x, g.pos.y, g.pos.z],
+        });
+        this.monsters.hit(m, dmg, 'chest', null, thrower);
+      }
+    }
   }
 
   /* -------------------------------------------------------- 戦闘範囲 */
@@ -1194,6 +1256,10 @@ export class Room {
   // 逆に警告の表示は各自の画面が自分の位置から出す（往復を待つと手遅れになる）ので、
   // 半径と猶予はprotocol.jsに置いて両側で同じ値を見る
   _zone(slot) {
+    // 協力プレイに戦域は無い。対人の狭い輪（半径20m）は「隠れ続けて
+    // ラウンドを潰す」対策で、モンスター相手にはその心配が無い。
+    // 残すと、広いマップの縁で戦っているだけで削られる
+    if (this.rules.coop) { slot.outsideFor = 0; return; }
     const sim = slot.sim;
     if (!sim.alive) { slot.outsideFor = 0; return; }
     const p = sim.player.collider.start;
@@ -1273,6 +1339,8 @@ export class Room {
     // ガンゲームでは自滅で段は進まない。進めると崖から飛び降りるのが
     // 一番速い勝ち方になる（modes.jsのonKillが自分自身を弾いている）
     this._checkRoundOver('fall');
+    // 協力プレイでは「最後の1人が落下死」も全滅になる（coop以外では何もしない）
+    this._checkWipe();
   }
 
   /**
@@ -1418,6 +1486,14 @@ export class Room {
       sim.record(t);
     }
 
+    // 協力プレイのモンスター。プレイヤーの位置が確定した後に動かす
+    // （先に動かすと1刻み古い位置を狙うことになる）。
+    // onCleared→_endMatchが中から呼ばれて局面がENDへ動くことがあるので、
+    // 動いた後の処理はLIVE限定のまま並べておけばそのまま素通りする
+    if (this.phase === PHASE.LIVE && this.rules.coop && this.monsters) {
+      this.monsters.update(TICK_DT, this._coopPlayers());
+    }
+
     // 玉はラウンドが動いている間だけ進める。幕間に爆発すると、
     // 次のラウンドが始まった直後の相手に前のラウンドの爆風が入る
     if (this.phase === PHASE.LIVE) this._stepNades();
@@ -1499,15 +1575,21 @@ export class Room {
   _broadcast() {
     const ps = [];
     for (const s of this.slots.values()) ps.push(packPlayer(s.sim.packSource()));
+    // 協力プレイならモンスターも20Hzで載せる。イベント単発で流すと、
+    // 取りこぼした端末だけモンスターが浮いたまま止まる（位置は必ず定期便で上書きする）
+    const msA = this.rules.coop && this.monsters
+      ? this.monsters.packSource().map(packMonster) : null;
     const now = Math.round(nowMs());
     // ackは人ごとに違うので、電文も人ごとに組む
     // 残り時間はここに相乗りさせる。専用の電文を毎秒足すより、
     // すでに20Hzで流れている物に数バイト載せるほうが安い
     const left = Math.round(Math.max(0, this.timeLeft) * 10) / 10;
     for (const s of this.slots.values()) {
-      s.conn.send({
+      const msg = {
         t: Sv.SNAPSHOT, tk: this.tick, now, ack: s.lastSeq, left, ph: this.phase, ps,
-      });
+      };
+      if (msA) msg.ms = msA;
+      s.conn.send(msg);
     }
     if (this.events.length > 0) {
       const e = this.events;
@@ -1522,7 +1604,8 @@ export class Room {
       // 並びは protocol.js の SCORE_ROW。**足す時は読む側も一緒に直す**
       rows.push([
         s.id, s.sim.kills, s.sim.deaths, Math.round(s.conn.rtt || 0), s.rounds,
-        this.rules.teams ? (TEAM_OF_SEAT(s.seat) ?? -1) : -1,
+        // 協力プレイは全員が0番のチーム（rules.teamOfが席割りを上書きしている）
+        this.rules.teams ? (this.rules.teamOf ? 0 : (TEAM_OF_SEAT(s.seat) ?? -1)) : -1,
       ]);
     }
     return rows;
@@ -1563,6 +1646,94 @@ export class Room {
     // 前のラウンドで空中に残っていた玉は持ち越さない
     this.nades.length = 0;
     for (const s of this.slots.values()) this._respawn(s);
+    // 協力プレイならモンスターの進行を仕込む。他の遊び方では畳んでおく
+    if (this.rules.coop) this._startCoop();
+    else if (this.monsters) { this.monsters.reset(); this.monsters = null; }
+  }
+
+  /* ------------------------------------------------ 協力プレイ（対モンスター） */
+
+  /* モンスターの進行を組む。**出来事は全部コールバックで受け取ってイベントに変える。**
+     進行そのもの（波・湧き・AI）はserver/monsters.jsが持ち、
+     部屋は「誰に何が起きたか」を配ることと、勝敗の判定だけを持つ */
+  _startCoop() {
+    // MonsterDirectorはマップを跨いで使い回さない（湧き地点と遮蔽が別物になるので、
+    // 部屋のマップが替わっていたら作り直す）
+    if (this.monsters && this.monsters.world !== this.world) this.monsters = null;
+    if (!this.monsters) {
+      this.monsters = new MonsterDirector(this.world, {
+        onSpawn: (m) => {
+          const c = m.enemy.collider.start;
+          this.push({
+            e: EV.MSPAWN, mid: m.mid, kind: m.kind, scale: MONSTER_KINDS[m.kind].scale,
+            p: [c.x, m.enemy.feetY, c.z], hp: m.enemy.maxHealth,
+          });
+        },
+        onFire: (m) => this.push({ e: EV.MFIRE, mid: m.mid }),
+        onHitPlayer: (slot, dmg) => this._monsterHitPlayer(slot, dmg),
+        onDeath: (m, by, head) => {
+          this.push({ e: EV.MKILL, mid: m.mid, by: by ? by.id : -1, head: !!head });
+          if (by?.sim) by.sim.kills++;
+        },
+        onWave: (n, boss) => this.push({ e: EV.WAVE, n, of: WAVE_COUNT + 1, boss: boss ? 1 : 0 }),
+        onCleared: () => {
+          logs.add('match', { winner: `チーム(${this.mode})`, why: 'boss' });
+          this._endMatch('boss', true);
+        },
+      });
+    }
+    this.monsters.reset();
+  }
+
+  /** モンスターのAIへ渡す「席に着いている人」の並び */
+  _coopPlayers() {
+    const out = [];
+    for (const s of this.slots.values()) {
+      if (s.seat === null) continue;
+      out.push({ slot: s, player: s.sim.player });
+    }
+    return out;
+  }
+
+  /* モンスターがプレイヤーに当てた。撃ち合い(shot)と違ってレイの巻き戻しは無い
+     （撃つ側がAIなので、遅延の公平を取る相手がいない）。
+     無敵(protectIn)は人からの弾と同じように効かせる——湧いた瞬間に
+     囲まれて溶けるのは、対人より対モンスターの方が起きやすい */
+  _monsterHitPlayer(slot, dmg) {
+    if (this.phase !== PHASE.LIVE) return;
+    const sim = slot.sim;
+    if (!sim || !sim.alive || sim.protectIn > 0) return;
+    const p = sim.player.collider.start;
+    // by:-1 は「人ではない」の印。クライアントは名前を探しにいかない
+    this.push({
+      e: EV.HIT, id: slot.id, by: -1,
+      dmg: Math.round(dmg * 10) / 10, part: 1, p: [p.x, p.y + 0.5, p.z],
+    });
+    sim.player.damage(dmg);
+    if (!sim.player.alive) this._killByMonster(slot);
+  }
+
+  // モンスターに倒された。落下(_killByFall)と同じ形で、mの印だけ変える
+  _killByMonster(slot) {
+    this.push({
+      e: EV.KILL, id: slot.id, by: slot.id,
+      w: slot.sim.weapon, head: false, m: 1,
+    });
+    slot.downed = true;
+    slot.respawnIn = MATCH.RESPAWN_S;
+    slot.sim.deaths++;
+    this._checkWipe();
+  }
+
+  /* 全員が同時に倒れていたら負け。復活(RESPAWN_S)を待っている間も「倒れている」なので、
+     残りの人が復活までの数秒を守り切れなかったら全滅になる */
+  _checkWipe() {
+    if (this.phase !== PHASE.LIVE || !this.rules.coop) return;
+    for (const s of this.slots.values()) {
+      if (s.seat !== null && s.sim.alive) return;
+    }
+    logs.add('match', { winner: `モンスター(${this.mode})`, why: 'wipe' });
+    this._endMatch('wipe', true);
   }
 
   // ラウンドの決着。winnerがnullなら時間切れか相討ちで、誰の取得にもならない。

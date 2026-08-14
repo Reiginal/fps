@@ -10,9 +10,12 @@
    DOMには触らない。接続画面もスコアボードも別のファイルが作る。 */
 
 import {
-  C, Sv, EV, PHASE, encode, decode, unpackPlayer,
+  C, Sv, EV, PHASE, encode, decode, unpackPlayer, unpackMonster,
   qPos, qAng, INPUT_BATCH, INTERP_DELAY_MS, TIMEOUT_MS, CHAT_MAX, LOBBY_ROW, SCORE_ROW, MODE_IDS, MAP_IDS,
 } from './protocol.js';
+
+// モンスターの居ない電文で毎回新しい空配列を作らない
+const EMPTY_MONSTERS = [];
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -111,6 +114,8 @@ export class NetClient {
     this.mode = MODE_IDS[0];
     // 今のマップ。同じくロビーの電文で届く（届くまでは既定の市街地）
     this.map = MAP_IDS[0];
+    // 協力プレイのモンスター（スナップショットの最新1枚ぶん）。coop以外では空
+    this.monsters = EMPTY_MONSTERS;
 
     /* protocol.jsは「取りこぼしに備えて直近の未確認分も一緒に送る」と書いてあるが、
        既定では新しい刻みだけを送る。1パケット3刻みという前提を崩さないため。
@@ -387,7 +392,9 @@ export class NetClient {
     this._score(m);
     this._emit(this.onMatchEnd, {
       rows: this.scoreRows(),
-      why: m.why === 'time' ? 'time' : 'score',
+      // 協力プレイの決着（boss=勝ち / wipe=全滅）はそのまま通す。
+      // 知らない値はscoreへ寄せる（今まで通り）
+      why: ['time', 'boss', 'wipe'].includes(m.why) ? m.why : 'score',
       next: typeof m.next === 'number' ? m.next : 0,
       /* 稼いだコインと残高。**数でなければ通さない。**
          ログインしていない人・台帳を持たないサーバーでは届かないので、
@@ -458,6 +465,12 @@ export class NetClient {
     const snap = { time, tick: m.tk | 0, ack: typeof m.ack === 'number' ? m.ack : -1, players };
     this._snaps.push(snap);
     while (this._snaps.length > SNAP_KEEP) this._snaps.shift();
+
+    /* 協力プレイのモンスター。最新の1枚だけ持つ（補間はremoteMonsters.js側が
+       「今の絵から届いた位置へ寄せる」形でやるので、2枚持つ必要が無い）。
+       msが無い遊び方では触らない（前の試合のモンスターを持ち越さないよう、
+       無い電文が来たら空にする） */
+    this.monsters = Array.isArray(m.ms) ? m.ms.map(unpackMonster) : EMPTY_MONSTERS;
 
     this._reconcile(snap);
     this._emit(this.onSnapshot, m);

@@ -74,6 +74,9 @@ export function buildWorld(mapId = 'urban') {
     // 2対2の湧き地点。味方2人が並んで出る4箇所（席番号でそのまま引く）
     teamSpawns: level.teamSpawns,
     enemySpawns: level.enemySpawns,
+    // 協力プレイのモンスターAIが「撃たれたら隠れる」に使う遮蔽物リスト。
+    // 1人用のEnemyと同じクラスをサーバーで動かすので、同じ物を見せる
+    coverPoints: level.coverPoints,
     stats,
   };
   cached.set(mapId, world);
