@@ -262,25 +262,7 @@ const SHAPE_LOOK = {
       steel: { color: 0x8a7a66, wear: { color: 0xd8c8aa } },
     },
   },
-  shark: {
-    note: '銃口の顎と歯、鰓の切れ込み、背と胸の鰭。青灰の背と白い腹',
-    swatch: '#4a5c6a',
-    /* ウエスタン（焦茶＋真鍮）に対して、こちらは**青灰。**
-       **腹の白は塗りでは出せない**（塗り替えは材質ごとにしか効かないので、
-       上下の塗り分けが作れない）。腹の板を飾り側(sharkDeco)が持っていて、
-       ここが塗るのは背の側だけ。
-
-       鰭と顎に anodized を使ってあるので、ここで anodized を青灰にすると
-       **鰭も一緒に染まる**（材質を増やさずに背の色が乗る） */
-    over: {
-      enamel: { color: 0x2e3a44, wear: { color: 0x6a8090, amount: 0.9 } },
-      anodized: { color: 0x4a5c6a, wear: { color: 0x8aa4b4, amount: 0.8 } },
-      polymer: { color: 0x36444e, wear: { color: 0x6e8492 } },
-      phosphate: { color: 0x28323a, wear: { color: 0x62788a } },
-      // 地金は濡れた鮫肌の照り。青を残したまま明るくする
-      steel: { color: 0x8ea4b2, wear: { color: 0xd4e2ea } },
-    },
-  },
+  // **サメは2026-08-14に消した**（経緯は protocol.js の SHAPE_LIST）
 
   ice: {
     note: '霜の結晶と氷輪、銃口から垂れる氷柱。白と薄氷の青',

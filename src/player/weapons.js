@@ -828,15 +828,9 @@ export const MATS = {
        暗い当て板    … cyberShell（サイバーの筐体）
      材質を1つ増やすと描画呼び出しが1回増えるので、色が近い物は分けない */
 
-  /* サメ（ショットガン）の腹の白。
-     **背と腹を塗り分けるには、これを材質として持つしかない。**
-     スキンの塗り替えは材質ごとにしか効かないので（部品ごとの模様は作れない）、
-     「上が青灰・下が白」は塗りでは出せない。
-     腹の板を飾りとして足して、そこだけ白い材質にする。
-     歯と顎は bone（ドラゴンの牙）、鰭と鰓は anodized/enamel を使い回す
-     ——あちらは塗りで青灰に染まるので、材質を増やさずに背の色が乗る */
-  sharkBelly: mat(0xdcd8cc, 0.0, 0.58, SURF_POLYMER, 5, 0.8, null,
-    { amount: 0.35, color: 0xf0ece0, metal: 0.0, rough: 0.50, dust: 0.10 }),
+  /* **sharkBelly（サメの腹の白）は2026-08-14にサメごと消した。**
+     「背と腹の塗り分けは、塗りでは出せないので白い材質を1つ持つ」という手は、
+     また使う時のために書き残しておく（塗り替えは材質ごとにしか効かない） */
 
   /* ヴェノム（狙撃銃）。鱗。**黄緑は彩度を上げすぎると玩具になる**ので、
      緑を黄へ寄せたうえで暗く保つ。光るのは下のvenomGlowだけ */
@@ -3015,70 +3009,9 @@ function westernDeco(g) {
   g.add(part(torG(0.0250, 0.0030, 5, 14), MATS.engrave, 0, 0.022, -0.548));
 }
 
-/* ショットガンのサメ。**ウエスタンと系統を正面から分ける**（手入れされた木と真鍮 ↔ 生き物）。
- *
- * **一番気を付けたのは照準線。** この銃はゴーストリング(z=0.100)から
- * 銃口のビード(z=-0.548)へ、高さ SY=0.054 で線が通っている。
- * 背鰭を立てたくなる所が全部その線の上なので、**鰭は線の下に収める。**
- * 頂点を0.050で止めてあるのはそのため（それ以上上げると覗いた時にビードが消える）。
- *
- * 動く部品と消える部品の扱いはウエスタンと同じ（westernDecoの上のコメント参照）。
- * 尾鰭だけは銃床(rear)へ入れる——構えると消えるが、
- * **あれは目の後ろに来る部品なので、消えて正しい。**
- */
-function sharkDeco(g) {
-  const rear = g.userData.rear;
-  const B = 0.022;   // 銃身の芯（buildShotgunと同じ値）
-
-  /* ---- 銃口の顎と歯。**上顎は y=0.044 で止める**（照準線が0.054）。
-     歯は内側へ向ける。外へ向けると牙が生えているだけで、噛む口に見えない */
-  for (const s of [1, -1]) {
-    // 顎の板
-    g.add(part(cboxG(0.046, 0.010, 0.058), MATS.anodized, 0, B + s * 0.020, -0.556, s * 0.16));
-    // 歯。4本ずつ。**上は下向き(rx=π)、下は上向き**
-    for (let i = 0; i < 4; i++) {
-      const x = -0.0165 + i * 0.011;
-      g.add(part(cylG(0, 0.0042, 0.016, 5), MATS.bone,
-        x, B + s * 0.014, -0.556, s > 0 ? Math.PI : 0));
-    }
-  }
-
-  /* ---- 鰓の切れ込み。機関部の側面に3本ずつ、斜めに入れる。
-     **垂直に入れると滑り止めの溝に見える**ので、必ず傾ける */
-  for (const s of [1, -1]) {
-    for (let i = 0; i < 3; i++) {
-      g.add(part(boxG(0.002, 0.032, 0.005), MATS.enamel,
-        s * 0.0258, 0.000, -0.060 + i * 0.018, 0, 0, 0.30));
-    }
-  }
-
-  /* ---- 背鰭。**照準線の下に収める。**
-     銃身の上(y=0.039)から0.054(SY)までの0.015しか使えないので、低く広い鰭にする。
-     放熱筒(z -0.530〜-0.300)に隠れない所へ置く。
-
-     **回転を入れないこと。** 最初 rz=π/2 を入れて円錐を横に倒したら、
-     半径0.024がYへ効いて頂点が0.068まで伸び、**照準線を塞いだ**
-     （測って気づいた。tools/check-scope.mjsの[2.6]がそこを見張る）。
-     cylG(0, r, h, 3) は回さなければ「上を向いた三角錐」で、高さがhに収まる */
-  g.add(part(cylG(0, 0.018, 0.010, 3), MATS.anodized, 0, 0.042, -0.200));
-  // 胸鰭。機関部の下、左右へ張り出す。ここは高さの制約が無い
-  for (const s of [1, -1]) {
-    g.add(part(cboxG(0.030, 0.005, 0.038), MATS.anodized,
-      s * 0.030, -0.026, -0.030, 0, 0, s * 0.34));
-  }
-
-  /* ---- 腹の白。**下から見た時に別の色であること**が鮫の塗り分けの要。
-     弾倉チューブの下(y=-0.010)と機関部の下(y=-0.032)へ板を貼る */
-  g.add(part(cboxG(0.026, 0.006, 0.300), MATS.sharkBelly, 0, -0.020, -0.300));
-  g.add(part(cboxG(0.042, 0.006, 0.170), MATS.sharkBelly, 0, -0.034, -0.020));
-
-  /* ---- 尾鰭。**銃床へ入れる**（構えると一緒に消える。目の後ろの部品なので正しい）。
-     上下に開いた二股。鮫の尾は上が長い */
-  if (rear) {
-    rear.add(part(cboxG(0.006, 0.070, 0.046), MATS.anodized, 0, 0.036, 0.318, 0.34));
-    rear.add(part(cboxG(0.006, 0.048, 0.038), MATS.anodized, 0, -0.038, 0.316, -0.30));
-  }
-}
+/* **サメ(sharkDeco)は2026-08-14に消した。**「ソードオフ以外いけてない。
+   特にサメはいらない」と言われた（品揃え側の経緯は protocol.js の SHAPE_LIST）。
+   照準線の下に鰭を収める等の工夫は westernDeco と check-scope.mjs の[2.6]に残っている */
 
 /* 狙撃銃のアイス。
  *
@@ -4992,7 +4925,6 @@ export const SHAPE_BUILDS = {
   armor: (view = {}) => buildRifle(view, armorDeco),
   sakura: (view = {}) => buildRifle(view, sakuraDeco),
   western: (view = {}) => buildShotgun(view, westernDeco),
-  shark: (view = {}) => buildShotgun(view, sharkDeco),
   ice: (view = {}) => buildSniper(view, iceDeco),
   cyber: (view = {}) => buildPistol(view, cyberDeco),
   venom: (view = {}) => buildSniper(view, venomDeco),
@@ -6008,6 +5940,9 @@ export class WeaponSystem {
     this._ejectDelay = -1;
     this._ejectPos = new THREE.Vector3();
     this._ejectDir = new THREE.Vector3();
+    // リボルバーの装填の振り出し（空薬莢をまとめて捨てる）。仕組みは上と同じ自前タイマー
+    this._dumpDelay = -1;
+    this._dumpCount = 0;
 
     // 環境を照らす発砲光。これがあると夜でなくても迫力が出る
     this.muzzleLight = new THREE.PointLight(0xffb060, 0, 14, 2);
@@ -6050,6 +5985,8 @@ export class WeaponSystem {
     this.onShot = null;
     this.onSound = null;
     this.onEject = null;
+    // リボルバーの装填で空薬莢をまとめて捨てる時。(位置, 発数)で呼ぶ
+    this.onEjectDump = null;
   }
 
   /**
@@ -6205,6 +6142,8 @@ export class WeaponSystem {
     if (this.switching > 0) return false;
     this.reloading = 0;
     this.shellReload = false;
+    // 装填ごと止めるので、予約してあった弾倉の振り出しも止める
+    this._dumpDelay = -1;
     this._shellLower = 0;
     this.switching = 0.42;
     // 持ち替えを跨いで前の武器の状態を残さない。
@@ -6425,6 +6364,14 @@ export class WeaponSystem {
     if (w.ammo >= w.def.mag || w.reserve <= 0) return false;
     this.shellReload = w.def.reloadKind === 'shell';
     this.reloading = this.shellReload ? w.def.shellTime : w.def.reloadTime;
+    /* リボルバーは装填の頭で弾倉を振り出して、空薬莢をまとめて捨てる。
+       放る瞬間は左手が弾倉に届く時（工程表PATH_TACのmag到達＝装填の0.40）に合わせる。
+       数は撃った発数ぶん。ただし6発で頭打ち
+       （弾倉の見た目が6室なので、7発以上こぼれると弾倉より多く出たことになる） */
+    if (!this.shellReload && w.shapeId === 'revolver') {
+      this._dumpCount = Math.min(w.def.mag - w.ammo, 6);
+      this._dumpDelay = w.def.reloadTime * 0.40;
+    }
     return true;
   }
 
@@ -6521,6 +6468,20 @@ export class WeaponSystem {
       if (this._ejectDelay <= 0) {
         this._ejectDelay = -1;
         this.onEject?.(this._ejectPos, this._ejectDir);
+      }
+    }
+
+    /* ---------------------------- リボルバーの装填、弾倉の振り出し */
+    if (this._dumpDelay >= 0) {
+      this._dumpDelay -= dt;
+      if (this._dumpDelay <= 0) {
+        this._dumpDelay = -1;
+        // 装填がまだ続いている時だけ。死んで湧き直した後などに宙で出さない。
+        // 位置は予約時でなくこの瞬間に取る（0.6秒の間に体ごと動いているので）
+        if (this.reloading > 0 && this.current.parts.eject) {
+          const pos = this._viewToWorld(this.current.parts.eject.getWorldPosition(_v3));
+          this.onEjectDump?.(pos, this._dumpCount);
+        }
       }
     }
 
@@ -7593,6 +7554,7 @@ export class WeaponSystem {
     this.magWob = 0; this.magWobV = 0;
     this.trigT = 0; this.trigTarget = 0;
     this._ejectDelay = -1;
+    this._dumpDelay = -1;
     this.flashTimer = 0;
     this.smokeTimer = 0;
     this.muzzleLight.intensity = 0;

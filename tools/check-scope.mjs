@@ -228,7 +228,8 @@ console.log('\n[2.6] ショットガンの照準線が飾りで塞がれてい�
   };
   const plain = blockers(def.build);
   ok(plain.length === 0, `素のままで線を塞ぐ物は無い（${plain.length}個）`);
-  for (const [name, id] of [['ウエスタン', 'western'], ['サメ', 'shark']]) {
+  // サメも見ていたが、2026-08-14にスキンごと消した（経緯は protocol.js の SHAPE_LIST）
+  for (const [name, id] of [['ウエスタン', 'western']]) {
     const got = blockers(SHAPE_BUILDS[id]);
     ok(got.length === 0,
       `${name} … 線を塞いでいない（${got.length}個`

@@ -466,6 +466,24 @@ export const STEPS = [
                 earned = wallets.earned + 1100,
                 updated_at = now()`,
   },
+  {
+    n: 20,
+    name: 'サメ（ショットガンの形違い）を消して返金する',
+    /* 2026-08-14。「ショットガンはソードオフ以外いけてない。
+       特にサメはいらないから削除でいい」と言われた。
+       顎と歯と鰭で「噛みつく銃」を狙った物だが、届いていなかった。
+
+       12〜16番と同じやり方（払った額を返してから消す） */
+    sql: `UPDATE wallets w
+             SET coins = w.coins + r.back, updated_at = now()
+            FROM (SELECT user_id, SUM(price) AS back
+                    FROM owned_skins
+                   WHERE sku = 'shotgun:shark'
+                GROUP BY user_id) r
+           WHERE w.user_id = r.user_id;
+      DELETE FROM owned_skins    WHERE sku = 'shotgun:shark';
+      DELETE FROM equipped_skins WHERE skin_id = 'shark'`,
+  },
   // 現金を入れる時の明細(ledger)はここへ足す。上の11には二度と触らない
 ];
 
