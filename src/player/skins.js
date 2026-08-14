@@ -454,6 +454,36 @@ const SHAPE_LOOK = {
     },
   },
 
+  /* ---- 2026-08-15に足したショットガンの2つ（経緯は protocol.js の SHAPE_LIST） */
+  lever: {
+    note: '機関部の下の輪っか、露出した撃鉄、青光りする鋼とまっすぐな木の銃床',
+    swatch: '#2c3a48',
+    /* **青光りする鋼（ブルーイング）。** 同じ「昔の銃の木と金属」でも、
+       ウエスタンは真鍮の暖色、ソードオフは傷んだ黒鉄なので、
+       ここは**青へ振った鋼**で3本を分ける。木は赤みの胡桃で鋼の青と対にする */
+    over: {
+      enamel: { color: 0x232e3a, metalness: 0.6, roughness: 0.30, wear: { color: 0x6e8296, amount: 0.8 } },
+      phosphate: { color: 0x1e2832, wear: { color: 0x64788c } },
+      polymer: { color: 0x28303a, wear: { color: 0x5e7080 } },
+      walnut: { color: 0x58301c, wear: { color: 0xa06438, dust: 0.10 } },
+      steel: { color: 0x8ea0b2, wear: { color: 0xd8e4ee } },
+      brass: { color: 0xa08038, wear: { color: 0xd4b468 } },
+    },
+  },
+  drum: {
+    note: '太鼓型の弾倉、天面のレール、マズルブレーキ。つや消しの軍用樹脂',
+    swatch: '#4a5240',
+    /* **暗いオリーブ。** 棚で唯一の現代の軍用なので、色も唯一の軍色にする。
+       ヴェノム（狙撃銃の黄緑）と被らないよう、彩度を落として灰へ寄せる */
+    over: {
+      polymer: { color: 0x3c4434, roughness: 0.52, wear: { color: 0x78806a, dust: 0.14 } },
+      phosphate: { color: 0x2e3428, wear: { color: 0x6a7258 } },
+      enamel: { color: 0x33392c, wear: { color: 0x707862 } },
+      steel: { color: 0x7a8270, wear: { color: 0xbcc4ae } },
+      rubber: { color: 0x2a2e24, wear: { color: 0x565c4a } },
+    },
+  },
+
   cute: {
     note: '猫耳・丸めた角・パステルの縞・星のチャーム',
     swatch: '#d98aa6',

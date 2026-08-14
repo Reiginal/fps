@@ -563,6 +563,31 @@ export const SHAPE_GUN = {
     subVol: 0.80, subTime: 0.34, subDelay: 0.02,
   },
 
+  /* ---- 2026-08-15に足した2つ（経緯は protocol.js の SHAPE_LIST）。
+     ショットガンの棚は 元(胴380・破裂2600・尾0.70)／ウエスタン(240・2000・0.92)／
+     ソードオフ(240・2100・0.22) で、破裂が2000〜2600に固まっている。
+     なので1本は上（3400）、1本は下（1400）へ出して帯を割る */
+
+  /* レバーアクション。**乾いた鋭い1発。**
+     裸の銃身は放熱筒もガスの逃げも無いので、前へ抜ける音が素直に高く出る。
+     破裂を棚で一番高く、尾は鋼の機関部が短く鳴る程度に残す */
+  lever: {
+    volume: 0.94, bodyFreq: 340, crackFreq: 3400,
+    bodyDecay: 0.18, tailDecay: 0.55, tailVol: 0.36, crackVol: 1.00,
+    thumpFrom: 150, thumpTo: 40, thumpTime: 0.20,
+    subVol: 0.50, subTime: 0.24, subDelay: 0.02,
+  },
+
+  /* ドラム。**低く籠もる腹。**
+     マズルブレーキが横へ抜くので前への破裂は弱く、
+     樹脂の塊は高い所を吸う。破裂を棚で一番低く、腹に来る低音を一番厚く */
+  drum: {
+    volume: 0.96, bodyFreq: 250, crackFreq: 1400,
+    bodyDecay: 0.26, tailDecay: 0.48, tailVol: 0.40, crackVol: 0.55,
+    thumpFrom: 140, thumpTo: 28, thumpTime: 0.26,
+    subVol: 0.72, subTime: 0.30, subDelay: 0.02,
+  },
+
 };
 
 /** その形の銃声。形が無ければ元の武器の音をそのまま返す */
