@@ -40,6 +40,7 @@ import { PerfMeter } from './ui/perfmeter.js';
 import { CharView } from './ui/charview.js';
 import { NetClient } from './net/client.js';
 import { RemotePlayers } from './net/remote.js';
+import { RemoteMonsters } from './net/remoteMonsters.js';
 import { preloadCharModel, SOLO_MODEL } from './ai/glbchar.js';
 import { FarShadowGate } from './world/shadowgate.js';
 import {
@@ -1813,6 +1814,8 @@ class Game {
     this.net = net;
     this.mode = 'versus';
     this.remotes = new RemotePlayers(this.scene, this.level);
+    // 協力プレイのモンスター描き。coop以外の遊び方ではmsが空なので何も出ない
+    this.remoteMonsters = new RemoteMonsters(this.scene);
     /* 今このとき地面に落ちている物。**置いた時の1回しか配られない**ので、
        途中から入った時はお迎えの電文で受け取らないと、拾える物が見えないまま
        「近づいたら何か起きた」になる */
@@ -1985,6 +1988,8 @@ class Game {
     this._updateVoiceHud();
     this.remotes?.dispose();
     this.remotes = null;
+    this.remoteMonsters?.dispose();
+    this.remoteMonsters = null;
     this._lastStates = null;
     this._lastFireAt.clear();
     this._lobbyIds = null;
@@ -2010,14 +2015,16 @@ class Game {
     this.menu.setBusy(false);
   }
 
-  _onMatchEnd({ rows, got, coins }) {
+  _onMatchEnd({ rows, why, got, coins }) {
     // 通算へ流し込む区切り。順位はラウンド取得数→撃破数の順で並ぶので、
     // 先頭が自分なら勝ち。**hud側の並べ方と同じ順にする**
     // （別々に並べると、画面では1位なのに勝ちが増えない、が起きる）
     const rank = (rows || []).slice()
       .sort((a, b) => ((b.rounds | 0) - (a.rounds | 0)) || ((b.kills | 0) - (a.kills | 0)));
     this._tally('matches');
-    if (rank[0]?.me) this._tally('wins');
+    // 協力プレイの勝ち負けはチーム全員で同じ（ボスを倒したら全員の勝ち）
+    const coop = why === 'boss' || why === 'wipe';
+    if (coop ? why === 'boss' : rank[0]?.me) this._tally('wins');
     this._checkAchievements();
     // 重さの報告は_flushStatsの中で送られる（先に送ってから標本を捨てる順）
     this._flushStats();
@@ -2026,7 +2033,9 @@ class Game {
        貯まらない理由がログインだと分からないまま「壊れている」に見える）。
        ホームの残高もここで合わせておく。次に開いた時に古い数字が出ていると、
        増えたのか増えていないのかが読めない */
-    let note = `${MATCH.ROUND_WINS}本先取で決着`;
+    let note = why === 'boss' ? 'ボスを倒した — チームの勝ち'
+      : why === 'wipe' ? '全滅 — モンスターの勝ち'
+        : `${MATCH.ROUND_WINS}本先取で決着`;
     if (typeof got === 'number' && got > 0) {
       note += `　＋${got}コイン（ぜんぶで${(coins ?? 0).toLocaleString()}枚）`;
       this.account?.setCoins(coins);
@@ -3072,15 +3081,20 @@ class Game {
         // 普通の撃破と同じ行にすると「Xを倒したのはX」という行が流れる
         // 1対1のラウンド制なので、誰かが倒れた時点でそのラウンドは決まる。
         // 「戦死」だけ出すと、それで1本落としたのかどうかが画面から読めない
-        if (ev.z || ev.f) {
-          // 戦域の外・落下で力尽きた回も戦死は戦死。連続撃破もここで切れる
+        if (ev.z || ev.f || ev.m) {
+          // 戦域の外・落下・モンスターで力尽きた回も戦死は戦死。連続撃破もここで切れる
           if (ev.id === me) { this._tally('deaths'); this.streak = 0; }
-          const why = ev.z ? '戦域の外' : '落下';
+          const why = ev.z ? '戦域の外' : ev.m ? 'モンスター' : '落下';
           this.hud.kill(`${net.nameOf(ev.id)}が${why}で力尽きた`, false);
-          this.hud.banner(
-            ev.id === me ? 'ラウンドを落とした' : 'ラウンド取得',
-            ev.id === me ? `${why}で力尽きた` : `相手が${why}で力尽きた`, 1.8,
-          );
+          // 協力プレイはラウンドの取り合いではないので、ラウンドの垂れ幕は出さない
+          if (!ev.m) {
+            this.hud.banner(
+              ev.id === me ? 'ラウンドを落とした' : 'ラウンド取得',
+              ev.id === me ? `${why}で力尽きた` : `相手が${why}で力尽きた`, 1.8,
+            );
+          } else if (ev.id === me) {
+            this.hud.banner('倒れた', '味方が生きていれば数秒で戻れる', 1.8);
+          }
           break;
         }
         const head = !!ev.head;
@@ -3244,6 +3258,62 @@ class Game {
         }
         // 相手の弾道もここで引く（発射の電文には向きが無いので、着弾から逆に描く）
         this._remoteTracer(ev.by, this._evPos);
+        break;
+      }
+
+      /* ---------------- ここから協力プレイ（対モンスター） ---------------- */
+
+      case EV.MSPAWN:
+        this.remoteMonsters?.spawn(ev.mid, ev.kind, ev.scale, ev.p);
+        break;
+
+      case EV.MHIT: {
+        // 自分が当てた時の手応えは対人のHITと同じにする
+        if (ev.by === me) {
+          this.shotsHit++; this._tally('hits');
+          const head = ev.part === PART.HEAD;
+          this.hud.hitmarker(head);
+          this.audio.hitmarker(head);
+        }
+        if (this._vecOf(this._evPos, ev.p)) {
+          this._evNormal.subVectors(this.camera.position, this._evPos).normalize();
+          this.effects.impact(this._evPos, this._evNormal, 'flesh');
+        }
+        break;
+      }
+
+      case EV.MKILL: {
+        this.remoteMonsters?.kill(ev.mid);
+        const r = this.remoteMonsters?.get(ev.mid);
+        this.audio.death(r?.headPos ?? this.camera.position, this.camera);
+        if (ev.by === me) {
+          this.kills++;
+          this._tally('kills');
+          this.streak++;
+          this._tallyBest('bestStreak', this.streak);
+          if (ev.head) { this.headshots++; this._tally('headshots'); }
+          this.audio.kill(!!ev.head);
+          this.hud.elim('モンスター', !!ev.head);
+        }
+        break;
+      }
+
+      case EV.MFIRE: {
+        const r = this.remoteMonsters?.get(ev.mid);
+        if (!r) break;
+        this.audio.gunshot(
+          { volume: 0.55, bodyFreq: 300, crackFreq: 2400, bodyDecay: 0.18, tailDecay: 0.32, thumpFrom: 95, thumpTo: 40 },
+          r.headPos, this.camera,
+        );
+        break;
+      }
+
+      case EV.WAVE: {
+        const boss = !!ev.boss;
+        this.hud.banner(
+          boss ? 'ボスが来る' : `第${ev.n}波`,
+          boss ? '大物を全員で削り切れ' : `全${ev.of}波`, 2.2,
+        );
         break;
       }
 
@@ -3475,6 +3545,11 @@ class Game {
     for (const [id, row] of net.players) this._charMap.set(id, row.chr | 0);
     this.remotes.setChars(this._charMap);
     this.remotes.sync(states, net.id, this.camera.position);
+    // 協力プレイのモンスター。coop以外ではnet.monstersが空なので実質何もしない
+    if (this.remoteMonsters) {
+      this.remoteMonsters.sync(net.monsters);
+      this.remoteMonsters.update(dt);
+    }
     this._updatePlates(states);
 
     this.effects.update(dt, this.camera);

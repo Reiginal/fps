@@ -144,9 +144,40 @@ const teamplay = {
   onKill: () => 'none',
 };
 
+/* ---------------------------------------------------------- 協力 */
+
+// 席に着いた全員（最大4人）が1つのチームで、モンスターの波を凌ぐ。
+// 「波を全部凌いでボスを倒したら勝ち／全員が同時に倒れていたら負け」で、
+// その判定はRoom側の協力プレイ専用の進行（monsters.js）が持つ。
+//
+// rounds:false … 対人の「最後の1人」判定(_checkRoundOver)を素通しで無効化する。
+//   倒れた人は数秒で生き返って続く（ガンゲームと同じ道）
+// teams:true  … teamOf/_sameTeamがそのまま「全員味方」を返すようにするための印。
+//   ただし席割り(TEAM_OF_SEAT)だと左右で敵同士になるので、下のteamOfで全員を同じ側に上書きする
+const coop = {
+  id: 'coop',
+  rounds: false,
+  // 3分の時計で仕切り直す相手が居ない（決着は「ボスを倒す」か「全員が倒れる」だけ）。
+  // ガンゲームと同じ理由で時計を切る
+  timed: false,
+  nadeLimit: true,
+  carryFor: (weapons) => loadoutOf(weapons),
+  stagesOf: () => 1,
+  // モンスターは武器を落とさない（人ではないので持ち物の絵が無い）。
+  // 倒れた味方の武器も落とさない（拾い合いより復活で戻る方が協力の形に合う）
+  drops: false,
+  teams: true,
+  // 席に関係なく全員が同じチーム。これが無いとTEAM_OF_SEATで左右に割れて、
+  // 左の2人と右の2人が互いに撃てるままになる
+  teamOf: () => 't0',
+  onKill: () => 'none',
+  // 協力プレイの印。Room側はこれを見て戦域(_zone)を切り、モンスターを湧かせる
+  coop: true,
+};
+
 /* ------------------------------------------------------------ 表 */
 
-const TABLE = { dm: deathmatch, gun: gungame, team: teamplay };
+const TABLE = { dm: deathmatch, gun: gungame, team: teamplay, coop };
 
 /** 知らないidが来たらデスマッチへ寄せる（部屋が止まるより寄せたほうがまし） */
 export const modeOf = (id) => TABLE[id] || TABLE.dm;

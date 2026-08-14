@@ -51,7 +51,8 @@ const _pose = { thigh: 0, knee: 0, ankle: 0, abduct: 0 };
    fwdが進行方向の前後成分、strafeが横成分、sideが脚の左右(+1が右脚)。
    横へ動いているのに前後のストライドを打つと足が地面を擦る（ムーンウォーク）ので、
    前後幅をfwdで潰したぶんを外転へ振り替える */
-function legPose(t, amp, run, out, fwd, strafe, side) {
+// remoteMonsters.jsも同じ歩様を使う（脚の組み立てはプレイヤーもモンスターも同じ骨）
+export function legPose(t, amp, run, out, fwd, strafe, side) {
   const sn = Math.sin(t), cs = Math.cos(t);
   const stride = (0.50 + run * 0.42) * amp;
   // 静止時も膝は伸ばし切らない。伸ばすと台に刺したフィギュアになる
