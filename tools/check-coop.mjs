@@ -348,25 +348,53 @@ console.log('\n[11] 火を吐く個体は、視線が通らない時に前へ出
 }
 
 console.log('\n[12] ボスは技を一通り出す');
+/* **平らな地面の上で測る。** 市街地の上でやると、中央の掩体で視線が切れて
+   突進(視線が要る)と火の玉(視線が要る)が条件に入らず、
+   「技が出ない」のか「そこへ行けない」のかが区別できない。
+   そこへ行けるかは[8]と[9]が別に見ているので、ここは技の選び方だけを測る */
 {
-  const lvl = { octree: world.octree, bounds: world.bounds, enemySpawns: world.enemySpawns };
+  const { Octree } = await import('three/addons/math/Octree.js');
+  const flat = new THREE.Mesh(new THREE.BoxGeometry(160, 1, 160));
+  flat.position.set(0, -0.5, 0);
+  flat.updateMatrixWorld(true);
+  const g = new THREE.Group();
+  g.add(flat);
+  const lvl = { octree: new Octree().fromGraphNode(g), bounds: 70, enemySpawns: [new THREE.Vector3(0, 0.1, 0)] };
+
   const boss = new Monster(lvl, 'boss', { visual: false });
-  boss.spawn(new THREE.Vector3(0, 0.1, 14));
-  const target = { pos: new THREE.Vector3(0, 0.94, 6), eyeY: 1.6, alive: true };
+  boss.spawn(new THREE.Vector3(0, 0.1, 0));
+  const target = { pos: new THREE.Vector3(0, 0.94, 8), eyeY: 1.6, alive: true };
   const seen = new Set();
-  let swings = 0, stomps = 0, roars = 0;
+  let swings = 0, stomps = 0, roars = 0, spits = 0;
   boss.onMelee = () => { swings++; };
   boss.onStomp = () => { stomps++; };
   boss.onRoar = () => { roars++; };
-  for (let i = 0; i < 60 * 60; i++) {
+  boss.onSpit = () => { spits++; };
+  /* **相手を近づけたり離したりする。** 技は間合いで選ばれるので、
+     1つの距離に置きっぱなしだと片方しか出ない
+     （爪は4.6m以内、突進は7.4〜26m、火の玉は10m以上）。
+     実際の試合でも、引きつける人と離れて撃つ人が同時にいる */
+  for (let i = 0; i < 60 * 120; i++) {
+    // 12秒ごとに、爪の間合いと遠間を行き来させる（ボスの位置から測って置く）
+    const near = Math.floor(i / (60 * 12)) % 2 === 0;
+    const want = near ? 3.0 : 17.0;
+    const dx = target.pos.x - boss.collider.start.x;
+    const dz = target.pos.z - boss.collider.start.z;
+    const d = Math.hypot(dx, dz) || 1;
+    target.pos.set(boss.collider.start.x + (dx / d) * want, 0.94, boss.collider.start.z + (dz / d) * want);
     boss.update(1 / 60, target, { others: [] });
     seen.add(boss.state);
   }
   ok(swings > 0, `爪を振る（${swings}回）`);
   ok(stomps > 0, `踏みつける（${stomps}回）`);
   ok(roars > 0, `咆哮する（${roars}回）`);
+  ok(spits > 0, `離れた相手には火の玉を吐く（${spits}回）`);
   ok(seen.has(MSTATE.CHARGE), '突進もする');
   ok(seen.has(MSTATE.WINDUP), '殴る前に必ず溜めがある（避けられる）');
+  /* **殴った後は一度離れる。** ここが効いていないと、爪の間合いに張り付いて
+     突進も火の玉も一生出ないボスになる（実際そうなっていた） */
+  ok(seen.has(MSTATE.SPIT) && seen.has(MSTATE.STOMP) && seen.has(MSTATE.ROAR),
+    '技の状態が電文に乗る（クライアントが姿勢を作れる）');
 }
 
 console.log('\n[13] サーバーは見た目を組まない（軽さ）');

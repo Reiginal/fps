@@ -82,6 +82,8 @@ export const MONSTER_KINDS = {
     ranged: {
       damage: 16, min: 6, max: 26, windup: 0.85, cooldown: 2.4,
       speed: 26, radius: 0.55, splash: 2.6,
+      // 近づかれたら下がる。**この個体は距離で戦う**ので、詰められたら困る側
+      keepAway: true,
     },
     // 腹が膨れていて背が高い。口が大きい
     shape: { crouch: 0.10, headScale: 1.30, armLen: 0.80, tail: 0.85, belly: 1.30, horn: 0 },
@@ -91,11 +93,31 @@ export const MONSTER_KINDS = {
      背中のコブが弱点で、そこだけ3倍入る（下のHIT.WEAK_MUL）。
      引きつける人と背後へ回る人が要る、というのがこの試合の山場 */
   boss: {
-    scale: 2.75, health: 2600, speed: 3.1, radius: 1.05,
+    /* radiusは**歩く時の芯の太さだけ**（弾の当たり所は下のHIT表から出るので、
+       ここを細くしても撃ちやすさは変わらない）。
+       見た目通りの1.05m（差し渡し2.1m）にしていた頃は、実測で
+       **湧き地点14箇所のうち爪が届いたのは4箇所**しかなかった——
+       路地にも門にも引っかかって、町の中をほとんど歩けていない。
+       0.78なら江戸の門(5.0m)も町屋の戸(2.2m)も通る。
+       体の見た目が少し壁へめり込むが、来ないボスよりはるかにまし */
+    scale: 2.75, health: 2600, speed: 3.1, radius: 0.78,
+    /* 歩く時の背丈。**見た目(4.5m)より低くする。**
+       素直に4.5mのカプセルで歩かせると、庇も門も鳥居も全部つかえて、
+       建物の近くに立っている人には永久に届かない（実測で8m手前が限界だった）。
+       当たり判定のカプセルは「体が通るか」だけを決める物で、
+       弾の当たり所は別（下のHIT表）なので、ここを下げても撃ちやすさは変わらない。
+       角と頭が庇を突き抜けて見える回があるが、来ないボスよりはるかにまし */
+    colliderH: 0.60,
     melee: { damage: 34, reach: 4.6, windup: 0.62, strike: 0.18, recover: 0.85 },
     ranged: {
       damage: 22, min: 10, max: 34, windup: 1.0, cooldown: 5.0,
       speed: 24, radius: 0.85, splash: 3.4,
+      /* **下がらない。** ボスは爪の方が本命（威力34、間合い4.6m）なので、
+         火の玉は「遠くへ逃げた相手を追い立てる」ためだけに持たせている。
+         ここをtrueにしていた頃は、min(10m)より近づくと必ず後退していて、
+         **爪の間合いまで一度も詰めなかった**（onMeleeが出るのは突進の
+         ぶつかりだけで、溜め→爪の一連が一度も見られない状態だった） */
+      keepAway: false,
     },
     // 技。それぞれ独立した間隔で回る
     charge: { speed: 11.5, windup: 0.75, run: 1.9, damage: 40, cooldown: 9.0, stun: 2.2 },
@@ -584,7 +606,7 @@ export class Monster {
     this.meshes = [];
     if (this.root) this.root.traverse((o) => { if (o.isMesh) this.meshes.push(o); });
 
-    this.height = NOMINAL_H * this.scale;
+    this.height = NOMINAL_H * this.scale * (def.colliderH ?? 1);
     this.radius = def.radius;
     this.collider = new Capsule(new THREE.Vector3(), new THREE.Vector3(), this.radius);
 
@@ -624,6 +646,7 @@ export class Monster {
     this._sideFor = 0;
     this._sideDir = Math.random() < 0.5 ? -1 : 1;
     this._wantHop = false;
+    this._backoff = 0;
 
     // 見た目の姿勢（クライアントもサーバーも同じ変数を持つ。サーバーは骨へ流さない）
     this.mouth = 0;         // 口の開き 0..1
@@ -673,6 +696,7 @@ export class Monster {
     this.rangedCd = this.def.ranged ? Math.random() * 1.2 : 0;
     this._lastPos.copy(this.collider.start);
     this._stuckWin = 0; this._stuckFor = 0; this._sideFor = 0; this._wantHop = false;
+    this._backoff = 0;
     this._syncHitboxes();
     if (this.root) { this.root.visible = true; this.root.rotation.set(0, 0, 0); }
   }
@@ -805,12 +829,24 @@ export class Monster {
        跳べずに終わる。挟まった個体はまさに押し戻されて浮いたり着いたりを
        繰り返しているので、その1回を逃すと「跳ねない個体」が出る */
     if (this._stuckFor >= STUCK.HOP_AT) this._wantHop = true;
-    // 最後は地面へ潜って湧き直す。**倒せない置物として残すよりはまし**
-    if (this._stuckFor >= STUCK.BURROW_AT && this.canBurrow) {
-      const sp = this.level.enemySpawns;
-      if (sp && sp.length) {
-        this.spawn(sp[Math.floor(Math.random() * sp.length)]);
-        this.state = MSTATE.SEEK;
+    if (this._stuckFor >= STUCK.BURROW_AT) {
+      if (this.canBurrow) {
+        // 最後は地面へ潜って湧き直す。**倒せない置物として残すよりはまし**
+        const sp = this.level.enemySpawns;
+        if (sp && sp.length) {
+          this.spawn(sp[Math.floor(Math.random() * sp.length)]);
+          this.state = MSTATE.SEEK;
+        }
+      } else {
+        /* 潜れない個体（ボス）はここで手が無くなる。**実際に詰んだ。**
+           市街地の中央の掩体を挟んで向かい合うと、13mの所で押し戻され続けて
+           一歩も近づけず、視線も通らないので突進も火の玉も条件に入らない
+           ——倒しに来ないうえ何もしないボスになっていた。
+
+           短い横歩き(SIDE_S=1.1秒)では、幅14mの建物は回り切れない。
+           **一方向へ長く走り切る**ことで角を回らせる。相手の方へ寄る力を
+           混ぜないのは、混ぜると建物の壁へ吸い寄せられて元に戻るため */
+        this._sideFor = 4.5;
       }
       this._stuckFor = 0;
     }
@@ -830,6 +866,10 @@ export class Monster {
     this.chargeCd = Math.max(0, this.chargeCd - dt);
     this.stompCd = Math.max(0, this.stompCd - dt);
     this.roarCd = Math.max(0, this.roarCd - dt);
+    /* 間合いの取り直しは**毎ティック減らす。** SEEKの中だけで減らしていた頃は、
+       殴り終わった次のフレームでまた爪の間合いに入って即WINDUPへ行くので、
+       下がる時間が1フレームも取れず、値が2.3のまま止まっていた */
+    this._backoff = Math.max(0, this._backoff - dt);
 
     const tp = target?.pos;
     const dx = tp ? tp.x - this.collider.start.x : 0;
@@ -879,7 +919,7 @@ export class Monster {
           this._chargeYaw = wantYaw;
         } else if (def.roar && this.roarCd <= 0 && dist < 20) {
           this._enter(S.ROAR); this.roarCd = def.roar.cooldown;
-        } else if (dist <= def.melee.reach && this.meleeCd <= 0) {
+        } else if (dist <= def.melee.reach && this.meleeCd <= 0 && this._backoff <= 0) {
           this._enter(S.WINDUP);
         } else if (def.ranged && this.rangedCd <= 0 && this.hasLOS
                    && dist >= def.ranged.min && dist <= def.ranged.max) {
@@ -908,9 +948,13 @@ export class Monster {
            通っていない時に下がると、壁の裏で永久に後退し続けて、
            流用していた頃と同じ「何も起きない試合」に戻る */
         const rg = this.def.ranged;
-        if (rg && this.hasLOS && dist < rg.min) {
+        if (this._backoff > 0) {
+          // 殴った後の間合い取り直し（RECOVERから来る）。少し下がって次の技へ。
+          // 減らすのは上のまとめて減らしている所
+          ux = -tx; uz = -tz; speedMul = 0.85;
+        } else if (rg && rg.keepAway && this.hasLOS && dist < rg.min) {
           ux = -tx; uz = -tz; speedMul = 0.75;
-        } else if (rg && this.hasLOS && dist < rg.max * 0.7) {
+        } else if (rg && rg.keepAway && this.hasLOS && dist < rg.max * 0.7) {
           // 間合いの中。横へ流れながら次の吐きを待つ
           const side = Math.sin(this.jitter) > 0 ? 1 : -1;
           ux = sx * side; uz = sz * side;
@@ -962,6 +1006,20 @@ export class Monster {
         speedMul = 0.35;
         if (this.stateT >= this.def.melee.recover) {
           this.meleeCd = 0.35;
+          /* **殴り終わったら一度離れる。** 遠距離や突進を持っている個体
+             （＝ボス）は、離れないとその技を一生使わない。
+             爪の間合い(4.6m)に張り付いたままだと、突進(7.4m以上)も
+             火の玉(10m以上)も条件に入らないため——実際そうなっていて、
+             onMeleeが出るのは突進のぶつかりだけ、という状態だった。
+             逃げるのではなく「次の技のために間合いを取り直す」動き */
+          if ((this.def.charge && this.chargeCd <= 2.5)
+              || (this.def.ranged && this.rangedCd <= 2.5)) {
+            /* 2.6秒。**次の技が届く所まで下がり切る長さ**で決めてある。
+               速さ3.1×0.85で約7m開くので、爪の間合い(4.6m)から
+               突進の帯(7.4〜26m)と火の玉の下限(10m)の両方に入る。
+               短いと下がりきる前に間合いへ戻ってしまい、技が一度も出ない */
+            this._backoff = 2.6;
+          }
           this._enter(S.SEEK);
         }
         break;
