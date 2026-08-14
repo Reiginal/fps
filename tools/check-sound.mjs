@@ -400,6 +400,7 @@ console.log('\n[4.7] 形スキンの銃声が、見た目の通りに鳴って�
       ['桜', 'sakura', 'キャンディ', 'cute', 'rifle'],
       ['ヴェノム', 'venom', 'アイス', 'ice', 'sniper'],
       ['サイレンサー', 'suppressed', 'サイバー', 'cyber', 'pistol'],
+      ['レバーアクション', 'lever', 'ドラム', 'drum', 'shotgun'],
     ];
     for (const [nA, a, nB, b, weapon] of pairs) {
       const base = GUNS.find((g) => g.id === weapon).sound;

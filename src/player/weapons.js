@@ -4302,6 +4302,276 @@ function buildSawedOff(view = {}) {
   return g;
 }
 
+/* ---------------------------------------------- レバーアクションとドラム
+ *
+ * 2026-08-15に足したショットガンの形違い2つ。サメ（飾りを貼る方向）を消して
+ * 棚が2種類になった所で、「形ごと別の銃」の方向で2本足すことにした
+ * （ソードオフ・リボルバー・ブルパップが刺さって、飾りの方向が全滅した後なので）。
+ *
+ *   レバーアクション … 機関部の下に輪っか。西部劇×アクション映画の銃
+ *   ドラム           … 太鼓型の弾倉。現代の軍用
+ *
+ * どちらも強さは元のショットガンのまま。差は見た目と音だけ。
+ */
+
+/* レバーアクション。**輪っか（レバー）が正体。**
+   構えた画面で常に見える機関部の下の輪郭が変わるのが選んだ理由。
+   装填も実物が1発ずつ側面の口から込める銃なので、
+   今の「1発ずつ7回」の動きと見た目が矛盾しない（ソードオフの時は
+   中折れに合わせて装填口を上へ移す工夫が要った。ここはそのまま合う）。
+
+   レバー自体は動かさない。ポンプ(pump)の仕組みは前後の滑りしか持っておらず、
+   輪っかが滑って動くと「回して装填する銃」に見えない。
+   ソードオフも動く部品は引金だけなので、前例に倣って止めてある */
+function buildLeverShotgun(view = {}) {
+  const g = new THREE.Group();
+  const grip = view.grip || {};
+  const B = 0.022;           // 銃身の芯。元のショットガンと同じ高さ
+  const SY = 0.054;          // 照準線も元と同じ高さに通す
+
+  /* ---- 機関部。**平らな鋼の板。** ポンプ式の角張った箱と違って、
+     レバー銃の機関部は側面がのっぺりした一枚板に見えるのが正しい */
+  g.add(part(cboxG(0.044, 0.060, 0.170), MATS.enamel, 0, 0.002, 0.000));
+  g.add(part(cboxG(0.040, 0.014, 0.150), MATS.enamel, 0, 0.032, 0.000));
+  addStampX(g, 0.0225, -0.004, 0.000, 0.036, 0.020, 3);
+  addStampX(g, -0.0225, -0.004, 0.000, 0.036, 0.020, 3);
+  // 側面の装填口。**ここから1発ずつ込める**（装填の左手はここへ来る）
+  g.add(part(boxG(0.004, 0.018, 0.034), MATS.brass, 0.0225, -0.004, 0.028));
+  // 排莢口は天面。レバー銃は上へ弾を吐く
+  g.add(part(boxG(0.024, 0.004, 0.040), MATS.steel, 0, 0.040, -0.024));
+
+  /* ---- 露出した撃鉄。ソードオフと同じ「昔の銃」の印。照準線より下で止める */
+  g.add(part(cboxG(0.010, 0.024, 0.014), MATS.steel, 0, 0.034, 0.092, 0.42));
+  g.add(part(boxG(0.013, 0.008, 0.010), MATS.knurl, 0, 0.044, 0.097, 0.42));
+
+  /* ---- 銃身と弾倉チューブ。放熱筒は付けない
+     （あれはポンプ式の「装備」の印。昔の銃は銃身が裸で正しい） */
+  g.add(part(cylG(0.0165, 0.0165, 0.430, 20), MATS.phosphate, 0, B, -0.330, Math.PI / 2));
+  g.add(part(cylG(0.0125, 0.0125, 0.410, 18), MATS.steel, 0, -0.008, -0.310, Math.PI / 2));
+  g.add(part(cylG(0.0135, 0.0135, 0.016, 18), MATS.phosphate, 0, -0.008, -0.520, Math.PI / 2));
+  // 銃身とチューブを繋ぐ帯金。2箇所留めると「一体の銃」に見える
+  for (const z of [-0.180, -0.500]) {
+    g.add(part(boxG(0.008, 0.036, 0.010), MATS.steel, 0, 0.006, z));
+  }
+
+  /* ---- 先台。**短い木。** ポンプと違って動かないので、握る所だと分かる長さだけ */
+  g.add(part(cboxG(0.046, 0.036, 0.150), MATS.walnut, 0, B - 0.026, -0.200));
+  g.add(part(cylG(0.0055, 0.0055, 0.048, 10), MATS.brass, 0, B - 0.042, -0.200, 0, 0, Math.PI / 2));
+
+  /* ---- レバーの輪っか。**この銃の一番の見せ場。**
+     機関部の下、引金の後ろへ縦の輪を置く。トリガーガードを兼ねる形にして、
+     別のガードは付けない（輪が2つ並ぶと何の銃か読めなくなる） */
+  g.add(part(torG(0.032, 0.0042, 6, 18), MATS.steel, 0, -0.058, 0.082, 0, Math.PI / 2, 0));
+  // 輪と機関部を繋ぐ柄。宙に浮いた輪はレバーに見えない
+  g.add(part(boxG(0.009, 0.026, 0.014), MATS.steel, 0, -0.036, 0.104));
+
+  /* ---- 引金（動く） */
+  const trg = new THREE.Group();
+  trg.position.set(0, -0.026, 0.072);
+  trg.add(part(boxG(0.007, 0.022, 0.007), MATS.steel, 0, -0.011, -0.004, 0.2));
+  g.add(trg);
+  g.userData.trigger = trg;
+
+  /* ---- 装填用のシェル1発（動く）。元のショットガンと同じ形で持つ */
+  const shell = new THREE.Group();
+  shell.add(part(cylG(0.0098, 0.0098, 0.050, 10), MATS.shell, 0, 0, 0, Math.PI / 2));
+  shell.add(part(cylG(0.0104, 0.0104, 0.014, 10), MATS.brass, 0, 0, 0.024, Math.PI / 2));
+  shell.visible = false;
+  g.add(shell);
+  g.userData.shell = shell;
+
+  /* ---- 銃床。**まっすぐな木。** 樹脂の銃床（元）と質感ごと分ける */
+  const rear = new THREE.Group();
+  rear.add(part(cboxG(0.042, 0.058, 0.070), MATS.enamel, 0, 0, 0.115));
+  rear.add(part(cboxG(0.044, 0.092, 0.180), MATS.walnut, 0, -0.020, 0.235, 0.10));
+  rear.add(part(cboxG(0.048, 0.100, 0.014), MATS.steel, 0, -0.032, 0.318, 0.10));
+  g.add(rear);
+  g.userData.rear = rear;
+
+  /* ---- 照準。後ろはV字の切り欠き、前は真鍮のビーズ。
+     どちらも土台は照準線(SY)より下に置く */
+  g.add(part(boxG(0.022, 0.010, 0.014), MATS.phosphate, 0, 0.040, -0.060));
+  g.add(part(boxG(0.006, 0.010, 0.010), MATS.steel, 0.009, 0.048, -0.060));
+  g.add(part(boxG(0.006, 0.010, 0.010), MATS.steel, -0.009, 0.048, -0.060));
+  g.add(part(boxG(0.012, 0.012, 0.010), MATS.phosphate, 0, 0.030, -0.538));
+  g.add(part(sphG(0.0042), MATS.brass, 0, SY, -0.538));
+
+  const sight = new THREE.Object3D();
+  sight.position.set(0, SY, -0.060);
+  g.add(sight);
+  g.userData.sight = sight;
+  const muzzle = new THREE.Object3D();
+  muzzle.position.set(0, B, -0.548);
+  g.add(muzzle);
+  g.userData.muzzle = muzzle;
+  // 天面排莢なので、出口も上に置く
+  const eject = new THREE.Object3D();
+  eject.position.set(0.010, 0.046, -0.020);
+  g.add(eject);
+  g.userData.eject = eject;
+
+  /* ---- 手。右は機関部の後ろ、左は木の先台。**左は動かない** */
+  const handR = buildHand(1, {
+    gripR: 0.022, wrap: 0.50, trigger: true,
+    armDir: grip.armDir || [0.38, -0.62, 0.94], armLen: 0.62,
+  });
+  handR.position.set(0.008, -0.056, 0.128);
+  handR.rotation.set(-0.32, 0, 0);
+  g.add(handR);
+  g.userData.handR = handR;
+
+  const handL = buildHand(-1, {
+    gripR: 0.026, wrap: 0.70, tip: -0.18, roll: 0.48, skew: 0.22,
+    wrist: [0.046, -0.052, -0.038], armDir: [-0.38, -0.86, -0.80],
+  });
+  handL.position.set(0, -0.012, -0.200);
+  handL.rotation.set(-Math.PI / 2 + 0.08, 0, 0.10);
+  g.add(handL);
+  g.userData.handL = handL;
+
+  g.userData.holdL = {
+    rest: [[0, -0.012, -0.200], [-Math.PI / 2 + 0.08, 0, 0.10]],
+    // 装填口は機関部の右側面。**下（元）でも上（ソードオフ）でもない**
+    mag: [[0.030, -0.040, 0.028], [0.14, 0.32, -0.42]],
+    low: [[0.048, -0.240, 0.070], [0.46, 0.38, -0.38]],
+    charge: [[0, -0.012, -0.200], [-Math.PI / 2 + 0.08, 0, 0.10]],
+  };
+
+  bakeStatic(rear);
+  bakeStatic(trg);
+  bakeStatic(shell);
+  bakeStatic(g);
+  return g;
+}
+
+/* ドラム。**太鼓型の弾倉が正体。** 現代の軍用（AA-12系）。
+   ウエスタン（木と真鍮）・ソードオフ（切った二連）・レバー（昔の鋼と木）が
+   全部「昔の銃」側に居るので、この1本だけ現代へ振って棚の系統を割る。
+
+   装填は元と同じ「1発ずつ7回」。ドラムなのに1発ずつ？と思う所だが、
+   実物のドラム弾倉も弾は口から1発ずつ詰める物なので、
+   **左手がドラムの口へ7回通う**動きにすれば矛盾しない */
+function buildDrumShotgun(view = {}) {
+  const g = new THREE.Group();
+  const grip = view.grip || {};
+  const B = 0.022;
+  const SY = 0.054;
+
+  /* ---- 機関部。**樹脂の塊。** 角を落とした太い箱で、鋼の板（レバー）と正反対 */
+  g.add(part(cboxG(0.054, 0.068, 0.210), MATS.polymer, 0, 0.000, -0.020));
+  // 天面のレール。等間隔の刻みが「現代の軍用」の一番安い記号
+  g.add(part(cboxG(0.036, 0.010, 0.200), MATS.phosphate, 0, 0.040, -0.020));
+  for (let i = 0; i < 6; i++) {
+    g.add(part(boxG(0.038, 0.005, 0.008), MATS.enamel, 0, 0.046, -0.100 + i * 0.032));
+  }
+  // 排莢口。大口径なので大きい
+  g.add(part(boxG(0.005, 0.026, 0.058), MATS.enamel, 0.027, 0.004, -0.020));
+
+  /* ---- 銃身とマズルブレーキ。短く太く。**銃身の裸の長さで昔の銃と分ける** */
+  g.add(part(cylG(0.0170, 0.0170, 0.300, 18), MATS.phosphate, 0, B, -0.270, Math.PI / 2));
+  g.add(part(cylG(0.0240, 0.0240, 0.084, 10), MATS.enamel, 0, B, -0.430, Math.PI / 2, Math.PI / 10));
+  addVentX(g, 0.0228, B, -0.430, 0.0060);
+  addVentX(g, -0.0228, B, -0.430, 0.0060);
+
+  /* ---- ドラム弾倉。**この銃の一番の見せ場。**
+     機関部の下へ太鼓を横向き（軸を左右）に置く。
+     下端は握把より下まで来る——輪郭が縦へ膨らむのが狙いなので、遠慮しない */
+  g.add(part(cylG(0.047, 0.047, 0.054, 18), MATS.polymer, 0, -0.072, -0.010, 0, 0, Math.PI / 2));
+  // 側面の渦の彫り。ただの円柱だと消火器に見える
+  for (const s of [1, -1]) {
+    g.add(part(torG(0.030, 0.0034, 5, 14), MATS.phosphate, s * 0.028, -0.072, -0.010, 0, Math.PI / 2, 0));
+    g.add(part(cylG(0.012, 0.012, 0.006, 12), MATS.phosphate, s * 0.030, -0.072, -0.010, 0, 0, Math.PI / 2));
+  }
+  // ドラムの口。機関部との継ぎ目に締め具
+  g.add(part(cboxG(0.040, 0.014, 0.048), MATS.phosphate, 0, -0.038, -0.010));
+
+  /* ---- 握把と用心鉄。拳銃型の握把も現代側の記号 */
+  g.add(part(cboxG(0.034, 0.090, 0.038), MATS.polymer, 0, -0.080, 0.104, -0.26));
+  g.add(part(boxG(0.030, 0.080, 0.008), MATS.rubber, 0, -0.078, 0.122, -0.26));
+  g.add(part(torG(0.021, 0.0036, 6, 16, Math.PI), MATS.polymer,
+    0, -0.036, 0.062, 0, Math.PI / 2, Math.PI));
+
+  const trg = new THREE.Group();
+  trg.position.set(0, -0.026, 0.070);
+  trg.add(part(boxG(0.007, 0.023, 0.007), MATS.steel, 0, -0.012, -0.004, 0.2));
+  g.add(trg);
+  g.userData.trigger = trg;
+
+  /* ---- 前の縦握り。左手の置き場。ポンプの代わりの塊 */
+  g.add(part(cboxG(0.030, 0.072, 0.034), MATS.polymer, 0, -0.024, -0.235, -0.16));
+  for (let i = 0; i < 3; i++) {
+    g.add(part(boxG(0.032, 0.005, 0.022), MATS.rubber, 0, -0.020 - i * 0.020, -0.235, -0.16));
+  }
+
+  /* ---- 装填用のシェル1発（動く） */
+  const shell = new THREE.Group();
+  shell.add(part(cylG(0.0098, 0.0098, 0.050, 10), MATS.shell, 0, 0, 0, Math.PI / 2));
+  shell.add(part(cylG(0.0104, 0.0104, 0.014, 10), MATS.brass, 0, 0, 0.024, Math.PI / 2));
+  shell.visible = false;
+  g.add(shell);
+  g.userData.shell = shell;
+
+  /* ---- 銃床。樹脂の骨組み */
+  const rear = new THREE.Group();
+  rear.add(part(cboxG(0.046, 0.058, 0.070), MATS.polymer, 0, 0, 0.115));
+  rear.add(part(cboxG(0.040, 0.084, 0.160), MATS.polymer, 0, -0.018, 0.235, 0.10));
+  rear.add(part(cboxG(0.048, 0.094, 0.016), MATS.rubber, 0, -0.030, 0.315, 0.10));
+  g.add(rear);
+  g.userData.rear = rear;
+
+  /* ---- 照準。レールの前後に立てる。土台は照準線より下 */
+  g.add(part(boxG(0.020, 0.008, 0.012), MATS.phosphate, 0, 0.048, 0.070));
+  g.add(part(torG(0.016, 0.0026, 6, 14), MATS.steel, 0, SY, 0.070));
+  g.add(part(boxG(0.012, 0.010, 0.010), MATS.phosphate, 0, 0.032, -0.455));
+  g.add(part(boxG(0.005, 0.018, 0.006), MATS.steel, 0, 0.046, -0.455));
+
+  const sight = new THREE.Object3D();
+  sight.position.set(0, SY, 0.070);
+  g.add(sight);
+  g.userData.sight = sight;
+  const muzzle = new THREE.Object3D();
+  muzzle.position.set(0, B, -0.474);
+  g.add(muzzle);
+  g.userData.muzzle = muzzle;
+  const eject = new THREE.Object3D();
+  eject.position.set(0.040, 0.008, -0.020);
+  g.add(eject);
+  g.userData.eject = eject;
+
+  /* ---- 手。右は握把、左は縦握り。**左は動かない** */
+  const handR = buildHand(1, {
+    gripR: 0.022, wrap: 0.50, trigger: true,
+    armDir: grip.armDir || [0.38, -0.62, 0.94], armLen: 0.62,
+  });
+  handR.position.set(0.008, -0.062, 0.112);
+  handR.rotation.set(-0.28, 0, 0);
+  g.add(handR);
+  g.userData.handR = handR;
+
+  const handL = buildHand(-1, {
+    gripR: 0.024, wrap: 0.66, tip: -0.20, roll: 0.44, skew: 0.20,
+    wrist: [0.046, -0.052, -0.038], armDir: [-0.38, -0.86, -0.80],
+  });
+  handL.position.set(0, -0.046, -0.235);
+  handL.rotation.set(-0.24, 0, 0.10);
+  g.add(handL);
+  g.userData.handL = handL;
+
+  g.userData.holdL = {
+    rest: [[0, -0.046, -0.235], [-0.24, 0, 0.10]],
+    // 装填口はドラムの前の継ぎ目。**左手が7回ここへ通う**
+    mag: [[0.024, -0.070, -0.045], [0.18, 0.28, -0.42]],
+    low: [[0.048, -0.240, 0.060], [0.46, 0.38, -0.38]],
+    charge: [[0, -0.046, -0.235], [-0.24, 0, 0.10]],
+  };
+
+  bakeStatic(rear);
+  bakeStatic(trg);
+  bakeStatic(shell);
+  bakeStatic(g);
+  return g;
+}
+
 /* ------------------------------------------------------------------ 短剣 */
 
 // 銃と同じ枠に収める。当たり判定を別に作らないのが肝で、
@@ -4925,6 +5195,8 @@ export const SHAPE_BUILDS = {
   armor: (view = {}) => buildRifle(view, armorDeco),
   sakura: (view = {}) => buildRifle(view, sakuraDeco),
   western: (view = {}) => buildShotgun(view, westernDeco),
+  lever: buildLeverShotgun,
+  drum: buildDrumShotgun,
   ice: (view = {}) => buildSniper(view, iceDeco),
   cyber: (view = {}) => buildPistol(view, cyberDeco),
   venom: (view = {}) => buildSniper(view, venomDeco),
