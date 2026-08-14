@@ -11,7 +11,7 @@
 
 import {
   C, Sv, EV, PHASE, encode, decode, unpackPlayer,
-  qPos, qAng, INPUT_BATCH, INTERP_DELAY_MS, TIMEOUT_MS, CHAT_MAX, LOBBY_ROW, SCORE_ROW, MODE_IDS,
+  qPos, qAng, INPUT_BATCH, INTERP_DELAY_MS, TIMEOUT_MS, CHAT_MAX, LOBBY_ROW, SCORE_ROW, MODE_IDS, MAP_IDS,
 } from './protocol.js';
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -109,6 +109,8 @@ export class NetClient {
     this.wasBack = false;
     // 今の遊び方。ロビーの電文で届く（届くまでは既定のデスマッチ）
     this.mode = MODE_IDS[0];
+    // 今のマップ。同じくロビーの電文で届く（届くまでは既定の市街地）
+    this.map = MAP_IDS[0];
 
     /* protocol.jsは「取りこぼしに備えて直近の未確認分も一緒に送る」と書いてあるが、
        既定では新しい刻みだけを送る。1パケット3刻みという前提を崩さないため。
@@ -283,7 +285,11 @@ export class NetClient {
         /* 今の遊び方を覚えておく。**ロビーの電文でしか届かない**ので、
            試合が始まった後に「今チーム戦なのか」を知る手段がここしかない */
         if (m.md) this.mode = String(m.md);
-        this._emit(this.onLobby, { rows, why: m.why || '', mode: m.md || null });
+        // 今のマップも同じく覚えておく（試合が始まった後にどの地形を見ているか知る手段はここだけ）
+        if (m.mp) this.map = String(m.mp);
+        this._emit(this.onLobby, {
+          rows, why: m.why || '', mode: m.md || null, map: m.mp || null,
+        });
         break;
       }
       // 往復を測るのはサーバー。こちらは即返すことだけが仕事
@@ -677,6 +683,12 @@ export class NetClient {
   sendMode(id) {
     if (!this.connected) return;
     this._send({ t: C.MODE, md: String(id) });
+  }
+
+  /** マップを選ぶ。sendModeと同じ扱い */
+  sendMap(id) {
+    if (!this.connected) return;
+    this._send({ t: C.MAP, mp: String(id) });
   }
 
   /** 発言する。長さも連投もサーバーが見るので、ここでは送るだけ */

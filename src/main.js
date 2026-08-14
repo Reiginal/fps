@@ -831,6 +831,8 @@ class Game {
     // 本編の地形を控えておく。チュートリアルの小ステージと行き来する時、
     // 「今どっちに居るか」はthis.levelが持ち、戻り先はこれが持つ（_setWorld参照）
     this._mainLevel = level;
+    // 対戦の部屋が選んでいるマップ。既定は市街地(urban)で、起動時に組むのもこれ
+    this._curMap = 'urban';
     // 射線判定用。当たり判定専用の見えない床は除き、見えている面だけを対象にする
     this.solidMeshes = [];
     level.root.traverse((o) => { if (o.isMesh && o.visible) this.solidMeshes.push(o); });
@@ -843,6 +845,9 @@ class Game {
       [mats.wood, 'wood'], [mats.sandbag, 'wood'],
       [mats.rustMetal, 'metal'], [mats.corrugated, 'metal'],
       [mats.brick, 'concrete'], [mats.plaster, 'concrete'], [mats.dirt, 'concrete'],
+      // 江戸ステージ用。瓦と叩き土は硬い材質なのでconcrete扱い、板壁と障子はwood扱い
+      [mats.timberSiding, 'wood'], [mats.shojiPaper, 'wood'],
+      [mats.kawara, 'concrete'], [mats.packedEarth, 'concrete'],
     ]);
 
     // 足音用の材質分け。着弾の分類とは粒度が違う（土と舗装を区別したい）
@@ -850,6 +855,7 @@ class Game {
       [mats.metal, 'metal'], [mats.metalRed, 'metal'],
       [mats.rustMetal, 'metal'], [mats.corrugated, 'metal'],
       [mats.wood, 'wood'], [mats.sandbag, 'dirt'], [mats.dirt, 'dirt'],
+      [mats.timberSiding, 'wood'], [mats.packedEarth, 'dirt'],
     ]);
     this._down = new THREE.Vector3(0, -1, 0);
     this._probe = new THREE.Vector3();
@@ -1153,6 +1159,7 @@ class Game {
     lobby.onSeat = (seat) => this.net?.sendSeat(seat);
     lobby.onBot = (seat) => this.net?.sendBot(seat);
     lobby.onMode = (id) => this.net?.sendMode(id);
+    lobby.onMap = (id) => this.net?.sendMap(id);
     lobby.onReady = (on) => this.net?.sendReady(on);
     // 選んでいる兵士を3Dで見せる。ロビーにいる間だけ描く
     this.charView = new CharView(document.getElementById('lbView'));
@@ -1295,6 +1302,9 @@ class Game {
     // チュートリアル・訓練場から来た時は先に世界を戻す（何度呼んでも無害な作り）
     this._leaveTutorial();
     this._leaveRange();
+    // 対戦で江戸マップに切り替わっていた場合、1人用は必ず市街地に戻す。
+    // 1人用の敵AI(enemySpawns等)は市街地基準で調整されている
+    this._syncMap('urban');
     this.mode = 'solo';
     this.hud.setMode('solo');
     this.director.reset();
@@ -1325,6 +1335,35 @@ class Game {
     // 射線の材質引き当て（火花の種類・着弾音）。見えている面だけを対象にする
     this.solidMeshes.length = 0;
     level.root.traverse((o) => { if (o.isMesh && o.visible) this.solidMeshes.push(o); });
+  }
+
+  /**
+   * mapIdの地形を返す。無ければその場で組んでsceneへ足す（初回だけ払う）。
+   * _tutLevelと同じ「開かないセッションでは1バイトも払わない」考え方。
+   * 材質は本編と同じthis.matsを使い回すので、テクスチャの追加コストは無い
+   */
+  _levelFor(mapId) {
+    this._mapLevels ??= { urban: this._mainLevel };
+    if (this._mapLevels[mapId]) return this._mapLevels[mapId];
+    const level = buildLevel(this.mats, {
+      lamps: loadSettings().gfxShadow !== '低', mapId,
+    });
+    level.root.visible = false;
+    this.scene.add(level.root);
+    this._mapLevels[mapId] = level;
+    return level;
+  }
+
+  /**
+   * 対戦の部屋が選んでいるマップに地形を合わせる。**サーバーが選んだ物だけを見る。**
+   * ここで自分から選ぶ手段は無い（地形がクライアントとサーバーで
+   * 食い違うと、片方だけ壁を素通りすることになる）
+   */
+  _syncMap(mapId) {
+    const id = mapId || 'urban';
+    if (this._curMap === id) return;
+    this._curMap = id;
+    this._setWorld(this._levelFor(id));
   }
 
   _enterTutorial() {
@@ -1811,7 +1850,7 @@ class Game {
     net.onEvent = (ev) => this._onNetEvent(ev);
     net.onMatchEnd = (r) => this._onMatchEnd(r);
     net.onDisconnect = (why) => this._onNetLost(why);
-    net.onLobby = (m) => { this._lobbyChime(m.rows); this.lobby.render(m); };
+    net.onLobby = (m) => { this._lobbyChime(m.rows); this.lobby.render(m); this._syncMap(m.map); };
     net.onChat = ({ name, text }) => this.chat.push(name, text, name === this._myName);
     /* 声の合図。**中身は読まずに声の層へ渡す。**
        誰と繋いでよいかはサーバーが決めているので、ここで確かめ直さない */

@@ -9,12 +9,13 @@ import * as THREE from 'three';
 import { Capsule } from 'three/addons/math/Capsule.js';
 import {
   TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS, MATCH, PHASE, ZONE, NADE, blastDamage, outsideZone,
-  Sv, EV, packPlayer, SEATS, SEAT_SPAWN, CHARACTERS, MODE_IDS, LOBBY_ROW, LOBBY_ROW_LEN, DROP,
+  Sv, EV, packPlayer, SEATS, SEAT_SPAWN, CHARACTERS, MODE_IDS, MAP_IDS, LOBBY_ROW, LOBBY_ROW_LEN, DROP,
   TEAM_OF_SEAT, TEAM_NAMES, MELEE_HEAVY, MELEE_SWEEP,
 } from '../src/net/protocol.js';
 import { SimPlayer, resolveShot, rewindMs, originVisible, WEAPONS, heavyDef } from './sim.js';
 import { Bot, forwardOf } from './bot.js';
 import { modeOf } from './modes.js';
+import { buildWorld } from './world.js';
 import { logs } from './logs.js';
 
 const TICK_MS = 1000 / TICK_HZ;
@@ -96,6 +97,9 @@ export class Room {
     // 遊び方。ロビーで誰でも変えられる（身内で遊ぶのに部屋主を作らない）。
     // 決まりの中身は server/modes.js が持つ
     this.mode = MODE_IDS[0];
+    // マップも同じ扱い。地形はコンストラクタに渡されたworldをそのまま初期値にする
+    // （index.jsが起動時に組んだ既定マップ）。setMap()で選び直すとbuildWorld()を呼び直す
+    this.map = MAP_IDS[0];
   }
 
   /** 今の遊び方の決まり */
@@ -230,6 +234,23 @@ export class Room {
     // 選んだ瞬間に持ち物を配り直す。ロビーで構えている武器が
     // その遊び方の物に変わるので、押した結果がその場で見える
     for (const s2 of this.slots.values()) { s2.stage = 0; this._arm(s2); }
+    this._sendLobby();
+    return true;
+  }
+
+  /**
+   * マップを選ぶ。setModeと同じく誰が押しても変わり、試合が始まったら効かない。
+   *
+   * **地形を組み直す(buildWorld)のはここだけ。** 一度組んだ地形はworld.js側で
+   * mapIdごとにキャッシュされるので、行き来しても2度目からは組み直しが起きない。
+   * this.worldを差し替えるだけで、湧き地点(spawnFor)も戦域判定(_zone)も
+   * 次のティックから新しいマップを見る
+   */
+  setMap(id) {
+    if (this.phase !== PHASE.WAIT) return false;
+    if (!MAP_IDS.includes(id) || id === this.map) return false;
+    this.map = id;
+    this.world = buildWorld(id);
     this._sendLobby();
     return true;
   }
@@ -499,6 +520,8 @@ export class Room {
          「押せないボタン」に見える（実際そう見えていた）。
          試合が始まった後に「今チーム戦か」を知る手段もこれしかない */
       md: this.mode,
+      // 今のマップ。mdと同じ理由（押した結果がその場で見える、試合中に今のマップを知る手段）
+      mp: this.map,
     };
     for (const s of this.slots.values()) s.conn.send(msg);
   }

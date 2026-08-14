@@ -6,7 +6,9 @@
 // 押した瞬間に自分の画面だけ座らせると、埋まっていた席を押した時に
 // 「座れたように見えて座れていない」状態が残る。押したら送るだけにして、
 // 絵が変わるのは必ずサーバーから届いた後にする。
-import { SEATS, CHARACTERS, MODE_LIST, LOBBY_ROW, TEAM_OF_SEAT, TEAM_NAMES } from '../net/protocol.js';
+import {
+  SEATS, CHARACTERS, MODE_LIST, MAP_LIST, LOBBY_ROW, TEAM_OF_SEAT, TEAM_NAMES,
+} from '../net/protocol.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -26,6 +28,8 @@ export class Lobby {
       stand: $('lbStand'),
       modes: $('lbModes'),
       modeDesc: $('lbModeDesc'),
+      maps: $('lbMaps'),
+      mapDesc: $('lbMapDesc'),
       leave: $('lbLeave'),
       standUp: $('lbStandUp'),
       ready: $('lbReady'),
@@ -39,8 +43,11 @@ export class Lobby {
     this.onReady = () => {};
     this.onChar = () => {};
     this.onMode = () => {};
+    this.onMap = () => {};
     // 今の遊び方。サーバーから届いた物を写すだけで、こちらでは決めない
     this.mode = MODE_LIST[0].id;
+    // 今のマップも同じ扱い
+    this.map = MAP_LIST[0].id;
     // 自分が今どれを選んでいるか。印を付けるために持つ
     this.myChar = 0;
 
@@ -78,6 +85,19 @@ export class Lobby {
       b.onclick = () => { this.onPress(); this.onMode(m.id); };
       this.el.modes.appendChild(b);
       this.modeEls.push(b);
+    });
+
+    // マップの候補。作り方は遊び方と同じ
+    this.mapEls = [];
+    this.el.maps.innerHTML = '';
+    MAP_LIST.forEach((mp) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'lbmode';
+      b.textContent = mp.name;
+      b.onclick = () => { this.onPress(); this.onMap(mp.id); };
+      this.el.maps.appendChild(b);
+      this.mapEls.push(b);
     });
 
     // 見た目の候補。ここも最初に1度だけ作る
@@ -145,13 +165,19 @@ export class Lobby {
    * サーバーから届いたロビーの中身を描く。
    * rows は [[id, name, seat, ready, chr]]。seatが-1なら、その人はまだ立っている
    */
-  render({ rows = [], why = '', mode = null } = {}) {
+  render({ rows = [], why = '', mode = null, map = null } = {}) {
     // 遊び方。届いていなければ今の物を保つ（人が出入りしただけの時に
     // 選択が既定へ戻ると、押し直しになる）
     if (mode) this.mode = mode;
     const cur = MODE_LIST.find((m) => m.id === this.mode) || MODE_LIST[0];
     this.modeEls.forEach((b, i) => b.classList.toggle('on', MODE_LIST[i].id === cur.id));
     this.el.modeDesc.textContent = cur.desc;
+
+    // マップも同じ扱い
+    if (map) this.map = map;
+    const curMap = MAP_LIST.find((m) => m.id === this.map) || MAP_LIST[0];
+    this.mapEls.forEach((b, i) => b.classList.toggle('on', MAP_LIST[i].id === curMap.id));
+    this.el.mapDesc.textContent = curMap.desc;
 
     // 席番号から座っている人を引けるようにしておく
     const bySeat = [];
