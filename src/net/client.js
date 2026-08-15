@@ -491,7 +491,8 @@ export class NetClient {
         const rtt = now() - e.sentAt;
         this._rtt = this._rtt ? this._rtt + (rtt - this._rtt) * 0.2 : rtt;
         // サーバーが測った値が来ていればそちらが優先（_score参照）
-        if (!this.players.get(this.id) || !this.players.get(this.id).ping) this.ping = Math.round(this._rtt);
+        const meRow = this.players.get(this.id);
+        if (!meRow || !meRow.ping) this.ping = Math.round(this._rtt);
         break;
       }
     }
