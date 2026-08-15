@@ -143,5 +143,63 @@ console.log('\n[6] 江戸用の材質がtextures.jsに揃っている');
   }
 }
 
+console.log('\n[7] 湧いた所から本当に歩けるか（実際に歩かせて測る）');
+/* なぜ要るか: 「地形に埋まっていないか」だけでは足りなかった。
+   band()で組む建物は**中が空洞**なので、町屋の真ん中に湧いても
+   カプセルはどこにも当たらず、埋まり判定はすり抜ける。
+   実際にはドアまで1.2mの部屋に閉じ込められている。
+
+   最初の町割りは通りを±21に通して内側の列を±15.8に建てていたので、
+   対戦の湧き地点の環（±17.5と±12,±12）の真上に建物が乗っていた。
+   32通り歩かせて12通りが動けず、
+     ・(0,-17.5) … 町屋の中
+     ・(±12,±12) … 町屋2棟の角に挟まれた0.7mの隙間
+   遊ぶと「歩けない・画面が揺れる」になる。**歩かせないと分からない。** */
+{
+  const { SimPlayer } = await import('../server/sim.js');
+  const K_FWD = 1 << 0;
+  const world = buildWorld('edo');
+  const sim = new SimPlayer(1, '検査', world);
+  const spots = [
+    ...world.arenaSpawns.map((v) => ['対戦', v]),
+    ...world.teamSpawns.map((v) => ['2対2', v]),
+    ['開始', world.playerSpawn],
+  ];
+  const stuck = [];
+  let jitterWorst = 0, jitterAt = '';
+  for (const [label, sp] of spots) {
+    let openWays = 0;
+    for (let a = 0; a < 8; a++) {
+      const dir = (a / 8) * Math.PI * 2;
+      sim.spawn(new THREE.Vector3(sp.x, 0.1, sp.z), dir);
+      const p0 = sim.player.collider.start.clone();
+      let prev = p0.clone(), prevDx = 0, prevDz = 0, rev = 0, frames = 0;
+      for (let i = 0; i < 60 * 3; i++) {
+        sim.tick(K_FWD, dir, 0);
+        const c = sim.player.collider.start;
+        const dx = c.x - prev.x, dz = c.z - prev.z;
+        if (i > 5 && (dx * dx + dz * dz) > 1e-8 && (prevDx * prevDx + prevDz * prevDz) > 1e-8) {
+          // 前のフレームと逆向きに動いた＝押し戻されている（＝画面が揺れる）
+          if (dx * prevDx + dz * prevDz < 0) rev++;
+          frames++;
+        }
+        prevDx = dx; prevDz = dz; prev.set(c.x, c.y, c.z);
+      }
+      const moved = Math.hypot(sim.player.collider.start.x - sp.x, sim.player.collider.start.z - sp.z);
+      if (moved > 5) openWays++;
+      const jit = frames ? rev / frames : 0;
+      if (jit > jitterWorst) { jitterWorst = jit; jitterAt = `${label}(${sp.x},${sp.z})`; }
+    }
+    // 8方向のうち5方向以上へ抜けられること。壁を背負う位置はあってよいが、
+    // 「どこへも行けない」は湧き地点として成立していない
+    if (openWays < 5) stuck.push(`${label}(${sp.x},${sp.z}) 抜けられる向き${openWays}/8`);
+  }
+  ok(stuck.length === 0,
+    `どの湧き地点からも8方向のうち5方向以上へ歩ける${stuck.length ? `：${stuck.join(' / ')}` : ''}`);
+  // 押し戻され率。壁と同じ場所に当たり判定を二重に置くとここが跳ね上がる
+  ok(jitterWorst < 0.10,
+    `歩いていて押し戻されない（最悪${(jitterWorst * 100).toFixed(1)}% ${jitterAt}。10%未満）`);
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);

@@ -8,7 +8,7 @@
 // このrepo自身の .git には触らない（印の台帳を汚すと、走らせるたびに結果が変わる）。
 //
 //   node tools/check-guard.mjs
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -192,6 +192,48 @@ console.log('\n[4] 別のセッションが触った物をコミットに入れ�
     hook({ session_id: 'sessionA', tool_name: 'Edit', tool_input: { file_path: join(dir, 'theirs.txt') } });
     ok(commitAsA('git add theirs.txt && git commit -m "x"') === null,
       '相手がコミットし終えた後は、同じファイルを自分が触っても通る');
+
+    /* ------------------------------------------- worktreeへ隔離した相手 */
+    /* **別の机で触られた印では止めない。**
+
+       CLAUDE.mdは「並行して別のセッションが動いていたらworktreeへ隔離してから
+       作業する」と決めているのに、隔離した先でも同じファイル名というだけで
+       止まっていた。src/main.js のように誰でも触るファイルがあると、
+       隔離しても何もコミットできない。
+
+       隔離してあればディスク上まったく別のファイルなので、
+       相手の書きかけが自分のコミットに混ざりようがない
+       （この台帳が防ぎたかった事故は、同じ机を2人で使った時の話）。
+
+       印は .git/claude-claims.json に直接書いて作る。
+       worktreeを本当に作ると検査が重くなるうえ、
+       「別の机で付いた印」という状態だけ作れれば足りる */
+    const claimPath = join(dir, '.git', 'claude-claims.json');
+    writeFileSync(join(dir, 'theirs.txt'), 'い\nう\nえ\nお\n');
+    const asOtherTree = (w) => {
+      writeFileSync(claimPath, JSON.stringify({
+        'theirs.txt': { s: 'sessionB', t: Date.now(), w },
+      }));
+    };
+    asOtherTree('/どこか/別の/worktree');
+    ok(commitAsA('git add theirs.txt && git commit -m "x"') === null,
+      '別の作業ツリー(worktree)で付いた印では止めない');
+
+    /* 同じ机で付いた印なら今まで通り止まる。ここが緩むと元の事故に戻る。
+       **本当の場所まで辿ってから渡す。** macOSの /tmp は /private/tmp への
+       近道で、見張り側は辿った後の道で比べている（guard-git.mjsのtreeRoot）。
+       辿らずに渡すと「別の机」と読まれて、この検査が意味を失う */
+    asOtherTree(realpathSync(dir));
+    ok(commitAsA('git add theirs.txt && git commit -m "x"')?.permissionDecision === 'deny',
+      '**同じ机で付いた印なら今まで通り止まる**');
+
+    /* 直す前に付いた印（wを持たない）は、どの机の物か分からない。
+       **分からない時は止める側に倒す** */
+    writeFileSync(claimPath, JSON.stringify({
+      'theirs.txt': { s: 'sessionB', t: Date.now() },
+    }));
+    ok(commitAsA('git add theirs.txt && git commit -m "x"')?.permissionDecision === 'deny',
+      '机が分からない古い印は、今まで通り止める');
 
     // 見張りが転んでも作業を止めない
     ok(hook({ session_id: 'sessionA', tool_name: 'Bash', tool_input: {} }) === null,

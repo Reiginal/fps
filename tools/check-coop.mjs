@@ -495,5 +495,35 @@ console.log('\n[15] 描く物が増えすぎていない（軽さ）');
 }
 
 
+console.log('\n[16] 協力プレイで仲間が仲間だと分かる');
+/* なぜ要るか: 味方かどうかの判定(_isMate)が`mode === 'team'`だけを見ていたので、
+   **協力プレイでは名札が一枚も出ていなかった。**
+   見た目は全員同じ兵士で、名前も体力も出ないので、遊んでいる間ずっと
+   「どれが仲間か分からない」「誰が倒れているか分からない」状態だった。
+   引きつける人と背中へ回る人が要る遊びなのに、画面に手掛かりが無い */
+{
+  const { readFileSync } = await import('node:fs');
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  const isMate = main.split('_isMate(id) {')[1]?.split('\n  }')[0] || '';
+  ok(isMate.length > 0, '味方かどうかを決める所が見つかった');
+  ok(/net\.mode === 'coop'/.test(isMate) && /return true/.test(isMate),
+    '協力プレイは席に関係なく全員が味方（server/modes.jsのteamOfと揃う）');
+
+  const plates = main.split('_updatePlates(states) {')[1]?.split('\n  }')[0] || '';
+  ok(/const down = /.test(plates) && /coop && this\._isMate/.test(plates),
+    '倒れている仲間にも札を出す（協力プレイだけ）');
+  ok(/alwaysBar: coop && mate/.test(plates),
+    '協力プレイの仲間は体力の帯を常に出す（誰が削られているかで次の動きが決まる）');
+
+  const hud = readFileSync(new URL('../src/ui/hud.js', import.meta.url), 'utf8');
+  ok(/p\.alwaysBar/.test(hud), 'HUD側が常時の帯を受けている');
+  ok(/classList\.toggle\('down'/.test(hud), 'HUD側が倒れている印を付けている');
+  ok(/classList\.toggle\('occl'/.test(hud), 'HUD側が壁の向こうの印を付けている');
+
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  ok(/\.plate\.down /.test(html), '倒れている札の見た目がCSSにある');
+  ok(/\.plate\.occl /.test(html), '壁の向こうの札の見た目がCSSにある');
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);

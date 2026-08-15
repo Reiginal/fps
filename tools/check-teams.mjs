@@ -255,7 +255,14 @@ console.log('\n[11.5] 味方が味方だと分かるか');
      レイを飛ばす所がmateの分岐の中に入っていないことを見る */
   const wallCheck = plates.split('rayIntersect')[0] || '';
   ok(!/if \(!mate\) \{/.test(wallCheck), '壁の向こうの味方までは出さない');
-  ok(/hit\.distance < dist - 0\.45\) continue;/.test(plates), '遮蔽の判定が残っている');
+  ok(/hit\.distance < dist - 0\.45/.test(plates), '遮蔽の判定が残っている');
+  /* **壁抜けを通してよいのは協力プレイだけ。**
+     協力プレイには隠れる相手プレイヤーが居ないので、味方を壁で切ると
+     「倒れた仲間が居ることにすら気づけない」だけになる。
+     ただしその例外が対人（2対2）へ漏れると、上の組み立てが丸ごと壊れる。
+     例外の条件に coop が入っていることを見る */
+  const occl = plates.split('const occluded')[1]?.split('_plateV')[0] || '';
+  ok(/coop/.test(occl), '壁抜けを通す例外は協力プレイ限定になっている');
   // 地図の点。味方は薄れない印(mate)を立てて渡す
   ok(/_blipList\.push\(\{[^}]*mate: true/.test(main), '地図へ味方の点を足している');
   const hud = readFileSync(new URL('../src/ui/hud.js', import.meta.url), 'utf8');
