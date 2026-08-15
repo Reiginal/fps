@@ -2855,13 +2855,23 @@ class Game {
 
     // 近接は弾を飛ばさないので曳光弾も出さない（刃を振るたびに弾が飛んで見えていた）
     const drawTracer = !def.melee && pellet % 3 === 0;
+    /* 近接の間合いと刃の高さは、サーバーの判定と同じ数字で見る
+       （間合いはsim.jsのheavyDef、高さはroom.jsが掛けるMELEE_SWEEP.DROP）。
+       def.rangeと目の高さのままだと、強い一撃の伸びた間合い(1.9〜2.5m)で
+       サーバーは当てているのに手元は無音になり、壁を斬る音も判定より26cm上を指す。
+       ソロの_resolveShotと同じ形。sendShotへ渡すoriginは今のまま（下げるのはサーバーの仕事） */
+    const sweep = def.melee ? (heavy ? MELEE_SWEEP.HEAVY : MELEE_SWEEP.LIGHT) : null;
+    const reach = sweep ? sweep.reach : def.range;
+    const from = sweep
+      ? _meleeFrom.copy(origin).setY(origin.y - MELEE_SWEEP.DROP)
+      : origin;
     // 地形はoctreeで見る（理由は_terrainRay参照）
-    const whit = this._terrainRay(origin, dir, def.range);
+    const whit = this._terrainRay(from, dir, reach);
     const wallDist = whit ? whit.distance : Infinity;
 
     // 相手に当たったかは手元でも粗く見る。当たっていれば壁の火花を出さない。
     // ここで出す判定はあくまで絵の切り替え用で、ダメージには一切使わない
-    const bodyDist = this._nearestRemoteHit(origin, dir, Math.min(wallDist, def.range));
+    const bodyDist = this._nearestRemoteHit(from, dir, Math.min(wallDist, reach));
 
     if (bodyDist < wallDist) {
       if (drawTracer) {
@@ -3702,13 +3712,19 @@ class Game {
   _weaponSlotsHud() {
     const w = this.weapons;
     const items = this._slotItems ||= [];
-    items.length = 0;
+    let n = 0;
     for (const i of w.carry) {
       const d = WEAPONS[i];
       if (!d) continue;
+      // 札のオブジェクトも使い回す（HUD側は呼び出し中に読むだけで持ち越さない）
+      const it = items[n] ||= { name: '', out: false };
+      it.name = d.nick || d.name;
       // 使い切った投げ物は薄く。札そのものは残す（消すと後ろの番号がずれる）
-      items.push({ name: d.nick || d.name, out: !!d.thrown && w.nades <= 0 });
+      it.out = !!d.thrown && w.nades <= 0;
+      n++;
     }
+    // 持ち物が減った時に前の札が残らないよう、使ったぶんへ切り詰める
+    items.length = n;
     this.hud.weaponSlots(items);
     // 数字キーに載らない武器（支給された狙撃銃）は2行目、包帯と同じ行へ
     const q = WEAPONS[w.quickIndex];
@@ -3817,6 +3833,11 @@ class Game {
     const made = new THREE.Line(
       new THREE.BufferGeometry().setAttribute(
         'position', new THREE.BufferAttribute(new Float32Array(ARC_STEPS * 3), 3),
+      ).setAttribute(
+        /* 破線の刻みに使う距離も、位置と同じく確保して書き込むだけにする。
+           computeLineDistances()は呼ぶたびに配列と属性を作り直して
+           setAttributeで差し替えるので、GPU側のバッファも毎フレーム作り直しになる */
+        'lineDistance', new THREE.BufferAttribute(new Float32Array(ARC_STEPS), 1),
       ),
       new THREE.LineDashedMaterial({
         color, transparent: true, opacity,
@@ -3840,10 +3861,14 @@ class Game {
     const pos = _arcPos.copy(_throwOrigin).addScaledVector(_throwDir, NADE.MUZZLE);
     const vel = _arcVel.copy(_throwDir).multiplyScalar(throwSpeedOf(short));
     const arr = line.geometry.attributes.position.array;
+    // 破線の刻み。computeLineDistances()と同じ「区間の長さの累積」を自分で書く
+    const dist = line.geometry.attributes.lineDistance.array;
     const dt = 0.045;
     let n = 0;
+    let acc = 0;
     for (let i = 0; i < ARC_STEPS; i++) {
       arr[n++] = pos.x; arr[n++] = pos.y; arr[n++] = pos.z;
+      dist[i] = acc;
       _arcPrev.copy(pos);
       vel.y -= NADE.GRAVITY * dt;
       pos.addScaledVector(vel, dt);
@@ -3858,15 +3883,20 @@ class Game {
         const hit = this._terrainRay(_arcPrev, _arcStep.divideScalar(len), len);
         if (hit) {
           pos.copy(hit.position);
+          // 当たった区間だけ、引き戻した後の点までの長さで足す。
+          // 潰した残りの点は距離が進まない（同じ値が並ぶ）
+          acc += _arcPrev.distanceTo(pos);
           for (let k = i + 1; k < ARC_STEPS; k++) {
             arr[n++] = pos.x; arr[n++] = pos.y; arr[n++] = pos.z;
+            dist[k] = acc;
           }
           break;
         }
       }
+      acc += len;
     }
     line.geometry.attributes.position.needsUpdate = true;
-    line.computeLineDistances();
+    line.geometry.attributes.lineDistance.needsUpdate = true;
   }
 
   /** ソロの手榴弾。判定を持つ相手がいないので、飛翔も爆発もここで完結させる */
