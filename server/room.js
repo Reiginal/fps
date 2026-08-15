@@ -1039,20 +1039,25 @@ export class Room {
     const back = rewindMs(slot.conn.rtt || 0, stale);
     const atMs = nowMs() - back;
 
+    /* 強い一撃は威力と間合いを差し替える（heavyDefが持つ）。
+       **遠いかわりに狭い。**広いまま遠くすると、
+       間合いを詰める道具という形が崩れる */
+    const fireDef = strong ? heavyDef(sim.def) : sim.def;
+    /* 刃には太さがある。**銃には無い**ので、近接の時だけ渡す。
+       左は払うので広く、右は突く／振り下ろすので狭い（MELEE_SWEEP）。
+       ここで1回だけ決めて、下のモンスター判定も同じ値を使う
+       （前は同じ式が2箇所にあって、片方だけ直すと対人と対モンスターで食い違えた） */
+    const firePad = sim.def.melee ? (strong ? MELEE_SWEEP.HEAVY.pad : MELEE_SWEEP.LIGHT.pad) : 0;
+
     const res = resolveShot({
       octree: this.world.octree,
       origin,
       dir,
-      /* 強い一撃は威力と間合いを差し替える（heavyDefが持つ）。
-         **遠いかわりに狭い。**広いまま遠くすると、
-         間合いを詰める道具という形が崩れる */
-      def: strong ? heavyDef(sim.def) : sim.def,
+      def: fireDef,
       targets,
       atMs,
       rewind: REWIND_ON,
-      /* 刃には太さがある。**銃には無い**ので、近接の時だけ渡す。
-         左は払うので広く、右は突く／振り下ろすので狭い（MELEE_SWEEP） */
-      pad: sim.def.melee ? (strong ? MELEE_SWEEP.HEAVY.pad : MELEE_SWEEP.LIGHT.pad) : 0,
+      pad: firePad,
     });
 
     /* 協力プレイではモンスターも標的。resolveShotの結果（人・壁・外れ）と
@@ -1060,23 +1065,21 @@ export class Room {
        resolveShotの中に混ぜないのは、モンスターがpose履歴（巻き戻し）を
        持たないため——撃つ相手がAIなので、遅延の公平を取る必要が無い */
     if (this.rules.coop && this.monsters) {
-      const def2 = strong ? heavyDef(sim.def) : sim.def;
-      const pad2 = sim.def.melee ? (strong ? MELEE_SWEEP.HEAVY.pad : MELEE_SWEEP.LIGHT.pad) : 0;
-      const mres = this.monsters.intersectShot(origin, dir, pad2);
-      if (mres && mres.hit.distance <= (def2.range || 100) && mres.hit.distance < res.dist) {
+      const mres = this.monsters.intersectShot(origin, dir, firePad);
+      if (mres && mres.hit.distance <= (fireDef.range || 100) && mres.hit.distance < res.dist) {
         const partNo = mres.hit.part === 'head' ? PART.HEAD
           : mres.hit.part === 'legs' ? PART.LEG
             : mres.hit.part === 'weak' ? PART.WEAK : PART.CHEST;
         // 距離減衰は人へ撃った時と同じ式（resolveShotと揃える）
-        const t2 = def2.falloffEnd > def2.falloffStart
-          ? Math.min(1, Math.max(0, (mres.hit.distance - def2.falloffStart)
-            / (def2.falloffEnd - def2.falloffStart)))
+        const t2 = fireDef.falloffEnd > fireDef.falloffStart
+          ? Math.min(1, Math.max(0, (mres.hit.distance - fireDef.falloffStart)
+            / (fireDef.falloffEnd - fireDef.falloffStart)))
           : 0;
-        const mul = 1 + (def2.falloffMin - 1) * t2;
+        const mul = 1 + (fireDef.falloffMin - 1) * t2;
         /* **部位倍率は人の表(PART_MUL)を使わない。**
            モンスターは当たり所の大きさも意味も人と違う（背中のコブという
            弱点があり、脚は太くて当たりやすい）ので、倍率はsrc/ai/monster.jsが持つ */
-        const dmg = def2.damage * mul * MonsterDirector.mulOf(mres.hit.part);
+        const dmg = fireDef.damage * mul * MonsterDirector.mulOf(mres.hit.part);
         const pt = mres.hit.point;
         this.push({
           e: EV.MHIT, mid: mres.m.mid, by: slot.id,
@@ -1227,9 +1230,8 @@ export class Room {
       });
       sim.player.damage(dmg);
       if (!sim.player.alive) {
-        const killer = this.slots.get(g.by);
         // 自分で自分を吹き飛ばした回は、相手の取得にする（_killByFallと同じ扱い）
-        if (killer && killer !== s) this._kill(s, killer, 1);
+        if (thrower && thrower !== s) this._kill(s, thrower, 1);
         else this._killByFall(s);
       }
     }
@@ -1238,7 +1240,6 @@ export class Room {
     // （胸の高さ・遮蔽チェック・距離減衰）。手榴弾が効かないと、
     // 群れに囲まれた時の切り札が無くなる
     if (this.rules.coop && this.monsters && this.phase === PHASE.LIVE) {
-      const thrower = this.slots.get(g.by) || null;
       for (const m of [...this.monsters.active]) {
         const mon = m.mon;
         if (!mon.alive) continue;

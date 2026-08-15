@@ -10,12 +10,11 @@ import {
   SEATS, CHARACTERS, MODE_LIST, MAP_LIST, LOBBY_ROW, TEAM_OF_SEAT, TEAM_NAMES,
 } from '../net/protocol.js';
 
-const $ = (id) => document.getElementById(id);
-
 // 名前がそのままHTMLとして解釈されると、名前に細工した人が
 // 他人の画面を書き換えられる。出す前に必ず通す
-const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ESC[c]);
+import { esc } from './esc.js';
+
+const $ = (id) => document.getElementById(id);
 
 export class Lobby {
   constructor() {

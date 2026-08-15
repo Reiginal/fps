@@ -11,10 +11,9 @@
 //
 // 開発者向けの文字列ではなく、遊ぶ側が読める言葉で書く。
 // 読めない文字列を出しても「なんか赤いのが出た」で終わって、こちらへ何も返ってこない。
-const $ = (id) => document.getElementById(id);
+import { esc } from './esc.js';
 
-const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ESC[c]);
+const $ = (id) => document.getElementById(id);
 
 // 例外を出しっぱなしにしない。同じ物が毎フレーム出ると画面が埋まる
 const MAX_ERRORS = 3;

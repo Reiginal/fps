@@ -181,5 +181,3 @@ const TABLE = { dm: deathmatch, gun: gungame, team: teamplay, coop };
 
 /** 知らないidが来たらデスマッチへ寄せる（部屋が止まるより寄せたほうがまし） */
 export const modeOf = (id) => TABLE[id] || TABLE.dm;
-
-export const MODE_BEHAVIOR = TABLE;
