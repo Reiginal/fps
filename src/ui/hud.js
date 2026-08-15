@@ -65,6 +65,8 @@ export class HUD {
     this.mode = 'solo';
     // 名札は毎フレーム作り直すと1秒に60回DOMを捨てることになるので、idで使い回す
     this.plateEls = new Map();
+    // nameplates()が毎フレーム使う。作り直さず空にして使い回す
+    this._plateShown = new Set();
     this._lastMatch = '';
     this._lastRoster = '';
     this._lastHeal = '';
@@ -359,7 +361,15 @@ export class HUD {
   weaponSlots(items) {
     const box = this.el.slotBox;
     if (!box) return;
-    const key = items.map((it) => `${it.name}${it.out ? '/x' : ''}`).join('|');
+    /* 毎フレーム呼ばれるので、変わったかを調べる鍵はroster()と同じ数字1個に畳む。
+       前はmap→joinで、調べるためだけに配列と文字列を毎回作って捨てていた */
+    let key = (items.length * 31) | 0;
+    for (const it of items) {
+      const n = it.name || '';
+      for (let i = 0; i < n.length; i++) key = ((key * 33) + n.charCodeAt(i)) | 0;
+      // outの検知と名前の区切りを兼ねる（「ab,c」と「a,bc」を同じ鍵にしない）
+      key = ((key * 33) + (it.out ? 1 : 2)) | 0;
+    }
     if (key === this._slotKey) return;
     this._slotKey = key;
     // lastChildではなくchildrenで消す。本物のDOMではタグの間の改行が
@@ -753,7 +763,9 @@ export class HUD {
    * 壁の向こうかどうかは呼ぶ側で判定して、見えている相手だけ渡す
    */
   nameplates(list) {
-    const shown = new Set();
+    // 毎フレーム呼ばれるのでSetは使い回す（remote.jsの_seenと同じ流儀）
+    const shown = this._plateShown;
+    shown.clear();
     for (const p of (list || [])) {
       if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
       shown.add(p.id);

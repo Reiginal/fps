@@ -184,6 +184,7 @@ export class NetClient {
     this.connected = false;
     this.id = null;
     this.players.clear();
+    this._rowsCache = null;
     this._pending.length = 0;
     this._outbox.length = 0;
     this._snaps.length = 0;
@@ -322,6 +323,8 @@ export class NetClient {
     this.wasBack = !!m.back;
     this._syncClock(m.now);
     this.players.clear();
+    // 空の名簿で来た時に、切断前の控えが残らないようにここでも倒す
+    this._rowsCache = null;
     if (Array.isArray(m.players)) for (const p of m.players) this._touchPlayer(p);
     /* 自分の名前はyouに入る。playersにも自分の行は来るが、名前の無い形
        （packPlayerの配列）で配るサーバーもあり、行だけ先に出来ていると
@@ -341,6 +344,8 @@ export class NetClient {
     if (!p) return null;
     const id = Array.isArray(p) ? p[0] : p.id;
     if (id == null) return null;
+    // 名簿を触ったのでscoreRows()の控えを捨てる（SCOREもJOINも必ずここを通る）
+    this._rowsCache = null;
     let row = this.players.get(id);
     // chrは選んだ見た目の番号。既定は0番で、ロビーの電文が来たら上書きされる
     if (!row) { row = { name: '', kills: 0, deaths: 0, ping: 0, rounds: 0, chr: 0 }; this.players.set(id, row); }
@@ -363,7 +368,7 @@ export class NetClient {
   _roster(ev) {
     if (!ev || ev.id == null) return;
     if (ev.e === EV.JOIN) this._touchPlayer({ id: ev.id, name: ev.name });
-    else if (ev.e === EV.LEAVE) this.players.delete(ev.id);
+    else if (ev.e === EV.LEAVE) { this.players.delete(ev.id); this._rowsCache = null; }
   }
 
   _score(m) {
@@ -413,8 +418,14 @@ export class NetClient {
     return (row && row.name) || `プレイヤー${id}`;
   }
 
-  /** スコアボードの行。並べ替えは見せる側の仕事なので順番は付けない */
+  /** スコアボードの行。並べ替えは見せる側の仕事なので順番は付けない。
+      対戦中は毎フレーム呼ばれるが、名簿が実際に動くのはSCORE電文（毎秒1回ほど）と
+      入退場の時だけなので、作った物を控えて使い回す。作り直しは名簿を触った所
+      （_touchPlayer・LEAVE・_reset・WELCOME）が控えを捨てた次の1回だけ。
+      受け取る側は全員が読み取り専用か、写しを取ってから並べ替える作りなので、
+      同じ配列を返し続けても壊れない */
   scoreRows() {
+    if (this._rowsCache) return this._rowsCache;
     const out = [];
     for (const [id, r] of this.players) {
       out.push({
@@ -425,6 +436,7 @@ export class NetClient {
         me: id === this.id,
       });
     }
+    this._rowsCache = out;
     return out;
   }
 
