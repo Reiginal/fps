@@ -63,20 +63,42 @@ const relax = () => {
   for (let k = 0; k < 300; k++) ws.update(1 / 120, none, player, {});
 };
 
-/** その角度の輪のうち、素通しの割合 */
-const clearAt = (model, deg, n = 48) => {
+/* レイを当てる相手は、不透明な物だけへ先に絞っておく。
+   透明な物は覗く邪魔にならない。硝子もコーティングもレティクルもここに入る。
+   元は模型を丸ごと辿って全部に当ててから透明を除いていたが、レンズは
+   視線の真ん中に居るのでほぼ全レイが貫通して、使わない当たりを量産していた
+   （この検査の時間の9割がレイの計算。プロファイルで実測）。
+   Raycasterはvisibleではなくlayersしか見ないので、非表示も含めて集めれば
+   「全部に当ててから透明を除く」と判定は同じになる */
+const opaquesOf = (model) => {
+  const list = [];
+  model.traverse((o) => { if (o.material && !o.material.transparent) list.push(o); });
+  return list;
+};
+
+const RAY_FROM = new THREE.Vector3(0, 0, 0);
+const RAY_DIR = new THREE.Vector3();
+
+/** その角度の輪を測る。欲しい答えは「全周抜けているか」と「半分以上抜けているか」の
+    2つだけなので、残りのレイが答えを変えなくなった時点で打ち切る。
+    敷居は前の書き方（素通しの割合<0.999と<0.5）と同じ所に引いてある */
+const ringAt = (opaques, deg, n = 48) => {
   const r = THREE.MathUtils.degToRad(deg);
-  let open = 0;
+  let open = 0, shut = 0;
   for (let a = 0; a < n; a++) {
     const t = (a / n) * Math.PI * 2;
-    ray.set(new THREE.Vector3(0, 0, 0), new THREE.Vector3(
+    ray.set(RAY_FROM, RAY_DIR.set(
       Math.sin(r) * Math.cos(t), Math.sin(r) * Math.sin(t), -Math.cos(r),
     ));
-    const hits = ray.intersectObject(model, true);
-    // 透明な物は覗く邪魔にならない。硝子もコーティングもレティクルもここに入る
-    if (!hits.some((h) => h.object.material && !h.object.material.transparent)) open++;
+    let hit = false;
+    for (const m of opaques) {
+      if (ray.intersectObject(m, false).length) { hit = true; break; }
+    }
+    if (hit) shut++; else open++;
+    // 全周の答えは1本塞がれた時点で確定。半分の答えはどちらかが過半になれば確定
+    if (shut > 0 && (open >= n / 2 || shut > n / 2)) break;
   }
-  return open / n;
+  return { full: shut === 0, half: open >= n / 2 };
 };
 
 /* 2つの数え方で測る。**この2つは別のことを言っている:**
@@ -86,18 +108,20 @@ const clearAt = (model, deg, n = 48) => {
    この作りだと目・照準・銃身が同じ模型の上にあるので原理的に避けられない）ので、
    全周だけで測ると「銃身が太い＝照準が壊れている」と読めてしまう */
 const aperture = (model) => {
+  const opaques = opaquesOf(model);
   let last = 0;
   for (let deg = 0.2; deg <= 12; deg += 0.2) {
-    if (clearAt(model, deg) < 0.999) break;
+    if (!ringAt(opaques, deg).full) break;
     last = deg;
   }
   return last;
 };
 
 const windowOf = (model) => {
+  const opaques = opaquesOf(model);
   let last = 0;
   for (let deg = 0.2; deg <= 12; deg += 0.2) {
-    if (clearAt(model, deg) < 0.5) break;
+    if (!ringAt(opaques, deg).half) break;
     last = deg;
   }
   return last;
@@ -109,7 +133,7 @@ console.log('\n[1] 赤ドット（ライフル）');
   const a = aperture(w.model);
   const win = windowOf(w.model);
   ok(a >= 3.0, `狙点のまわりが全周素通し（${a.toFixed(1)}度まで）`);
-  ok(clearAt(w.model, 1.0) === 1, '狙点のまわりに欠けが無い');
+  ok(ringAt(opaquesOf(w.model), 1.0).full, '狙点のまわりに欠けが無い');
   /* 下限は2026-08-11に4.0から6.0へ上げた。**「もっと敵が見えるように」で広げたぶんを、
      ここで固定する。** 上げないと、次に構えの寸法を触った誰かが黙って元へ戻せる
      （窓の広さは筒の寸法ではなく目からの距離で決まるので、
@@ -142,7 +166,7 @@ console.log('\n[2] 望遠照準（狙撃銃）');
      （下の画素の判定がそこを見ている）。だから角度の下限は4.0のまま */
   ok(win >= 4.0, `窓の広さ ${win.toFixed(1)}度`);
   ok(a >= 2.0, `狙点のまわりが全周素通し（${a.toFixed(1)}度まで）`);
-  ok(clearAt(w.model, 1.0) === 1, '狙点のまわりに欠けが無い');
+  ok(ringAt(opaquesOf(w.model), 1.0).full, '狙点のまわりに欠けが無い');
   const px = (Math.tan(THREE.MathUtils.degToRad(win))
     / Math.tan(THREE.MathUtils.degToRad(vcam.fov / 2))) * H;
   // 覗くとビューモデル側の画角も絞られる（55度→adsFov*0.9）ので、

@@ -80,12 +80,61 @@ class Param {
    * n サンプルぶんの値を一気に作る。
    * 自動化で決まる値に、繋がっているノードの出力を足す。
    * 1サンプルずつ at() を呼ぶ作りだと、繋がった側を毎回描き直すことになる
+   *
+   * ここは1サンプルずつ at() を呼ばない。at()は呼ばれるたびに予定表を
+   * 先頭から探し直すので、48000サンプル×パラメータの数だけ積むと
+   * それだけでcheck-soundの半分を食っていた（プロファイルで実測。
+   * at()31.9%＋values()15.8%＋_valueOfEvent()5.1%）。
+   * tは前へしか進まないので、予定の添字も前へ進めるだけでよい。
+   * **式はat()から一字も変えていない。** measureする数字が1ビットでも
+   * 動いたら、検査の敷居を調整し直す羽目になる
    */
   values(n) {
     if (this._cache && this._cache.length === n) return this._cache;
     const sr = this.ctx ? this.ctx.sampleRate : 48000;
     const out = new Float32Array(n);
-    for (let i = 0; i < n; i++) out[i] = this.at(i / sr);
+    const ev = this.events;
+    if (ev.length === 0) {
+      // 予定が無ければただの定数。ほとんどのパラメータ（Q・detune・pan等）はここ
+      out.fill(this.value);
+    } else {
+      let i = -1;                              // まだev[0]の手前に居る印
+      let e = null, next = ev[0], v0 = 0, from = 0, seg = 0;
+      const enter = () => {                    // 区間iに入った時だけ、その区間の定数を作る
+        e = ev[i]; next = ev[i + 1];
+        if (next && (next.type === 'lin' || next.type === 'exp')) v0 = this._valueOfEvent(i);
+        else if (e.type === 'target') from = this._valueOfEvent(i, true);
+        else seg = this._valueOfEvent(i);
+      };
+      for (let s = 0; s < n; s++) {
+        const t = s / sr;
+        if (i < 0) {
+          if (t < ev[0].time) { out[s] = this.value; continue; }
+          i = 0;
+          while (i + 1 < ev.length && ev[i + 1].time <= t) i++;
+          enter();
+        } else if (i + 1 < ev.length && ev[i + 1].time <= t) {
+          do { i++; } while (i + 1 < ev.length && ev[i + 1].time <= t);
+          enter();
+        }
+        if (next && (next.type === 'lin' || next.type === 'exp')) {
+          const span = next.time - e.time;
+          const k = span > 0 ? (t - e.time) / span : 1;
+          if (next.type === 'lin') {
+            out[s] = v0 + (next.value - v0) * k;
+          } else {
+            // 指数の傾斜は0を跨げない。WebAudioと同じく極小値で下駄を履かせる
+            const a = Math.max(1e-6, Math.abs(v0)) * Math.sign(v0 || 1);
+            const b = Math.max(1e-6, Math.abs(next.value)) * Math.sign(next.value || 1);
+            out[s] = a * Math.pow(b / a, k);
+          }
+        } else if (e.type === 'target') {
+          out[s] = e.value + (from - e.value) * Math.exp(-(t - e.time) / Math.max(1e-6, e.tc));
+        } else {
+          out[s] = seg;
+        }
+      }
+    }
     for (const src of this.inputs) {
       const [l, r] = src.render(n);
       for (let i = 0; i < n; i++) out[i] += (l[i] + r[i]) * 0.5;
@@ -195,8 +244,12 @@ class OscillatorNode extends Node {
     const b = Math.min(n, Math.floor((this._stop === Infinity ? n / sr : this._stop) * sr));
     const fv = this.frequency.values(n);
     const dv = this.detune.values(n);
+    // detuneはほぼ定数なので、powは値が変わった時だけ計算し直す。
+    // 同じ入力へのpowは同じ値を返すので、結果は毎サンプル計算するのと同じ
+    let lastDv = NaN, dmul = 1;
     for (let i = a; i < b; i++) {
-      const f = Math.max(0, fv[i] * Math.pow(2, dv[i] / 1200));
+      if (dv[i] !== lastDv) { lastDv = dv[i]; dmul = Math.pow(2, lastDv / 1200); }
+      const f = Math.max(0, fv[i] * dmul);
       phase += f / sr;
       if (phase > 1) phase -= Math.floor(phase);
       const p = phase;
