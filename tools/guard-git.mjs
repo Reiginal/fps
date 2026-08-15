@@ -81,12 +81,24 @@ function writeClaims(path, claims) {
   renameSync(tmp, path);
 }
 
+/* 今の作業ツリーの場所。**worktreeごとに別になる。**
+   印がどの机で付いた物かを見分けるのに使う（下のsweepStaleとmine） */
+function treeRoot() {
+  try { return realpathSync(git(['rev-parse', '--show-toplevel']).trim()); } catch { return ''; }
+}
+
 /* 今も書きかけとして残っている物だけを残す。
    **コミットが済んだ印は消す。** 残しておくと、
-   同じファイルを次に触った別のセッションが理由もなく止められる */
-function sweepStale(claims, dirty, now) {
+   同じファイルを次に触った別のセッションが理由もなく止められる。
+
+   ただし消せるのは**自分の机（作業ツリー）で付いた印だけ。**
+   別のworktreeで書きかけのファイルは、こちらの git status には出てこないので、
+   「dirtyに無い＝もうコミットされた」と読むと、相手の書きかけの印を
+   横から消してしまう */
+function sweepStale(claims, dirty, now, tree) {
   for (const [path, c] of Object.entries(claims)) {
-    if (!dirty.has(path) || now - (c.t || 0) > KEEP_MS) delete claims[path];
+    if (now - (c.t || 0) > KEEP_MS) { delete claims[path]; continue; }
+    if ((c.w || tree) === tree && !dirty.has(path)) delete claims[path];
   }
   return claims;
 }
@@ -262,14 +274,15 @@ function main() {
          macOSの /tmp は /private/tmp への近道で、gitは辿った後の道を答える。
          辿らずに比べると「repoの外だ」と読んで、印を1つも残さないまま素通しする
          （検査を書いて初めて気づいた） */
-      const root = realpathSync(git(['rev-parse', '--show-toplevel']).trim());
+      const root = treeRoot();
       const real = join(realpathSync(dirname(abs)), basename(abs));
-      if (!real.startsWith(`${root}/`)) pass();   // repoの外は関係ない
+      if (!root || !real.startsWith(`${root}/`)) pass();   // repoの外は関係ない
       const rel = real.slice(root.length + 1);
       const path = claimFile();
       const claims = readClaims(path);
-      claims[rel] = { s: me, t: Date.now() };
-      writeClaims(path, sweepStale(claims, dirtyPaths(), Date.now()));
+      // wはどの作業ツリーで触ったか。worktreeへ隔離した相手と区別するのに使う
+      claims[rel] = { s: me, t: Date.now(), w: root };
+      writeClaims(path, sweepStale(claims, dirtyPaths(), Date.now(), root));
       pass();
     }
 
@@ -289,7 +302,32 @@ function main() {
 
     // 2. 名指しでも、他のセッションが触った物が混ざっていたら止める
     const claims = readClaims(claimFile());
-    const mine = (p) => !claims[p] || claims[p].s === me || Date.now() - (claims[p].t || 0) > KEEP_MS;
+    const myTree = treeRoot();
+    /* 自分が触ってよいファイルか。次のどれかなら通す。
+         ・誰も印を付けていない
+         ・自分の印
+         ・24時間より古い印（相手のセッションはもう居ない）
+         ・**別の作業ツリー(worktree)で付いた印**
+
+       最後のがworktree対応。CLAUDE.mdは「並行して別のセッションが動いていたら
+       worktreeへ隔離してから作業する」と決めているのに、隔離した先でも
+       同じファイル名というだけで止まっていた。
+
+       隔離してあれば**ディスク上まったく別のファイル**なので、
+       相手の書きかけが自分のコミットに混ざりようがない
+       （この台帳が防ぎたかった2026-08-12の事故は、同じ机を2人で使った時の話）。
+       別々の枝で同じ所を直していれば、それはマージの時にgitが普通に扱う。
+
+       印にwが無いのは、この直しより前に付いた古い印。
+       どの机か分からないので、今まで通り止める側に倒す */
+    const mine = (p) => {
+      const c = claims[p];
+      if (!c) return true;
+      if (c.s === me) return true;
+      if (Date.now() - (c.t || 0) > KEEP_MS) return true;
+      if (myTree && c.w && c.w !== myTree) return true;
+      return false;
+    };
     const whose = (p) => `${p}（別のセッションが編集中）`;
 
     if (calls.some((c) => c.sub === 'commit')) {
