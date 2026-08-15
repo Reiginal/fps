@@ -2930,8 +2930,11 @@ class Game {
     const toPlayer = playerEye.distanceTo(muzzle);
 
     // 壁越しに当たらないよう、必ず遮蔽を確認する。
-    // 敵14体が撃ち合うと瞬間で毎秒30〜60発になるので、ここもoctreeで飛ばす
-    const ohit = this._terrainRay(muzzle, dir, Math.max(toPlayer + 4, 8));
+    // 敵14体が撃ち合うと瞬間で毎秒30〜60発になるので、ここもoctreeで飛ばす。
+    // レイは1本だけ飛ばして、遮蔽の確認と下の外れ弾の着弾で使い回す
+    // （前は足切りの距離が違うだけの同じレイを、外れ弾のたびに2回飛ばしていた）
+    const rawHit = this._terrainRay(muzzle, dir, Infinity);
+    const ohit = rawHit && rawHit.distance <= Math.max(toPlayer + 4, 8) ? rawHit : null;
     const blocked = !!(ohit && ohit.distance < toPlayer - 0.4);
 
     this.effects.tracer(
@@ -2982,8 +2985,8 @@ class Game {
         if (perp < 3.2 && along < toPlayer + 6) this.audio.whizBy(perp);
       }
 
-      // 外れ弾も周囲に着弾させる（掠める感じが出る）
-      const mhit = this._terrainRay(muzzle, dir, 80);
+      // 外れ弾も周囲に着弾させる（掠める感じが出る）。上で飛ばしたレイの使い回し
+      const mhit = rawHit && rawHit.distance <= 80 ? rawHit : null;
       if (mhit) {
         const h = this._meshNear(mhit, dir);
         const normal = h?.face

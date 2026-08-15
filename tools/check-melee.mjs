@@ -72,7 +72,8 @@ console.log('\n[3] 偽られても間隔が伸びるだけ');
   /* **近接以外では効かない。** 銃に強弱は無いので、
      ここを見ていないと「ライフルで威力1.85倍」が通ってしまう */
   ok(/heavy && sim\.def\.melee/.test(room), '**近接以外は強い一撃にならない**');
-  ok(/pad: sim\.def\.melee \?/.test(room), '刃の太さも近接の時だけ渡している');
+  // 太さは一度firePadに置いてから渡す（対人と対モンスターで同じ値を使うため）
+  ok(/const firePad = sim\.def\.melee \?/.test(room), '刃の太さも近接の時だけ渡している');
   /* 刃を出す高さは**サーバーが下げる。**申告された位置を直した後に下げているので、
      クライアントを書き換えても位置を稼げない */
   const at = room.indexOf('origin.y -= MELEE_SWEEP.DROP');

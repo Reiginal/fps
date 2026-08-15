@@ -159,7 +159,8 @@ console.log('\n[3] main.jsが実際に乗せ替わっている');
   // 残ってよいのは、足音の材質(_footSurface)と、面の取り直し(_meshNear)の2箇所だけ。
   // どちらも「材質が要る短いレイ」で、総当たりでも外接球で殆ど弾かれる
   ok(bare === 2, `総当たりのレイは残り${bare}箇所（_footSurfaceと_meshNearの2箇所だけ）`);
-  ok((main.match(/this\._terrainRay\(/g) || []).length >= 7, 'octreeのレイに乗っている');
+  // 敵の発砲は遮蔽の確認と外れ弾の着弾で1本を使い回すようにしたので、7から6へ減った
+  ok((main.match(/this\._terrainRay\(/g) || []).length >= 6, 'octreeのレイに乗っている');
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);

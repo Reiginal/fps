@@ -11,6 +11,7 @@
 //
 // 2枚に分けず1枚にしてあるのは、打ち間違えて行き来するたびに
 // 入力が消えるのが煩わしいため。見出しとボタンの文言だけ差し替える。
+import { esc } from './esc.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -214,7 +215,10 @@ export class AccountMenu {
     if (inside) {
       // 残高は0でも出す。**出さないと「まだ1枚も無い」が分からない**
       const coins = Number(this.user.coins ?? 0).toLocaleString();
-      who.innerHTML = `<b>${escapeHtml(this.user.name)}</b> でログイン中`
+      /* 名前は他人にも出る文字列なので、そのまま innerHTML へ入れない。
+         textContent で足りる所は textContent を使っているが、
+         ここは <b> と <br> を混ぜたいので、値の方を無害にしてから入れる */
+      who.innerHTML = `<b>${esc(this.user.name)}</b> でログイン中`
         + `<br>コイン <b>${coins}</b>枚`
         + (this.user.verified ? '' : '　メールの確認がまだです');
     } else {
@@ -370,11 +374,3 @@ export class AccountMenu {
   }
 }
 
-/* 名前は他人にも出る文字列なので、そのまま innerHTML へ入れない。
-   textContent で足りる所は textContent を使っているが、
-   ここは <b> と <br> を混ぜたいので、値の方を無害にしてから入れる */
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ));
-}

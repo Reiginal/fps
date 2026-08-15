@@ -36,12 +36,15 @@ const VERBOSE = process.argv.includes('-v');
    **速くしたつもりのまま元の遅さに戻る**（しかも緑のままなので気づけない）。
    実在するかは check-meta.mjs の[4]が見ている */
 const HEAVY = [
-  'check-sound.mjs',        // 音を実際に計算して測る。一番長い
-  'check-swarm.mjs',        // 敵を大量に動かす
-  'check-audio-leak.mjs',
-  'check-syntax.mjs',       // ファイルの数だけ node --check を起こす
+  'check-scope.mjs',        // 照準へ放射状にレイを当てて測る。一番長い（実測15秒）
+  'check-sound.mjs',        // 音を実際に計算して測る（実測10秒）
+  'check-swarm.mjs',        // 敵を大量に動かす（実測9秒）
   'check-loadout.mjs',
   'check-reload.mjs',
+  'check-skins.mjs',
+  'check-rays.mjs',
+  'check-audio-leak.mjs',
+  'check-syntax.mjs',       // ファイルの数だけ node --check を起こす
   'check-heal.mjs',
 ];
 

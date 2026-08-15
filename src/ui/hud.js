@@ -1,11 +1,10 @@
 // HUDはDOMで描く。Canvasに描くより文字が締まって見えるし、CSSで調整が効く。
+// 名前は他人の端末から届く文字列。そのまま流すとタグとして解釈されるので、
+// HTMLを組み立てる所は必ずescを通す
+import { esc } from './esc.js';
+
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
-
-// 名前は他人の端末から届く文字列。そのまま流すとタグとして解釈されるので、
-// HTMLを組み立てる所は必ずここを通す
-const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ESC[c]);
 
 export class HUD {
   constructor() {

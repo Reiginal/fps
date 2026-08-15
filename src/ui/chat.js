@@ -6,11 +6,9 @@
 // innerHTMLへ入れる前に必ずescを通す。ここを抜かすと、発言に細工した人が
 // 他人の画面を書き換えられる。身内で遊ぶ前提でも、ここだけは省けない。
 import { CHAT_MAX } from '../net/protocol.js';
+import { esc } from './esc.js';
 
 const $ = (id) => document.getElementById(id);
-
-const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ESC[c]);
 
 // 画面に残す行数。増やすと古い発言まで見えるが、視界を塞ぐ
 const MAX_LINES = 6;
