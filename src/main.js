@@ -3404,15 +3404,22 @@ class Game {
   /* 相手の頭の上に名前を出す。壁の向こうは出さない。
      Octreeへ1本ずつレイを通すので、8人でも毎フレーム7本で済む */
   /**
-   * その人が味方か。**チーム戦の時だけ。**
+   * その人が味方か。**チーム戦と協力プレイ。**
    *
-   * どちらのチームかは席から決まる（protocol.jsのTEAM_OF_SEAT）が、
+   * 2対2はどちらのチームかが席から決まる（protocol.jsのTEAM_OF_SEAT）が、
    * 試合が始まると席の情報はもう流れてこないので、得点の電文に載せてもらった
-   * 番号をそのまま見る
+   * 番号をそのまま見る。
+   *
+   * **協力プレイは席に関係なく全員が味方**（server/modes.jsのcoopのteamOf）。
+   * ここを`mode === 'team'`だけで見ていたので、協力プレイでは
+   * **誰の札も一枚も出ていなかった**——見た目は全員同じ兵士で、名前も体力も
+   * 出ないので、遊んでいる間ずっと「どれが仲間か分からない」状態だった
    */
   _isMate(id) {
     const net = this.net;
-    if (!net || net.mode !== 'team' || id === net.id) return false;
+    if (!net || id === net.id) return false;
+    if (net.mode === 'coop') return true;
+    if (net.mode !== 'team') return false;
     const me = net.players.get(net.id);
     const other = net.players.get(id);
     if (!me || !other) return false;
@@ -3423,8 +3430,20 @@ class Game {
     const cam = this.camera;
     const list = this._plates;
     list.length = 0;
+    /* 協力プレイは**味方の札を壁越しにも出す。**
+
+       対人（2対2）で壁抜けを許していないのは、味方の居場所が常に分かると
+       「2人で挟む・別々に回る」という組み立てがそもそも要らなくなるため。
+       これは相手プレイヤーが居るから成り立つ話で、協力プレイには
+       隠れる相手が居ない。壁で切ると、**倒れた仲間が居ることにすら
+       気づけない**（順位表を開けば分かるが、囲まれている最中にTabは押せない）。
+
+       壁の向こうの札は薄くして、見えている仲間と見分けが付くようにする */
+    const coop = this.net?.mode === 'coop';
     for (const st of states) {
-      if (st.state & S.DEAD) continue;
+      const down = !!(st.state & S.DEAD);
+      // 倒れている人の札は協力プレイの味方だけ。対人では相手に情報を渡すことになる
+      if (down && !(coop && this._isMate(st.id))) continue;
       /* **見えている味方には必ず札を出す。ただし壁の向こうは出さない。**
 
          敵の札は「撃った直後」かつ「見えている時」だけにしてある（常時出すと
@@ -3445,11 +3464,14 @@ class Game {
       if (!r) continue;
       this._toRemote.subVectors(r.headPos, cam.position);
       const dist = this._toRemote.length();
-      if (dist < 0.5 || dist > 90) continue;
+      // 協力プレイの味方だけは、離れていても消さない（広い町で散ると見失う）
+      if (dist < 0.5 || dist > (coop && mate ? 140 : 90)) continue;
       this._toRemote.divideScalar(dist);
       this._ray.set(cam.position, this._toRemote);
       const hit = this.level.octree.rayIntersect(this._ray);
-      if (hit && hit.distance < dist - 0.45) continue;
+      const occluded = !!(hit && hit.distance < dist - 0.45);
+      // 壁の向こうを通すのは協力プレイの味方だけ。それ以外は今まで通り切る
+      if (occluded && !(coop && mate)) continue;
 
       this._plateV.copy(r.headPos).project(cam);
       if (this._plateV.z > 1) continue;
@@ -3469,8 +3491,16 @@ class Game {
         gun: WEAPONS[st.weapon]?.nick || WEAPONS[st.weapon]?.name || '',
         // 発砲からの残り具合。点と同じ速さで消えていく。味方は薄れさせない
         fade: mate ? 1 : this._blips.get(st.id).t,
-        // 味方かどうか。札の色を変えるのに使う（2対2でだけ立つ）
+        // 味方かどうか。札の色を変えるのに使う
         mate,
+        // 壁の向こうに居る（協力プレイの味方だけここまで来る）。薄くして見分ける
+        occluded,
+        // 倒れている。**復活を待っている仲間が居ることが分かるように**
+        down,
+        /* 体力の帯を常に出すか。**協力プレイの味方だけ。**
+           普段は満タンの相手にまで帯を出すと画面が線だらけになるので隠しているが、
+           協力プレイでは「誰が削られているか」がそのまま次の動きを決める */
+        alwaysBar: coop && mate,
       });
     }
     this.hud.nameplates(list);

@@ -777,7 +777,10 @@ export class HUD {
         };
         this.plateEls.set(p.id, e);
       }
-      if (e.txt !== p.name) { e.txt = p.name; e.name.textContent = p.name; }
+      /* 名前。倒れている味方だけ but 書き足す（下のlabel）。
+         毎フレーム呼ばれる所なので、変わった時だけ書く */
+      const label = p.down ? `${p.name}（倒れている）` : p.name;
+      if (e.txt !== label) { e.txt = label; e.name.textContent = label; }
       /* 何を持っているか。**ガンゲームで一番要る情報。**
          倒すたびに武器が替わるのに、他人の姿はどの銃でもほぼ同じ形なので、
          札に書かないと相手が今どの段にいるのかが分からない。
@@ -816,8 +819,11 @@ export class HUD {
       // 重なった時は近いほうを手前に。奥の名前が手前に来ると両方読めなくなる
       const z = Math.max(0, 999 - Math.round(d));
       if (e.z !== z) { e.z = z; e.root.style.zIndex = z; }
-      // 満タンの相手にまでバーを出すと、居るだけで画面が線だらけになる
-      const barOn = hp < 100;
+      /* 満タンの相手にまでバーを出すと、居るだけで画面が線だらけになる。
+         ただし協力プレイの味方だけは常に出す（alwaysBar）——
+         誰が削られているかがそのまま次の動きを決めるので、
+         「見えていない＝満タン」では読み取れない */
+      const barOn = hp < 100 || !!p.alwaysBar;
       if (e.barOn !== barOn) { e.barOn = barOn; e.bar.style.display = barOn ? 'block' : 'none'; }
       const barW = `${Math.round(46 * k)}px`;
       if (e.barW !== barW) { e.barW = barW; e.bar.style.width = barW; }
@@ -831,6 +837,17 @@ export class HUD {
          狙う前に色で分かる必要がある */
       const mate = !!p.mate;
       if (e.mate !== mate) { e.mate = mate; e.root.classList.toggle('mate', mate); }
+      /* 壁の向こうに居る味方。**協力プレイだけここに来る。**
+         見えている味方と同じ濃さで出すと、札があるのに姿が無い所を
+         撃ちにいくことになる。輪郭だけ残して薄くする */
+      const occl = !!p.occluded;
+      if (e.occl !== occl) { e.occl = occl; e.root.classList.toggle('occl', occl); }
+      /* 倒れている味方。**復活待ちの人が居ることが分かる。**
+         色と字で「今は数に入っていない」を伝える。
+         これが無いと、囲まれている最中に何人残っているのかを
+         順位表(Tab)を開かないと数えられない */
+      const down = !!p.down;
+      if (e.down !== down) { e.down = down; e.root.classList.toggle('down', down); }
     }
     // 見えなくなった相手・抜けた相手の札を片付ける
     for (const [id, e] of this.plateEls) {

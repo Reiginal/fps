@@ -1127,6 +1127,25 @@
      2人で挟む・別々に回る、という組み立てがそもそも要らなくなる */
   .plate.mate .pname { color: var(--ok); }
   .plate.mate .pfill { background: var(--ok); }
+  /* 壁の向こうに居る味方。**協力プレイだけ付く。**
+     対人では味方の札も壁で切っている（味方の位置が常に分かると
+     2人で挟む・別々に回るという組み立てが要らなくなる）が、
+     協力プレイには隠れる相手が居ないので通す。
+     ただし見えている味方と同じ濃さで出すと、姿の無い所を撃ちにいくことになる。
+     字を細らせて枠だけ残す */
+  .plate.occl .pname {
+    background: rgba(4,7,10,.25);
+    color: rgba(120,220,170,.72);
+    text-shadow: 0 0 4px rgba(0,0,0,.8);
+  }
+  .plate.occl .pgun { display: none; }
+  .plate.occl .pbar { opacity: .55; }
+  /* 倒れている味方。**復活を待っている人が居ることが分かる。**
+     これが無いと、囲まれている最中に何人残っているのかを
+     順位表(Tab)を開かないと数えられない */
+  .plate.down .pname { color: var(--warn); letter-spacing: .04em; }
+  .plate.down .pbar { display: none !important; }
+  .plate.down .pgun { display: none; }
 
   /* 2対2の時だけ席に付く、どちら側かの印。
      色は protocol.js の TEAM_COLORS と揃えてある（別々に決めると必ずずれる） */
