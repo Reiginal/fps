@@ -101,6 +101,14 @@ console.log('\n[4] 1人用と対戦で同じ数字を見ている');
   ok(/e\.intersect\(from, dir, sweep \? sweep\.pad : 0\)/.test(main),
     '1人用の敵にも刃の太さを渡している');
   ok(/sendShot\(origin, dir, heavy\)/.test(main), '対戦へは印を渡している');
+  /* 対戦の絵と音の経路も、サーバーの判定と同じ間合い(reach)と刃の高さ(from)で見ること。
+     def.rangeと目の高さのままだと、強い一撃の伸びた間合い(1.9〜2.5m)で
+     ヒットマーカーだけ出て手元は無音、という食い違いが出る（実際そうなっていた） */
+  const versus = main.slice(main.indexOf('_resolveShotVersus(shot) {'));
+  ok(/_terrainRay\(from, dir, reach\)/.test(versus),
+    '対戦の壁の絵と音も同じ間合いと高さで見ている');
+  ok(/_nearestRemoteHit\(from, dir, Math\.min\(wallDist, reach\)\)/.test(versus),
+    '対戦の相手の絵の切り替えも同じ線で見ている');
 
   const enemy = src('src/ai/enemy.js');
   ok(/HITBOX\.CHEST_R \* s \+ pad/.test(enemy) && /HITBOX\.LEG_R \* s \+ pad/.test(enemy),

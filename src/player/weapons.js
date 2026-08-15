@@ -5,9 +5,9 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { muzzleFlashTexture, radialTexture, smokeTexture } from '../world/textures.js';
 import { tryModelOverride } from './glbview.js';
 import { applySkin, skinFor, shapeOf } from './skins.js';
-// 持ち物の決まりだけ取り込む。protocol.jsはこちらを読まないので輪にならない
+// 持ち物の決まりと包帯の秒数を取り込む。protocol.jsはこちらを読まないので輪にならない
 import {
-  loadoutOf, NADE, MELEE_HEAVY, MELEE_SWEEP, DEFAULT_SKIN,
+  loadoutOf, NADE, HEAL, MELEE_HEAVY, MELEE_SWEEP, DEFAULT_SKIN,
 } from '../net/protocol.js';
 // 強い一撃の音。低く長い（重い物を振ると空気の量が増える）
 import { swingTune, gunTune } from '../core/audio.js';
@@ -332,9 +332,10 @@ function shapeIdOf(weaponId) {
   const skin = skinFor(weaponId);
   return shapeOf(skin) ? skin : null;
 }
-// 包帯を巻くのにかかる秒数。protocol.jsのHEAL.TIME_Sと同じ値を持つ
-// （weapons.jsはprotocolを読まないので、ここだけ写す。片方を変えたら両方直すこと）
-const HEAL_TIME = 2.4;
+// 包帯を巻くのにかかる秒数。protocol.jsのHEAL.TIME_Sから取る。
+// 回復の実時間(player.js)と巻く腕の動き(ここ)が別々の数字を持っていると、
+// 片方だけ直した日に巻き終わりと腕の動きが食い違うので、1つの値で揃える
+const HEAL_TIME = HEAL.TIME_S;
 
 // 移動の速さ1m/sあたり、ばらつき角に足す量。
 // 0.0045から下げてある。20m先の散らばりで見ると、走りながらの腰だめが
