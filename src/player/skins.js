@@ -520,10 +520,6 @@ export const shapeOf = (id) => SHAPE_BUILDS[id] || null;
 let owned = new Set();
 /* 武器ごとに何を着けているか。{ rifle:'desert', ... } */
 let worn = loadWorn();
-/* 装備が変わった時に呼ぶ。今持っている銃へ掛け直すのは呼ぶ側の仕事 */
-let onWear = () => {};
-
-export const setOnWear = (fn) => { onWear = fn || (() => {}); };
 
 /** その武器に今着いているスキンのid。何も着けていなければ標準 */
 export const skinFor = (weaponId) => {
@@ -555,7 +551,6 @@ export function setAccount({ owned: list, equipped } = {}) {
     worn[w] = (id && canEquip(w, id) && hasSkin(w, id)) ? id : DEFAULT_SKIN;
   }
   saveWorn();
-  onWear();
 }
 
 /**
@@ -567,7 +562,6 @@ export function wearSkin(weaponId, skinId) {
   if (!hasSkin(weaponId, skinId)) return false;
   worn[weaponId] = skinId;
   saveWorn();
-  onWear();
   return true;
 }
 

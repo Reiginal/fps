@@ -157,7 +157,6 @@ export const MODE_LIST = [
   },
 ];
 export const MODE_IDS = MODE_LIST.map((m) => m.id);
-export const modeName = (id) => (MODE_LIST.find((m) => m.id === id) || MODE_LIST[0]).name;
 
 /* ---------------------------------------------------------- ステージ */
 
@@ -170,7 +169,6 @@ export const MAP_LIST = [
   { id: 'edo', name: '江戸', desc: '板塀と瓦屋根の宿場町' },
 ];
 export const MAP_IDS = MAP_LIST.map((m) => m.id);
-export const mapName = (id) => (MAP_LIST.find((m) => m.id === id) || MAP_LIST[0]).name;
 
 // ガンゲームで配る順番。**持ち物(LOADOUT_IDS)とは別物で、こちらは表の全部を使う。**
 // ショットガンは持って出ない武器だが、配られる側なので入る。
@@ -1012,9 +1010,6 @@ export function itemsFor(weapon) {
       .map((s) => ({ ...s, kind: 'shape' })),
   ];
 }
-
-/** そのidが形違いか（色ではなく組み立てが別か） */
-export const isShape = (id) => SHAPE_LIST.some((s) => s.id === id);
 
 /* 商品1つを指す文字列。**武器ごとに別の商品**なので、両方が要る。
    「デザートのライフル」と「デザートのピストル」は別々に買う */
