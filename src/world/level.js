@@ -730,6 +730,14 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
     kawara: mats.kawara,
     earth: mats.packedEarth,
     shoji: mats.shojiPaper,
+    /* 2026-08-17に足した3枚。**「江戸に見えない」の正体は色だった。**
+       それまで白は1つも無く（障子紙は焼いてあるのに1回も貼っていなかった）、
+       朱は輝度0.0079でほぼ黒、石畳と玉垣と灯籠は市街地のコンクリだった。
+       実測: 白漆喰0.6499 ／ 朱0.2055 ／ 切石0.1908 ／ 瓦0.0151。
+       白と黒瓦の差が5.5倍→43倍になった（src/world/textures.jsのmaterialTone） */
+    shikkui: mats.shikkui,
+    urushi: mats.urushi,
+    stone: mats.cutstone,
   };
 
   // 全材質に頂点カラーを開ける。emit()が個体ごとに±5%の明度を焼き込むので、
@@ -759,6 +767,11 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
   addMacroVariation(M.timber, 0.30, 0.075);
   addMacroVariation(M.kawara, 0.40, 0.070);
   addMacroVariation(M.earth, 0.85, 0.070);
+  /* 白漆喰と朱漆は**むらを弱めに**入れる。強く入れると、せっかく上げた
+     明度と彩度がむらの暗い側で沈んで、また周りの茶色に混ざる */
+  addMacroVariation(M.shikkui, 0.30, 0.040);
+  addMacroVariation(M.urushi, 0.28, 0.035);
+  addMacroVariation(M.stone, 0.42, 0.065);
   // 上のaddMacroVariationは、textures側でaddSurfaceShadingが済んでいる材質には効かない
   // （向こうがuserData.macroAppliedを立てて一本化している）。効くのはpatch用のcloneだけ。
   // 地面の4m格子はそのどちらでも壊せないので、専用の混合層をここで足す。
@@ -1955,7 +1968,7 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
     for (const s of [-1, 1]) {
       const hx = s * (w / 2 + over);
       for (const t of [-1, 1]) {
-        put((x, z) => boxT(0.10, 0.16, slope, M.plaster, x, yEave + rise / 2 + 0.10, z, ry, t * ang, 0, 1.0, false),
+        put((x, z) => boxT(0.10, 0.16, slope, M.shikkui, x, yEave + rise / 2 + 0.10, z, ry, t * ang, 0, 1.0, false),
           hx, t * halfD / 2);
       }
     }
@@ -1992,7 +2005,7 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
 
   // 暖簾（のれん）。入口の上に垂らす布。朱の材質を借りる（布の材質は持っていない）
   const noren = (cx, cz, w, y, ry) => {
-    boxT(w, 0.52, 0.03, M.metalRed, cx, y - 0.26, cz, ry, 0, 0, 1.2, false);
+    boxT(w, 0.52, 0.03, M.urushi, cx, y - 0.26, cz, ry, 0, 0, 1.2, false);
     boxT(w + 0.1, 0.07, 0.07, M.timber, cx, y + 0.02, cz, ry, 0, 0, 1.0, false);
   };
 
@@ -2003,7 +2016,7 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
     // 壁。土台は板張り、上は漆喰にして2色にする（1色だと巨大な木箱に戻る）
     const doors = [{ side: face, u: 0, w: doorW }];
     band(w, d, 1.5, 0.16, M.timber, cx, 0, cz, 1.6, doors);
-    band(w, d, h - 1.5, 0.16, M.plaster, cx, 1.5, cz, 1.6, doors);
+    band(w, d, h - 1.5, 0.16, M.shikkui, cx, 1.5, cz, 1.6, doors);
     // 柱。角と中間に見せ柱を立てると、漆喰の面が板で仕切られて日本家屋になる
     for (const su of [-1, 1]) {
       for (const sv of [-1, 1]) {
@@ -2037,40 +2050,58 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
      町屋より背が高くて色が違うので、通りのどこに居るかがこれで分かる */
   const kura = (cx, cz, ry) => {
     const w = 6.4, d = 5.2, h = 4.4;
-    band(w, d, h, 0.28, M.plaster, cx, 0, cz, 1.4, [{ side: 'z-', u: 0, w: 1.9 }]);
-    // 腰の海鼠壁（なまこ壁）。下半分だけ材質を替えると、白い箱が蔵になる。
-    // **壁の上に貼る飾りなので当たり判定には入れない**
-    band(w + 0.04, d + 0.04, 1.5, 0.06, M.brick, cx, 0, cz, 2.4, [], false);
+    band(w, d, h, 0.28, M.shikkui, cx, 0, cz, 1.4, [{ side: 'z-', u: 0, w: 1.9 }]);
+    /* 腰の海鼠壁（なまこ壁）。**黒い瓦を並べて目地を白く盛る壁。**
+       ここは市街地の西洋レンガ(M.brick)を貼っていた。形だけ和物にして
+       表面が近代の資材、という抜け方をしていた所。黒瓦にすると、
+       上の白漆喰との対比がそのまま蔵の見た目になる。
+       **壁の上に貼る飾りなので当たり判定には入れない** */
+    band(w + 0.04, d + 0.04, 1.5, 0.06, M.kawara, cx, 0, cz, 2.4, [], false);
     gableRoof(cx, cz, w, d, h, 0.56, ry, 0.75);
-    // 観音扉。分厚い戸を左右に
-    for (const s of [-1, 1]) {
-      boxT(0.95, 2.2, 0.14, M.timber, cx + s * 0.5, 1.1, cz - d / 2 - 0.06, 0, 0, 0, 1.2, false);
-    }
+    /* 観音扉。**片方を開けて、両方とも当たり判定に入れる。**
+
+       ここは2枚とも solid=false で、しかも2枚合わせて幅1.95mが
+       band()の開けた1.9mの開口を完全に塞いでいた。つまり
+       **閉まって見えるのにすり抜けられる。** issue #57で
+       「板打ちだけは閉じている絵と挙動が食い違う」として直したのと同じ形。
+
+       塞いで解決にしない。蔵は通りの角に建っていて、中へ逃げ込めると
+       遮蔽として意味が出る。片方を90度開いた形で立てれば、
+       絵と挙動が合ったうえで幅0.95mの入口が残る（人の半径は0.35m） */
+    // 閉まっている側（右）。壁と同じ面に立てて、当たり判定に入れる
+    boxT(0.95, 2.2, 0.14, M.timber, cx + 0.5, 1.1, cz - d / 2 - 0.06, 0, 0, 0, 1.2, true);
+    // 開いている側（左）。蝶番の所で外向きに90度振る
+    boxT(0.14, 2.2, 0.95, M.timber, cx - 0.95, 1.1, cz - d / 2 - 0.52, 0, 0, 0, 1.2, true);
     mark(cx, cz, 4.2, 0.9);
   };
 
-  /* 鳥居。**朱塗りの色を持っていない**ので赤みの強い金属材(M.metalRed)を借りる。
+  /* 鳥居。**朱漆(M.urushi)で塗る。**
+     2026-08-17まで、朱を持っていなかったので市街地の塗装鉄板に赤を掛けていた。
+     materialのcolorはmapへの乗算なので、元が暗いと結果も暗くなる。
+     実測すると出力の輝度は0.0079——本物の朱(0.2103)の1/26.6で、
+     マップで唯一の差し色が遠目には黒い柱になっていた。
+     今の朱は実測0.2055（src/world/textures.jsのurushi）。
      笠木を島木と2段にして、左右を少し跳ね上げると（反り）鳥居の形になる。
      1本の横棒だとサッカーゴールに見える */
   const torii = (x, z, ry, w = 4.6, h = 3.6) => {
     const dirX = Math.cos(ry), dirZ = -Math.sin(ry);
     for (const s of [-1, 1]) {
       // 柱は上へ行くほど細い。まっすぐの円柱だと配管に見える
-      emit(cylGeo(0.15, 0.19, h, 10, 2), M.metalRed,
+      emit(cylGeo(0.15, 0.19, h, 10, 2), M.urushi,
         x + dirX * s * w / 2, h / 2, z + dirZ * s * w / 2, 0, 0, 0, true);
       // 亀腹（柱の根元の石）
-      cyl(0.26, 0.16, 10, M.concrete, x + dirX * s * w / 2, 0, z + dirZ * s * w / 2, 2, false);
+      cyl(0.26, 0.16, 10, M.stone, x + dirX * s * w / 2, 0, z + dirZ * s * w / 2, 2, false);
     }
     // 貫（ぬき）。柱を横に貫く角材。両端が柱から少し出るのが鳥居の形
-    boxD(w + 0.5, 0.20, 0.20, M.metalRed, x, h - 1.05, z, ry, 1.2);
+    boxD(w + 0.5, 0.20, 0.20, M.urushi, x, h - 1.05, z, ry, 1.2);
     // 額束（がくづか）。貫と島木の間の短い縦材
-    boxD(0.24, 0.72, 0.16, M.metalRed, x, h - 0.85, z, ry, 1.0);
+    boxD(0.24, 0.72, 0.16, M.urushi, x, h - 0.85, z, ry, 1.0);
     // 島木と笠木。2段にして、笠木を少し広く
-    boxD(w + 0.9, 0.20, 0.30, M.metalRed, x, h - 0.22, z, ry, 1.2);
-    boxD(w + 1.3, 0.17, 0.24, M.metalRed, x, h, z, ry, 1.2);
+    boxD(w + 0.9, 0.20, 0.30, M.urushi, x, h - 0.22, z, ry, 1.2);
+    boxD(w + 1.3, 0.17, 0.24, M.urushi, x, h, z, ry, 1.2);
     // 反り。両端に短い板を跳ね上げて置く
     for (const s of [-1, 1]) {
-      boxT(0.5, 0.16, 0.24, M.metalRed,
+      boxT(0.5, 0.16, 0.24, M.urushi,
         x + dirX * s * (w / 2 + 0.72), h + 0.10, z + dirZ * s * (w / 2 + 0.72), ry, 0, s * 0.22, 1.0, false);
     }
     mark(x, z, w * 0.5, 0.5);
@@ -2078,12 +2109,12 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
 
   // 石灯籠。竿・中台・火袋・笠を積む。石材が無いのでconcreteで代用
   const lantern = (x, z) => {
-    cyl(0.16, 0.30, 8, M.concrete, x, 0, z, 2);       // 基礎
-    cyl(0.11, 0.62, 8, M.concrete, x, 0.30, z, 2);    // 竿
-    box(0.44, 0.10, 0.44, M.concrete, x, 0.92, z, 0, 1.4);
-    box(0.30, 0.36, 0.30, M.concrete, x, 1.02, z, 0, 1.2);   // 火袋
+    cyl(0.16, 0.30, 8, M.stone, x, 0, z, 2);       // 基礎
+    cyl(0.11, 0.62, 8, M.stone, x, 0.30, z, 2);    // 竿
+    box(0.44, 0.10, 0.44, M.stone, x, 0.92, z, 0, 1.4);
+    box(0.30, 0.36, 0.30, M.stone, x, 1.02, z, 0, 1.2);   // 火袋
     box(0.56, 0.12, 0.56, M.kawara, x, 1.38, z, Math.PI / 4, 1.4);
-    box(0.14, 0.16, 0.14, M.concrete, x, 1.50, z, Math.PI / 4, 1.0);  // 宝珠
+    box(0.14, 0.16, 0.14, M.stone, x, 1.50, z, Math.PI / 4, 1.0);  // 宝珠
     mark(x, z, 0.6, 0.6);
   };
 
@@ -2099,8 +2130,8 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
 
   /* 井戸。**通りの結節点に置く目印。**屋根付きにすると遠くからでも読める */
   const well = (x, z) => {
-    cyl(0.85, 0.72, 12, M.concrete, x, 0, z, 3);
-    cyl(0.72, 0.10, 12, M.concrete, x, 0.72, z, 3, false);
+    cyl(0.85, 0.72, 12, M.stone, x, 0, z, 3);
+    cyl(0.72, 0.10, 12, M.stone, x, 0.72, z, 3, false);
     for (const s of [-1, 1]) boxT(0.12, 1.7, 0.12, M.timber, x + s * 0.78, 0.85, z, 0, 0, 0, 1.0, false);
     boxT(0.14, 0.14, 1.9, M.timber, x, 1.66, z, 0, 0, Math.PI / 2, 1.0, false);
     gableRoof(x, z, 2.0, 1.4, 1.72, 0.5, Math.PI / 2, 0.3);
@@ -2216,8 +2247,8 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
     /* 基壇（石の台）。**2段に積む。**
        前は11.4の台と12.4の台を両方 y=0 から立てていて、
        重なった所を歩くと押し戻す向きが2つできていた */
-    box(12.4, 0.22, 12.4, M.concrete, 0, 0, 0, 0, 3.0);
-    box(11.4, 0.33, 11.4, M.concrete, 0, 0.22, 0, 0, 3.0);
+    box(12.4, 0.22, 12.4, M.stone, 0, 0, 0, 0, 3.0);
+    box(11.4, 0.33, 11.4, M.stone, 0, 0.22, 0, 0, 3.0);
     // 社殿。四方に入口
     const doors = [
       { side: 'z-', u: 0, w: 2.6 }, { side: 'z+', u: 0, w: 2.6 },
@@ -2227,14 +2258,14 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
     // 内側の柱。中が空洞の箱だと「屋根の付いた四角い部屋」で終わる
     for (const su of [-1, 1]) {
       for (const sv of [-1, 1]) {
-        boxT(0.24, 3.2, 0.24, M.metalRed, su * 3.1, 0.55 + 1.6, sv * 3.1, 0, 0, 0, 1.0, false);
+        boxT(0.24, 3.2, 0.24, M.urushi, su * 3.1, 0.55 + 1.6, sv * 3.1, 0, 0, 0, 1.0, false);
       }
     }
     // 縁側（まわりの回り縁）と高欄
     band(10.6, 10.6, 0.16, 0.7, M.timber, 0, 0.55, 0, 1.6);
     for (const s of [-1, 1]) {
-      boxD(10.6, 0.09, 0.09, M.metalRed, 0, 1.18, s * 5.2, 0, 1.0);
-      boxD(0.09, 0.09, 10.6, M.metalRed, s * 5.2, 1.18, 0, 0, 1.0);
+      boxD(10.6, 0.09, 0.09, M.urushi, 0, 1.18, s * 5.2, 0, 1.0);
+      boxD(0.09, 0.09, 10.6, M.urushi, s * 5.2, 1.18, 0, 0, 1.0);
     }
     gableRoof(0, 0, 9.6, 9.6, 3.75, 0.60, 0, 1.10);
     // 千木（ちぎ）。屋根の上でX字に交わる木。**遠目のシルエットで社と分かる印**
@@ -2259,11 +2290,11 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
         const u = i * 1.75;
         if (Math.abs(u) < 3.2) continue;      // 参道の口
         if (Math.abs(u) > R) continue;
-        box(0.22, 1.05, 0.22, M.concrete, ax + dirX * u, 0, az + dirZ * u, ry, 1.0);
+        box(0.22, 1.05, 0.22, M.stone, ax + dirX * u, 0, az + dirZ * u, ry, 1.0);
       }
       // 笠石（柱の上を繋ぐ横石）
       for (const s of [-1, 1]) {
-        boxD(R - 3.4, 0.13, 0.30, M.concrete,
+        boxD(R - 3.4, 0.13, 0.30, M.stone,
           ax + dirX * s * (R + 3.4) / 2, 1.05, az + dirZ * s * (R + 3.4) / 2, ry, 1.2);
       }
     }
@@ -2347,10 +2378,14 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
   barrelStack(-16.0, -16.0, 0.7); barrelStack(16.0, 16.0, 0.7);
   lumber(-22.4, 16.5, 0.15); lumber(22.4, -16.5, 0.15);
   lumber(16.5, 22.4, Math.PI / 2 + 0.1); lumber(-16.5, -22.4, Math.PI / 2 + 0.1);
-  crate(1.1, 1.1, -21.0, 0, 5.5, 0.3);
-  crate(1.0, 0.9, 21.0, 0, -5.5, 0.9);
-  crate(1.2, 1.0, 5.5, 0, 21.0, 0.2);
-  crate(1.1, 1.0, -5.5, 0, -21.0, 0.5);
+  /* **木箱(crate)は置かない。** あれは角に鋼の隅金物を8個付けて
+     梱包バンドを2本掛ける近代の輸送箱で、江戸の通りに置くと時代錯誤。
+     しかも4個とも戦域のすぐ外（半径21m前後）で、必ず目に入る場所だった。
+     同じ高さの遮蔽は、この町が既に持っている物（酒樽と米俵）で作る */
+  barrelStack(-21.0, 5.5, 0.3);
+  barrelStack(21.0, -5.5, 0.9);
+  rice(5.5, 21.0, 0.2);
+  rice(-5.5, -21.0, 0.5);
 
   // 裏通りの竹垣。町屋の裏へ回った時に、抜け道が読めるようにする
   bambooFence(-12, -31.5, 0, 10, 1.3);
@@ -2363,17 +2398,17 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
      土一色の板が420m四方に1枚あるだけで、通りも境内も同じ色をしていた。
      石畳の環状の通りと、玉砂利の境内と、その外の土を敷き分ける。
      板は物の足跡(marks)が出揃ってから焼くので、生成の呼び出しは最後 */
-  patch(34, 34, M.concrete, 0, 0, 0, 0.019, 12, 0);            // 境内の玉砂利
+  patch(34, 34, M.stone, 0, 0, 0, 0.019, 12, 0);            // 境内の玉砂利
   // 環状の通り。4本の帯で囲む
-  patch(50, 9.0, M.concrete, 0, -19.4, 0, 0.021, 10, 1);
-  patch(50, 9.0, M.concrete, 0, 19.4, 0, 0.021, 10, 1);
-  patch(9.0, 50, M.concrete, -19.4, 0, 0, 0.021, 10, 1);
-  patch(9.0, 50, M.concrete, 19.4, 0, 0, 0.021, 10, 1);
+  patch(50, 9.0, M.stone, 0, -19.4, 0, 0.021, 10, 1);
+  patch(50, 9.0, M.stone, 0, 19.4, 0, 0.021, 10, 1);
+  patch(9.0, 50, M.stone, -19.4, 0, 0, 0.021, 10, 1);
+  patch(9.0, 50, M.stone, 19.4, 0, 0, 0.021, 10, 1);
   // 参道。境内から四方の門へ抜ける道
-  patch(6.0, 20, M.concrete, 0, -24, 0, 0.024, 5, 2);
-  patch(6.0, 20, M.concrete, 0, 24, 0, 0.024, 5, 2);
-  patch(20, 6.0, M.concrete, -24, 0, 0, 0.024, 5, 2);
-  patch(20, 6.0, M.concrete, 24, 0, 0, 0.024, 5, 2);
+  patch(6.0, 20, M.stone, 0, -24, 0, 0.024, 5, 2);
+  patch(6.0, 20, M.stone, 0, 24, 0, 0.024, 5, 2);
+  patch(20, 6.0, M.stone, -24, 0, 0, 0.024, 5, 2);
+  patch(20, 6.0, M.stone, 24, 0, 0, 0.024, 5, 2);
   // 町屋の裏の土。石畳と石畳の間を埋めて、境界が1本の直線にならないようにする
   patch(16, 12, M.dirt, -26, -31.5, 0.10, 0.023, 7, 1);
   patch(16, 12, M.dirt, 26, 31.5, -0.10, 0.023, 7, 1);

@@ -138,9 +138,85 @@ console.log('\n[5] 部屋でマップを選べる（setModeと同じ作法）');
 console.log('\n[6] 江戸用の材質がtextures.jsに揃っている');
 {
   const src = readFileSync(new URL('../src/world/textures.js', import.meta.url), 'utf8');
-  for (const name of ['timberSiding', 'kawara', 'packedEarth', 'shojiPaper']) {
+  for (const name of ['timberSiding', 'kawara', 'packedEarth', 'shojiPaper',
+    'shikkui', 'urushi', 'cutstone']) {
     ok(new RegExp(`${name}: mk\\(`).test(src), `${name} がbuildMaterials()の戻り値にある`);
   }
+}
+
+console.log('\n[6.5] 色が「江戸」になっている（ここが根っこだった）');
+/* なぜ要るか: 2026-08-17に「江戸っていうステージも全然江戸感ない。
+   何のこだわりもない」と言われて、屋根の形と密度を疑う前に材質の色を測ったら、
+   **実際に置いている6種の平均輝度が0.074〜0.083の12%幅に固まっていた。**
+     石畳0.0779 板壁0.0738 叩き土0.0771 漆喰0.0824 木0.0769 米俵0.0828
+   離れているのは瓦0.0150だけ。つまり「同じ明るさの茶色い面の上に
+   黒い三角屋根が乗った物」で、これは江戸ではなく土壁の集落＝砂漠の集落に見える。
+
+   日本家屋の記号は「白漆喰・黒瓦・木格子・朱」の4色の対比なので、
+   **白が無く朱が黒い**時点で、形をいくら作り込んでも画は変わらない。
+
+   ここが黙って元へ戻る（誰かが材質を市街地の物へ差し替える等）と、
+   同じ所へ一直線で戻るので、数字で見張る */
+{
+  const { materialTone } = await import('../src/world/textures.js');
+  const t = (n) => materialTone(n);
+  const shikkui = t('shikkui'), urushi = t('urushi'), stone = t('cutstone');
+  const kawara = t('kawara'), earth = t('packedEarth'), timber = t('timberSiding');
+
+  // 白。**これが無かった**（障子紙は焼いてあるのに1回も貼っていなかった）
+  ok(shikkui.lum > 0.45,
+    `白漆喰が本当に白い（輝度${shikkui.lum.toFixed(4)} / 0.45以上。前の漆喰は0.0742）`);
+  const contrast = shikkui.lum / kawara.lum;
+  ok(contrast > 20,
+    `白漆喰と黒瓦の対比がある（${contrast.toFixed(0)}倍 / 20倍以上。前は5.5倍）`);
+
+  // 朱。本物の朱はsRGB(224,75,40)で輝度0.2103
+  ok(urushi.lum > 0.12,
+    `朱が黒くない（輝度${urushi.lum.toFixed(4)} / 0.12以上。前は0.0079で本物の1/26.6）`);
+  ok(urushi.r > urushi.g * 2 && urushi.r > urushi.b * 2,
+    `朱が赤い（sRGB(${urushi.srgb.join(',')})）`);
+  // 漆は半艶。1に近いと朱色のフェルトになる
+  ok(urushi.rough < 0.62, `漆に艶が残っている（粗さ${urushi.rough.toFixed(2)} / 0.62未満）`);
+
+  // 石。足元と玉垣と灯籠。土と同じ暖色だと地面と壁の境が消える
+  ok(stone.lum > earth.lum * 1.6,
+    `切石が土より明るい（石${stone.lum.toFixed(4)} 対 土${earth.lum.toFixed(4)}）`);
+  ok(stone.b > stone.r, `切石が寒色に振ってある（青${stone.srgb[2]} > 赤${stone.srgb[0]}）`);
+
+  /* **輝度が1点に集まっていないこと。** ここが12%幅に固まっていたのが
+     「江戸感が無い」の正体だった。一番明るい材質と一番暗い材質で
+     20倍以上開いていることを見る */
+  const all = [shikkui, urushi, stone, kawara, earth, timber].map((m) => m.lum);
+  const spread = Math.max(...all) / Math.min(...all);
+  ok(spread > 20, `明るさが散らばっている（最大/最小=${spread.toFixed(0)}倍 / 20倍以上）`);
+
+  // 実際に江戸へ貼っていること（材質を作っただけで貼り忘れると意味が無い）
+  const lv = readFileSync(new URL('../src/world/level.js', import.meta.url), 'utf8');
+  const edo = lv.slice(lv.indexOf("if (mapId === 'edo') {"), lv.indexOf('  } else {', lv.indexOf("if (mapId === 'edo') {")));
+  ok(edo.includes('M.shikkui'), '白漆喰を江戸に貼っている');
+  ok(edo.includes('M.urushi'), '朱漆を江戸に貼っている');
+  ok(edo.includes('M.stone'), '切石を江戸に貼っている');
+  ok(!/M\.concrete\b/.test(edo), '江戸に市街地のコンクリが残っていない');
+  ok(!/M\.metalRed\b/.test(edo), '江戸に塗装鉄板の赤が残っていない');
+  ok(!/M\.plaster\b/.test(edo), '江戸に廃墟の漆喰が残っていない');
+}
+
+console.log('\n[6.6] 絵と挙動が食い違っていない');
+/* 蔵の観音扉が、閉まって見えるのに当たり判定を持っていなかった
+   （2枚とも solid=false で、合わせて幅1.95mがband()の開けた1.9mの開口を
+   完全に塞いでいた）。issue #57で直したのと同じ形の再発。
+   木箱は鋼の隅金物と梱包バンドが付いた近代の輸送箱なので江戸には置かない */
+{
+  const lv = readFileSync(new URL('../src/world/level.js', import.meta.url), 'utf8');
+  const kura = lv.split('const kura = (cx, cz, ry) => {')[1]?.split('\n  };')[0] || '';
+  ok(kura.length > 0, '蔵を組む所が見つかった');
+  const doorLines = kura.split('\n').filter((l) => /2\.2, /.test(l) && /M\.timber/.test(l));
+  ok(doorLines.length === 2, `観音扉が2枚ある（${doorLines.length}枚）`);
+  ok(doorLines.every((l) => /true\);\s*$/.test(l.trim())),
+    '扉が2枚とも当たり判定に入っている（閉まって見えるのにすり抜けない）');
+
+  const edo = lv.slice(lv.indexOf("if (mapId === 'edo') {"), lv.indexOf('  } else {', lv.indexOf("if (mapId === 'edo') {")));
+  ok(!/^\s*crate\(/m.test(edo), '江戸に近代の木箱を置いていない');
 }
 
 console.log('\n[7] 湧いた所から本当に歩けるか（実際に歩かせて測る）');

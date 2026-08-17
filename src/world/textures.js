@@ -1511,6 +1511,143 @@ function packedEarth(u, v, o, seed) {
   o.ao = 1 - crack * 0.35 - tread * 0.10 - (1 - pebble) * 0.05;
 }
 
+/* 白漆喰（しろしっくい）。蔵と町屋の上半分と塀に塗る白い壁。
+   **江戸の町並みが江戸に見えるかどうかは、ここが白いかどうかで決まる。**
+
+   なぜ新しく焼くか: それまでは市街地のplaster()を借りていた。あれは
+   「剥がれて下から西洋レンガが覗く廃墟の漆喰」で、実測した平均色は
+   sRGB(96,77,70)——白ではなく汚れた桃褐色。
+   実際に置いている材質6種（石畳0.0779・板壁0.0738・叩き土0.0771・
+   漆喰0.0824・木0.0769・米俵0.0828）の輝度が12%の幅に固まっていて、
+   **画面に白が1つも無い**状態だった。
+   日本家屋の記号は「白漆喰・黒瓦・木格子・朱」の4色の対比なので、
+   白が無いと屋根の形をどれだけ作り込んでも土壁の集落にしかならない。
+
+   本物の漆喰は真っ白ではない（貝灰と麻すさなので、わずかに黄味を帯びる）。
+   狙いはsRGB(222,216,203)前後。瓦(0.0150)との輝度差が30倍以上つく。
+   低: コテむらと軒下の雨だれ / 中: 貫の通った所のひび・下端の泥はね /
+   高: すさ（麻の繊維）と砂粒 */
+function shikkui(u, v, o, seed) {
+  // コテ跡。一方向に長く伸ばすと「塗った面」になる。等方のノイズだと石膏ボード
+  const trowel = fbmA(u, v, 7, 70, 3, seed + 10);
+  const wide = fbm(u, v, 2, 3, seed + 15);            // 塗り継ぎの大きなむら
+  // 髪の毛ほどのひび。漆喰は乾く時に必ず入る。深くしない（深いと廃墟になる）
+  const hair = smoothstep(0.80, 0.94, ridged(u, v, 14, 3, seed + 22));
+  // 軒下から垂れる雨だれ。上から下へ細く落ちる筋
+  const drip = smoothstep(0.60, 0.86, fbmA(u, v, 26, 3, 3, seed + 34));
+  // 下端の泥はね。vが1に近い側（＝下）だけ汚す
+  const splash = smoothstep(0.78, 1.0, v) * smoothstep(0.40, 0.75, fbm(u, v, 30, 2, seed + 44));
+  const suza = fbm(u, v, 120, 2, seed + 55);          // 麻すさの繊維
+  const sand = fbm(u, v, 190, 2, seed + 66);
+
+  o.h = trowel * 0.24 + (wide - 0.5) * 0.16 - hair * 0.45 + suza * 0.06 + sand * 0.04
+    - splash * 0.10;
+
+  /* 生成りの白。**ここを0.85前後まで上げるのが仕事。**
+     0.4台に置くと、また周りの茶色と同じ明るさに沈む */
+  let base = 0.86 + (wide - 0.5) * 0.055 + (trowel - 0.5) * 0.045 + (suza - 0.5) * 0.03;
+  base *= 1 - drip * 0.16 - hair * 0.10;
+  let r = base, g = base * 0.975, b = base * 0.915;
+  // 泥はねは叩き土の色を持ってくる（地面と同じ色で汚れると足元が繋がる）
+  r = lerp(r, 0.40, splash * 0.55); g = lerp(g, 0.34, splash * 0.55); b = lerp(b, 0.26, splash * 0.55);
+  o.r = r; o.g = g; o.b = b;
+
+  // 漆喰は艶消し。磨いた黒漆喰ではないので粗いまま
+  o.rough = clamp01(0.84 + sand * 0.10 - trowel * 0.05);
+  o.metal = 0;
+  o.ao = 1 - hair * 0.30 - drip * 0.12 - splash * 0.18;
+}
+
+/* 朱漆（しゅうるし）。鳥居・社の柱・高欄・欄干に塗る。
+   **マップで唯一の彩度の高い差し色。**
+
+   なぜ新しく焼くか: それまでは市街地の塗装鉄板(metalPanel)に
+   color 0xa8524a を掛けていた。materialのcolorはmapへの乗算なので、
+   元のmapが暗い(平均リニア0.055)ぶんだけ結果も暗くなる。
+   実測した出力の輝度は0.0079で、**本物の朱(224,75,40 / 輝度0.2103)の1/26.6。**
+   遠目には黒い柱で、差し色として1つも効いていなかった。
+
+   狙いはsRGB(224,75,40)前後。漆なので半艶（roughnessを0.3台まで落とす）。
+   低: 塗り重ねのむらと退色 / 中: 木目に沿った刷毛目・角の塗装の剥げ /
+   高: 漆の面のうねり */
+function urushi(u, v, o, seed) {
+  // 刷毛目。柱に縦に塗るので、vの方向へ長く伸ばす
+  const brush = fbmA(u, v, 60, 4, 3, seed + 12);
+  const fade = fbm(u, v, 3, 3, seed + 20);            // 日に焼けた退色むら
+  // 剥げ。角と縁で下地の木が出る。**入れすぎない**（廃神社になる）
+  const chip = smoothstep(0.86, 0.96, fbm(u, v, 22, 3, seed + 30));
+  const chipRim = smoothstep(0.86, 0.90, fbm(u, v, 22, 3, seed + 30)) * (1 - chip);
+  const grain = fbm(u, v, 110, 2, seed + 42);         // 下地の木目が漆越しに透ける
+  const wave = fbm(u, v, 200, 2, seed + 55);          // 漆の面のうねり
+
+  o.h = -chip * 0.55 + brush * 0.10 + grain * 0.05 + wave * 0.03 - chipRim * 0.12;
+
+  /* **明るく置く。** 0.88/0.29/0.16 でsRGB(224,74,41)あたりに落ちる。
+     ここを0.3台にすると、また黒い柱に戻る */
+  let r = 0.88 + (brush - 0.5) * 0.07 + (grain - 0.5) * 0.03;
+  let g = 0.29 + (brush - 0.5) * 0.05;
+  let b = 0.16 + (brush - 0.5) * 0.035;
+  // 退色。日の当たる面は白茶けて彩度が落ちる
+  const f = fade * 0.30;
+  r = lerp(r, 0.72, f); g = lerp(g, 0.38, f); b = lerp(b, 0.30, f);
+  // 剥げた所は下地の白木
+  r = lerp(r, 0.46, chip); g = lerp(g, 0.38, chip); b = lerp(b, 0.28, chip);
+  o.r = r; o.g = g; o.b = b;
+
+  // 漆は半艶。**ここが1に近いと朱色のフェルトになる**
+  o.rough = clamp01(0.34 + wave * 0.10 + chip * 0.45 + fade * 0.08);
+  o.metal = 0;
+  o.ao = 1 - chip * 0.30 - chipRim * 0.20;
+}
+
+/* 切石（きりいし）。石畳・玉垣・石灯籠・社の基壇。
+   **対戦で一番長く見る面がこれ**（足元と、周りを囲む囲い）なのに、
+   それまでは市街地の打ちっぱなしコンクリ(concrete)を貼っていた。
+   あれは骨材・補修パッチ・打設目地が焼いてあるので、
+   和風の輪郭を持った現代のコンクリ構造物に見えていた。
+
+   本物の切石は、割った面のノミ跡と、目地に溜まった苔と、
+   角の丸まりで読める。色は叩き土より寒色へ振って、地面と分ける。
+   低: 石ごとの色の個体差 / 中: 目地・角の丸み・苔 / 高: ノミ跡と粒 */
+function cutstone(u, v, o, seed) {
+  const COLS = 3, ROWS = 4;
+  // 段ごとに半分ずらして積む（芋目地にすると擁壁に見える）
+  const rowRaw = Math.floor(v * ROWS);
+  const row = ((rowRaw % ROWS) + ROWS) % ROWS;
+  const cu = u * COLS + (row & 1) * 0.5;
+  const colRaw = Math.floor(cu);
+  const col = ((colRaw % COLS) + COLS) % COLS;
+  const cf = fract(cu), rf = fract(v * ROWS);
+  const id = hash2(col, row, seed);
+
+  // 目地。切石は漆喰を詰めないので、細くて深い
+  const jx = Math.min(cf, 1 - cf), jy = Math.min(rf, 1 - rf);
+  const joint = 1 - smoothstep(0.012, 0.042, Math.min(jx, jy));
+  // 角の丸み。目地の少し内側で高さを落とす
+  const bevel = 1 - smoothstep(0.042, 0.10, Math.min(jx, jy));
+
+  const chisel = fbmA(u, v, 26, 90, 2, seed + 20);    // ノミ跡（一方向）
+  const pit = smoothstep(0.72, 0.90, fbm(u, v, 140, 2, seed + 33));
+  const moss = smoothstep(0.55, 0.85, fbm(u, v, 8, 3, seed + 44)) * joint;
+  const grit = fbm(u, v, 170, 2, seed + 58);
+
+  o.h = -joint * 0.95 - bevel * 0.22 + chisel * 0.16 - pit * 0.20 + grit * 0.05;
+
+  /* 灰青の石。**叩き土(0.34/0.29/0.22の暖色)より寒色へ振る。**
+     同じ暖色にすると地面と壁の境が消えて、また一色の画になる */
+  const base = 0.46 + id * 0.10 + (chisel - 0.5) * 0.07 + grit * 0.04;
+  let r = base * 0.96, g = base * 0.98, b = base * 1.02;
+  // 目地の奥は暗い。苔は緑
+  const dk = 1 - joint * 0.42 - bevel * 0.10 - pit * 0.12;
+  r *= dk; g *= dk; b *= dk;
+  r = lerp(r, 0.20, moss * 0.55); g = lerp(g, 0.28, moss * 0.55); b = lerp(b, 0.17, moss * 0.55);
+  o.r = r; o.g = g; o.b = b;
+
+  o.rough = clamp01(0.78 + grit * 0.10 + moss * 0.10 - chisel * 0.04);
+  o.metal = 0;
+  o.ao = 1 - joint * 0.55 - bevel * 0.18 - pit * 0.10;
+}
+
 // 障子紙。木の桟(格子)に紙を張った面。紙は薄く光を透かす見た目にしたいが、
 // 材質としては不透明の壁材と同じ扱いなので、格子の影と紙の毛羽立ちだけを表現する。
 // 低: 紙の日焼けムラ・破れかけの染み / 中: 桟の格子 / 高: 紙の繊維
@@ -1941,6 +2078,50 @@ export function createSky(sunDirection) {
 
 /* ----------------------------------------------------------------- API */
 
+/* 材質の平均色を測るための口。**GPUもcanvasも要らない。**
+
+   なぜ要るか: 「江戸に見えない」の正体を調べたら、置いてある材質6種の
+   平均輝度が0.074〜0.083の12%幅に固まっていた、という色の問題だった。
+   屋根の形や密度をいくら直しても画は変わらない。
+   直した後、それが黙って元に戻らないように数字で見張れるようにする
+   （tools/check-edo.mjsの[色]が使う）。
+
+   焼いた画像を読むのではなく、**生成関数を格子状に叩いて平均する。**
+   bake()はcanvasが要るので、ブラウザ無しの検査からは呼べない */
+const TONE_FNS = {
+  shikkui: [shikkui, 71], urushi: [urushi, 73], cutstone: [cutstone, 79],
+  kawara: [kawara, 59], timberSiding: [timberSiding, 53], packedEarth: [packedEarth, 61],
+  shojiPaper: [shojiPaper, 67], plaster: [plaster, 37], concrete: [concrete, 11],
+  brick: [brick, 23], metalPanel: [metalPanel, 19],
+};
+
+const srgbToLinear = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+
+/**
+ * 生成関数の平均色。返すのは 0..1 のsRGB値と、そこから出した輝度。
+ * gridを上げるほど正確になるが、64でも実用上ぶれない
+ */
+export function materialTone(name, grid = 64) {
+  const hit = TONE_FNS[name];
+  if (!hit) return null;
+  const [fn, seed] = hit;
+  const o = { h: 0, r: 0, g: 0, b: 0, rough: 0, metal: 0, ao: 1 };
+  let r = 0, g = 0, b = 0, rough = 0;
+  for (let j = 0; j < grid; j++) {
+    for (let i = 0; i < grid; i++) {
+      fn((i + 0.5) / grid, (j + 0.5) / grid, o, seed);
+      r += o.r; g += o.g; b += o.b; rough += o.rough;
+    }
+  }
+  const n = grid * grid;
+  r /= n; g /= n; b /= n; rough /= n;
+  const lum = 0.2126 * srgbToLinear(r) + 0.7152 * srgbToLinear(g) + 0.0722 * srgbToLinear(b);
+  return { r, g, b, rough, lum, srgb: [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)] };
+}
+
+/** materialTone で測れる材質の名前 */
+export const TONE_NAMES = Object.keys(TONE_FNS);
+
 export function buildMaterials(renderer) {
   // 420m角の地面に4m角のタイルを貼るので、視線が寝た所では8では足りず
   // ミップが崩れてクロスハッチのモアレが出る。上限まで使う。
@@ -2024,5 +2205,25 @@ export function buildMaterials(renderer) {
     kawara: mk(kawara, 59, 2.0, 1, { normalScale: 1.0, surf: { ...ground, macroRun: 0.05 } }),
     packedEarth: mk(packedEarth, 61, 2.2, 1, { normalScale: 1.1, surf: { ...ground, macroRun: 0.0 } }),
     shojiPaper: mk(shojiPaper, 67, 1.2, 1, { aniso: ANISO_WALL, normalScale: 0.7, surf: prop }),
+
+    /* ここから2026-08-17に足した3枚。**「江戸に見えない」の正体が色だった**ので、
+       足りていなかった白・朱・石を作った（それぞれの関数の頭に理由がある）。
+
+       1枚あたり焼くのに約147ms・VRAM 4MB掛かる。16枚で2.36秒だったのが
+       19枚で2.80秒になる。**払う価値がある**と判断した理由は、
+       置いてある材質6種の輝度が0.074〜0.083の12%幅に固まっていて、
+       屋根の形をいくら作り込んでも画が変わらなかったこと。
+       これ以上増やすなら、起動の待ち時間と引き換えになることを意識すること */
+    // 白漆喰。**雨だれ(macroRun)を強く入れない。**白い面に黒い筋が乗ると、
+    // せっかく上げた明度がそこで落ちる
+    shikkui: mk(shikkui, 71, 1.9, 1, {
+      aniso: ANISO_WALL, normalScale: 0.95, surf: { ...wall, macroRun: 0.14, macroAmt: 0.09 },
+    }),
+    // 朱漆。**むらを抑える。**塗った面なので、汚しを乗せると彩度がすぐ死ぬ
+    urushi: mk(urushi, 73, 1.6, 1, {
+      aniso: ANISO_WALL, normalScale: 0.8, surf: { ...prop, macroRun: 0.08, macroAmt: 0.06 },
+    }),
+    // 切石。石畳(上向き)にも玉垣(垂直)にも貼るので、地面側の設定に寄せる
+    cutstone: mk(cutstone, 79, 2.3, 1, { normalScale: 1.05, surf: { ...ground, macroRun: 0.18 } }),
   };
 }
