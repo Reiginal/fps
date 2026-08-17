@@ -803,5 +803,133 @@ console.log('\n[25] 4人が固まって湧いて、そこから歩ける');
     '部屋が協力プレイの時にその表を引いている');
 }
 
+console.log('\n[26] ボスがちゃんと殴りに来る（実際に180秒動かして数える）');
+/* なぜ要るか: 2026-08-17に「ボスが全然怖くないし、全然こっち殴ってこない」と
+   言われて実測したら、原因が4つ重なっていた。
+
+   ① 殴った後に必ず2.6秒下がる処理(_backoff)が**永久ループしていた。**
+      判定が「冷却が明けているか」だけで「その距離でその技が出せるか」を
+      見ていない。爪の間合い(4.6m)では突進(7.4m以上)も火の玉(10m以上)も
+      撃てないので冷却は0のまま張り付き、条件が常に真になる。
+      3mに張り付かせた180秒で、下がっていたのが109.1秒(61%)、
+      間合いに居て手が空いていた69.2秒のうち**68.5秒(99%)が不発**だった
+   ② 5.2〜7.4mに**出せる技が1つも無い空白帯**があった。
+      6.0mに立たれると180秒で爪0・踏み0・火0・突進0（咆哮だけ）
+   ③ 踏み(5.2m)と咆哮(20m)が爪(4.6m)より先に判定されるので、
+      **一番痛い技(34)が一番出なかった**
+   ④ ボスの足3.1m/sに対しプレイヤーは走り7.4m/s。走って逃げられると
+      **180秒追って爪0回・合計99ダメージ**
+
+   全部「遊んでみないと分からない」ではなく机上で数えられる物なので、
+   ここで数え続ける。**遅いのでこの節だけ数秒かかる** */
+{
+  const { Monster, MSTATE: MS } = await import('../src/ai/monster.js');
+  const DT = 1 / 60;
+
+  // 標的を動かしながらボスを回して、出した技と当てた回数を数える
+  const play = (mover, secs = 60, startD = 14) => {
+    const level = { octree: world.octree, bounds: world.bounds, enemySpawns: world.enemySpawns };
+    const m = new Monster(level, 'boss', { visual: false });
+    m.spawn(new THREE.Vector3(0, 0.2, 0));
+    const target = { pos: new THREE.Vector3(startD, 0.2, 0), eyeY: 1.6, alive: true };
+    const out = { claw: 0, stomp: 0, charge: 0, spit: 0, hits: 0, dmg: 0, inReach: 0, idleSeek: 0 };
+    const land = (self, d, reach) => {
+      const c = self.collider.start;
+      const px = target.pos.x - c.x, pz = target.pos.z - c.z;
+      const dd = Math.hypot(px, pz);
+      const fx = -Math.sin(self.yaw), fz = -Math.cos(self.yaw);
+      if (dd > reach) return;
+      if (dd > 0.1 && (px / dd) * fx + (pz / dd) * fz < 0.25) return;
+      out.hits++; out.dmg += d;
+    };
+    m.onMelee = land;
+    m.onStomp = (self, radius, d) => {
+      const c = self.collider.start;
+      if (Math.hypot(target.pos.x - c.x, target.pos.z - c.z) <= radius) { out.hits++; out.dmg += d; }
+    };
+    m.onSpit = () => { out.spit++; };
+    let was = m.state;
+    const b = (world.bounds || 38) - 2;
+    for (let i = 0; i < secs / DT; i++) {
+      mover(target.pos, m.collider.start, DT);
+      target.pos.x = Math.max(-b, Math.min(b, target.pos.x));
+      target.pos.z = Math.max(-b, Math.min(b, target.pos.z));
+      m.update(DT, target, { others: [] });
+      if (m.state !== was) {
+        if (m.state === MS.WINDUP) out.claw++;
+        if (m.state === MS.STOMP) out.stomp++;
+        if (m.state === MS.CHARGE) out.charge++;
+        was = m.state;
+      }
+      if (m.state === MS.SEEK || m.state === MS.IDLE) out.idleSeek += DT;
+      const d = Math.hypot(target.pos.x - m.collider.start.x, target.pos.z - m.collider.start.z);
+      if (d <= m.def.melee.reach) out.inReach += DT;
+    }
+    return out;
+  };
+  const still = () => {};
+  const flee = (sp) => (p, c, dt) => {
+    const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz) || 1;
+    p.x += (dx / d) * sp * dt; p.z += (dz / d) * sp * dt;
+  };
+
+  const a = play(still, 60);
+  ok(a.claw >= 15, `棒立ちの相手を60秒で${a.claw}回殴りにいく（15回以上）`);
+  ok(a.dmg > 600, `与えた被害 ${Math.round(a.dmg)}（600以上。プレイヤーの体力は260）`);
+
+  // ④ 走って逃げる相手。前は爪0回・99ダメージだった
+  const b2 = play(flee(7.4), 60);
+  ok(b2.hits > 0, `走って逃げる相手にも届く（当てた${b2.hits}回。前は0回）`);
+
+  // ② 空白帯。6mに張り付かせて、何か1つは出ること
+  const hold = (dd) => (p, c) => {
+    const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz) || 1;
+    p.x = c.x + (dx / d) * dd; p.z = c.z + (dz / d) * dd;
+  };
+  const c6 = play(hold(6.0), 30);
+  ok(c6.charge + c6.stomp + c6.claw + c6.spit > 0,
+    `5.2〜7.4mの空白帯が無い（6.0mで技が${c6.charge + c6.stomp + c6.claw + c6.spit}回出た。前は0回）`);
+  const c3 = play(hold(3.0), 30);
+  ok(c3.claw >= 8, `3.0mでは爪が主役（30秒で${c3.claw}回。前は後退で61%潰れていた）`);
+  ok(c3.idleSeek < 30 * 0.35,
+    `間合いの中で手が空いていない（歩いていた${c3.idleSeek.toFixed(1)}秒 / 10.5秒未満）`);
+}
+
+console.log('\n[27] ボスの作りが元へ戻っていない（読んで確かめる）');
+{
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../src/ai/monster.js', import.meta.url), 'utf8');
+  ok(!/_backoff/.test(src.replace(/2\.6秒の後退\(_backoff\)/g, '')),
+    '殴った後に下がる処理を持っていない');
+
+  const pick = src.split('/* 技の選び方。')[1]?.split('/* ------')[0] || '';
+  ok(pick.length > 0, '技の選び方が見つかった');
+  const clawAt = pick.indexOf('dist <= def.melee.reach');
+  const stompAt = pick.indexOf('def.stomp &&');
+  const roarAt = pick.indexOf('def.roar &&');
+  ok(clawAt > 0 && stompAt > clawAt, '爪を踏みつけより先に見る（一番痛い技が一番出る）');
+  ok(roarAt > clawAt && roarAt > stompAt, '咆哮は一番後ろ（自分で殴らない手なので）');
+
+  const { MONSTER_KINDS: K } = await import('../src/ai/monster.js');
+  const boss = K.boss;
+  ok(boss.charge.minRange < boss.stomp.radius * 0.8,
+    `突進の下限(${boss.charge.minRange}m)が踏みの届く所(${(boss.stomp.radius * 0.8).toFixed(1)}m)と重なっている`);
+  ok(boss.speed > 4.0, `足が遅すぎない（${boss.speed}m/s。3.1では走る相手に永久に届かない）`);
+  ok(boss.speed < 4.7, `プレイヤーの歩き(4.7m/s)より遅い（意識して下がれば引き離せる）`);
+  ok(Array.isArray(boss.rage) && boss.rage.length >= 2, '手負いの段を持っている');
+  ok(boss.charge.hitRecover < boss.charge.stun,
+    `当てた時の硬直(${boss.charge.hitRecover}秒)が外した時(${boss.charge.stun}秒)より短い`);
+
+  // 段が体力だけで決まる＝サーバーとクライアントで必ず一致する
+  const m = new Monster({ octree: null }, 'boss', { visual: false });
+  m.health = m.maxHealth;
+  ok(m.ragePhase === 0, '満タンなら段は0');
+  m.health = m.maxHealth * 0.5;
+  ok(m.ragePhase === 1, '半分で段が1つ上がる');
+  m.health = m.maxHealth * 0.2;
+  ok(m.ragePhase === 2, '2割で段が2つ上がる');
+  ok(m.rageCdMul < 1 && m.rageSpeedMul > 1, '段が上がると間隔が縮んで足が速くなる');
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);

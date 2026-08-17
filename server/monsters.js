@@ -258,7 +258,12 @@ export class MonsterDirector {
      4人で囲んで削るだけの作業になるので、定期的に手を増やさせる */
   _roarSpawn(rec) {
     const c = rec.mon.collider.start;
-    let n = 3;
+    /* 呼ぶ数。**3体から2体へ減らした。**
+       実測でプレイヤーが受ける被害の85〜88%が、ここで湧いた小型からだった
+       （ボス本人は12〜15%）。咆哮の間隔も16秒→24秒にしてあるので、
+       180秒で「11回×3体＝33体」から「7回×2体＝14体」になる。
+       ボスが自分で殴るようになったぶん、周りは薄くする */
+    let n = 2;
     for (let i = 0; i < n; i++) {
       if (this._aliveCount() >= ALIVE_CAP) break;
       const a = Math.random() * Math.PI * 2;
