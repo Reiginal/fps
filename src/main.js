@@ -1819,6 +1819,15 @@ class Game {
     this.remotes = new RemotePlayers(this.scene, this.level);
     // 協力プレイのモンスター描き。coop以外の遊び方ではmsが空なので何も出ない
     this.remoteMonsters = new RemoteMonsters(this.scene);
+    // 上帯に出す進み具合。EV.WAVEが来るたびに書き換える
+    this._coopWave = 0;
+    this._coopWaveOf = 0;
+    this._coopBoss = false;
+    /* 溜めに入った時の予告音。**毎フレーム渡す関数なので、1回だけ作って持っておく。**
+       その場で `(slot) => ...` と書くと、毎フレーム新しい関数を作って捨てることになる */
+    this._onMonsterTell = (slot) => {
+      this.audio.monsterTell(slot.mon.scale, slot.headPos, this.camera);
+    };
     /* 今このとき地面に落ちている物。**置いた時の1回しか配られない**ので、
        途中から入った時はお迎えの電文で受け取らないと、拾える物が見えないまま
        「近づいたら何か起きた」になる */
@@ -2043,7 +2052,7 @@ class Game {
       note += `　＋${got}コイン（ぜんぶで${(coins ?? 0).toLocaleString()}枚）`;
       this.account?.setCoins(coins);
     }
-    this.hud.matchEnd(rows, true, note);
+    this.hud.matchEnd(rows, true, note, coop);
     // 次の試合が始まったら畳む。サーバーはINTERMISSION後に0点を配って再開する。
     // 前のタイマーが残っていると、続けて2試合終わった時に早い方が新しい順位を消す
     clearTimeout(this._endTimer);
@@ -3083,7 +3092,9 @@ class Game {
           this.audio.hurt();
           this.damageFlash = Math.min(0.55, this.damageFlash + 0.22);
           this.player.addRecoil(0.012 + Math.random() * 0.010, (Math.random() - 0.5) * 0.018);
-          this._damageArrow(ev.by);
+          // モンスター(by:-1)には引ける位置が無いので、電文に載っているmpを使う
+          if (ev.mp && this._vecOf(this._evPos, ev.mp)) this._damageFromPoint(this._evPos);
+          else this._damageArrow(ev.by);
         }
         // 人に当たった弾の弾道。自分が撃たれた時ほど「どこからか」が要る
         if (ev.by !== me && this._vecOf(this._evPos, ev.p)) {
@@ -3367,11 +3378,32 @@ class Game {
 
       case EV.WAVE: {
         const boss = !!ev.boss;
+        this._coopWave = ev.n | 0;
+        this._coopWaveOf = ev.of | 0;
+        this._coopBoss = boss;
+        /* 波の切り替わりで**予備弾を満タンに戻す。**
+           弾は各自の画面が持っている数字なので、ここで戻すだけで足りる
+           （撃った数はサーバーへ送っていない。判定は当たり外れの話で、
+           残弾は手元の話。src/net/protocol.jsの冒頭の分け方の通り）。
+
+           マガジンの中身は戻さない。戻すと撃ち切る直前の波の変わり目で
+           装填を飛ばせることになる（訓練場の補給と同じ決まり。
+           weapons.jsのrefillReserveのコメント）。
+
+           落ちている物を拾えない遊び方(modes.jsのdrops:false)なので、
+           これが無いと**3波目までに撃ち切ったらボスに何もできない。**
+           2026-08-17に「第2波になってタイミングで弾の補充はさすがに欲しい」*/
+        const got = this.weapons.refillReserve();
         this.hud.banner(
           boss ? 'ボスが来た' : `第${ev.n}波`,
           boss ? '背中のコブが弱点。誰かが引きつけて、誰かが後ろへ回れ' : `全${ev.of}波`,
           boss ? 3.4 : 2.2,
         );
+        // 満タンの時は言わない（何も起きていないのに起きた気になる。EV.TAKEと同じ扱い）
+        if (got) {
+          this.hud.kill('補給 — 予備弾を満タンに戻した', false);
+          this.audio.click(1500, 0.4, 0.05);
+        }
         break;
       }
 
@@ -3404,11 +3436,17 @@ class Game {
   _damageArrow(byId) {
     const r = this.remotes?.get(byId);
     if (!r) return;
+    this._damageFromPoint(r.headPos);
+  }
+
+  // 上と同じだが、相手のidではなく座標から出す。
+  // 協力プレイのモンスターは人ではないのでidから位置を引けない
+  _damageFromPoint(at) {
     const yaw = this.player.yaw;
     const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
     const rx = Math.cos(yaw), rz = -Math.sin(yaw);
-    let dx = r.headPos.x - this.player.collider.start.x;
-    let dz = r.headPos.z - this.player.collider.start.z;
+    let dx = at.x - this.player.collider.start.x;
+    let dz = at.z - this.player.collider.start.z;
     const len = Math.hypot(dx, dz) || 1;
     dx /= len; dz /= len;
     this.hud.damageFrom(Math.atan2(dx * rx + dz * rz, dx * fx + dz * fz));
@@ -3636,7 +3674,7 @@ class Game {
     // 協力プレイのモンスター。coop以外ではnet.monstersが空なので実質何もしない
     if (this.remoteMonsters) {
       this.remoteMonsters.sync(net.monsters);
-      this.remoteMonsters.update(dt);
+      this.remoteMonsters.update(dt, this.camera, this._onMonsterTell);
     }
     this._updatePlates(states);
 
@@ -3678,14 +3716,22 @@ class Game {
         if (n > theirs || !leader) { theirs = Math.max(theirs, n); if (n >= theirs) leader = r.name || ''; }
       }
     }
-    this.hud.matchInfo(
-      mine, theirs, MATCH.ROUND_WINS, net.phase, net.timeLeft, leader, net.mode,
-    );
+    /* 協力プレイは点数の取り合いではないので、「自分 － 相手」も先取本数も出さない。
+       出す物は**今どこまで来たか**（第何波）と**あと何体か**の2つ。
+       ここを分けていなかったので「0 － 0 ／ 3本先取 ／ 残り 3:00」と、
+       起きないことを3つ並べていた（時計はそもそも止まっている。modes.jsのtimed:false）*/
+    if (net.mode === 'coop') {
+      this.hud.coopInfo(this._coopWave, this._coopWaveOf, this._coopBoss, net.monsters.length, net.phase);
+    } else {
+      this.hud.matchInfo(
+        mine, theirs, MATCH.ROUND_WINS, net.phase, net.timeLeft, leader, net.mode,
+      );
+    }
     // **1回だけ作る。** 名簿と順位表で別々に呼んでいた頃は、
     // 人数ぶんの入れ物を毎フレーム2組作って捨てていた
     const rows = net.scoreRows();
-    this.hud.roster(rows);
-    this.hud.scoreboard(rows, input.down('Tab'));
+    this.hud.roster(rows, net.mode === 'coop');
+    this.hud.scoreboard(rows, input.down('Tab'), net.mode === 'coop');
     this.hud.netStatus(net.ping > 220 ? `回線が不安定です (${Math.round(net.ping)}ms)` : '');
     input.endFrame();
   }
@@ -4314,7 +4360,15 @@ class Game {
 
        塗り直す時にだけ足すので、毎フレームの仕事は増えない
        （_blipListは毎フレーム頭で空にしているので、溜まることもない） */
-    if (this.mode === 'versus' && this.net?.mode === 'team') {
+    /* **協力プレイも味方の点を出す。** ここは`mode === 'team'`だけを見ていたので、
+       協力プレイでは味方の点が1つも出ていなかった。
+       協力プレイは全員が同じチーム（modes.jsのteamOf）で、
+       壁越しの居場所を隠す理由（2人で挟む・別々に回るという組み立て）も無い。
+       むしろ**離れた仲間へ駆けつけられるかどうかが遊びの中身**なので、
+       ここが空だと「仲間が範囲外に行きすぎてカバーができない」になる
+       （2026-08-17にそう言われた）*/
+    const coop = this.net?.mode === 'coop';
+    if (this.mode === 'versus' && (coop || this.net?.mode === 'team')) {
       for (const st of this._lastStates || []) {
         if (st.state & S.DEAD) continue;
         if (!this._isMate(st.id)) continue;
@@ -4324,20 +4378,24 @@ class Game {
 
     const p = this.player.collider.start;
     const versus = this.mode === 'versus';
+    /* 戦域の円。**協力プレイには戦域が無い**（modes.jsのcoop:trueを見て
+       Room側が_zoneを切っている）ので、円も外周の警告も出さない。
+       出していたので、削られもしない線の外へ出ると赤い警告が点いていた */
+    const zoned = versus && !coop;
     this._mapMe.x = p.x;
     this._mapMe.z = p.z;
     this._mapMe.yaw = this.player.yaw;
     this.hud.minimap(
       this._mapMe,
       this._blipList,
-      versus ? ZONE.RADIUS : 0,
-      // 対戦は戦う範囲の少し外まで。ソロは場内全域
-      versus ? ZONE.RADIUS + 4 : MAP_EXTENT,
+      zoned ? ZONE.RADIUS : 0,
+      // 対戦は戦う範囲の少し外まで。ソロと協力プレイは場内全域
+      zoned ? ZONE.RADIUS + 4 : MAP_EXTENT,
     );
 
     // 範囲外の警告。判定はサーバーが持つが、表示は自分の位置から出す。
     // サーバーの返事を待つと、警告が出た時にはもう削られている
-    if (!versus || !this.player.alive) { this.hud.zoneWarn(false); return; }
+    if (!zoned || !this.player.alive) { this.hud.zoneWarn(false); return; }
     if (!outsideZone(p.x, p.z)) {
       this._outsideFor = 0;
       this.hud.zoneWarn(false);
