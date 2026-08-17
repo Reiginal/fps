@@ -76,6 +76,7 @@ export function buildWorld(mapId = 'urban') {
     arenaSpawns: level.arenaSpawns,
     // 2対2の湧き地点。味方2人が並んで出る4箇所（席番号でそのまま引く）
     teamSpawns: level.teamSpawns,
+    coopSpawns: level.coopSpawns,
     enemySpawns: level.enemySpawns,
     // 協力プレイのモンスターAIが「撃たれたら隠れる」に使う遮蔽物リスト。
     // 1人用のEnemyと同じクラスをサーバーで動かすので、同じ物を見せる

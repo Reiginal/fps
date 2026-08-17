@@ -4497,7 +4497,7 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
   /* -------------------------------------------- スポーン地点と遮蔽情報 */
   // 江戸ステージは市街地と別のスポーン表を持つ（建物の配置が違うので流用できない）。
   // ただしarenaSpawns/teamSpawnsの「並び順に意味がある」制約はそのまま守る
-  let enemySpawns, coverPoints, arenaSpawns, teamSpawns;
+  let enemySpawns, coverPoints, arenaSpawns, teamSpawns, coopSpawns;
 
   if (mapId === 'edo') {
     /* モンスターと1人用の敵が出てくる場所。**町の外縁から入ってくる形にする。**
@@ -4565,6 +4565,13 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
     teamSpawns = [
       new THREE.Vector3(-17.5, 0.1, -3), new THREE.Vector3(-17.5, 0.1, 3),
       new THREE.Vector3(17.5, 0.1, -3), new THREE.Vector3(17.5, 0.1, 3),
+    ];
+    // 協力プレイは4人固まって出る（下のurban側の説明を読むこと）。
+    // 半径13.8〜17.8mの帯なので、境内(0〜15.5m)の外周と環状の通りに落ちる。
+    // どちらも建物を1軒も置いていない帯
+    coopSpawns = [
+      new THREE.Vector3(-17.5, 0.1, -3), new THREE.Vector3(-17.5, 0.1, 3),
+      new THREE.Vector3(-13.5, 0.1, -3), new THREE.Vector3(-13.5, 0.1, 3),
     ];
   } else {
   enemySpawns = [
@@ -4650,6 +4657,23 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
     new THREE.Vector3(-17.5, 0.1, -3), new THREE.Vector3(-17.5, 0.1, 3),
     new THREE.Vector3(17.5, 0.1, -3), new THREE.Vector3(17.5, 0.1, 3),
   ];
+
+  /* 協力プレイの湧く位置。**4人とも固まって出る。**
+
+     ここが無くて、協力プレイは上のteamSpawns（2対2用）をそのまま使っていた。
+     協力プレイは全員が同じチーム（modes.jsのteamOf）なのに、
+     **3人目と4人目だけ35m離れた反対側から出てくる。**
+     倒れた仲間を起こしにも行けず、相手はこちらを個別に追ってくるので、
+     試合の頭からばらばらのまま削られる形になっていた
+     （2026-08-17に「味方が範囲外に行きすぎてカバーができねえ」と言われた所）。
+
+     4人が6m四方に収まる。2対2の味方同士(6m)と同じ間隔で、
+     手榴弾1発で全員が飛ぶ距離ではない。
+     どの点も歩ける所にあることは tools/check-coop.mjs が実際に歩かせて測る */
+  coopSpawns = [
+    new THREE.Vector3(-17.5, 0.1, -3), new THREE.Vector3(-17.5, 0.1, 3),
+    new THREE.Vector3(-13.5, 0.1, -3), new THREE.Vector3(-13.5, 0.1, 3),
+  ];
   }
 
   return {
@@ -4662,6 +4686,7 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
     enemySpawns,
     arenaSpawns,
     teamSpawns,
+    coopSpawns,
     coverPoints,
     /* 江戸は南の門の内側から始める。**入ってきた所から参道が中央の社まで
        まっすぐ通っている**ので、初めて入った人でも進む先に迷わない
