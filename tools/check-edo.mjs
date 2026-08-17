@@ -219,6 +219,67 @@ console.log('\n[6.6] 絵と挙動が食い違っていない');
   ok(!/^\s*crate\(/m.test(edo), '江戸に近代の木箱を置いていない');
 }
 
+console.log('\n[6.7] 灯りと場外の景がある');
+/* なぜ要るか（灯り）: 江戸には点光源が0個で、提灯も行灯もかがり火も
+   1つも無かった。町並みの形をどれだけ作り込んでも、灯りが1点も無いと
+   「昼の土壁の集落」で終わる。
+
+   なぜ要るか（場外）: 板塀(2.6m)の外は無地の土が地平線まで続いていて、
+   見えるのは空だけだった。山も寺も城も櫓も無いので、
+   **この町が「どこかの町の一部」に見えない。**
+   市街地は遠景の街・崩落壁・瓦礫の土手を持っているのに、江戸には1行も無かった。
+
+   どちらも**当たり判定を増やしていないこと**を必ず確かめる。
+   場外の物が固体になると、Octreeのノードが増えて弾が場外の山に当たり始める */
+{
+  const lv = readFileSync(new URL('../src/world/level.js', import.meta.url), 'utf8');
+  const edo = lv.slice(lv.indexOf("if (mapId === 'edo') {"), lv.indexOf('  } else {', lv.indexOf("if (mapId === 'edo') {")));
+
+  ok(/const chochin = /.test(edo), '提灯を組む所がある');
+  ok(/M\.lantern/.test(edo), '光る材質を使っている');
+
+  /* **呼び出しの回数ではなく、実際に建った物を数える。**
+     chochin()の呼び出しは2箇所しか無いが、町屋16棟と門4箇所の中から
+     呼ばれるので実際は24個立つ。呼び出しを数えると、そこを取り違える。
+
+     灯りが1箇所に固まっていないことも見る（社の周りだけ光っていても
+     「通りに沿った灯りの列」にはならない）*/
+  {
+    const built = buildLevel(MATS, { mapId: 'edo' });
+    let lit = 0, minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    built.root.traverse((o) => {
+      if (!o.isMesh || !(o.material?.emissiveIntensity > 1)) return;
+      lit++;
+      o.geometry.computeBoundingBox();
+      const b = o.geometry.boundingBox;
+      minX = Math.min(minX, b.min.x + o.position.x); maxX = Math.max(maxX, b.max.x + o.position.x);
+      minZ = Math.min(minZ, b.min.z + o.position.z); maxZ = Math.max(maxZ, b.max.z + o.position.z);
+    });
+    ok(lit > 0, `光る面が実際に建っている（${lit}枚）`);
+    const spanX = maxX - minX, spanZ = maxZ - minZ;
+    ok(spanX > 40 && spanZ > 40,
+      `灯りが町中に散っている（${spanX.toFixed(0)}m×${spanZ.toFixed(0)}m。1箇所に固まっていない）`);
+  }
+  const lanternDef = lv.split('lantern: (() => {')[1]?.split('})(),')[0] || '';
+  ok(/emissive/.test(lanternDef), '光る材質が本当に光る設定を持っている');
+  ok(/clone\(\)/.test(lanternDef), '障子紙の写しなので、焼き直しもVRAMも増えない');
+
+  ok(/場外の景/.test(edo), '場外の景を組む所がある');
+  for (const [what, re] of [['山並み', /const ridge = /], ['天守', /天守/], ['火の見櫓', /火の見櫓/], ['寺の屋根', /寺の屋根/]]) {
+    ok(re.test(edo), `${what}がある`);
+  }
+
+  /* **場外の物が1つも固体になっていないこと。**
+     Octreeのノード数で見る（固体が増えれば必ず増える）*/
+  const w = buildWorld('edo');
+  let nodes = 0;
+  (function walk(n) { nodes++; for (const s of n.subTrees) walk(s); })(w.octree);
+  ok(nodes === 7404, `当たり判定が増えていない（Octreeノード${nodes} / 灯りと場外を足す前と同じ7404）`);
+
+  // 塀より高い物だけ置く（低いと塀に隠れて1ピクセルも見えない＝置いた意味が無い）
+  ok(/板塀の天端/.test(edo), '塀より高い物だけ置く、と決めてある');
+}
+
 console.log('\n[7] 湧いた所から本当に歩けるか（実際に歩かせて測る）');
 /* なぜ要るか: 「地形に埋まっていないか」だけでは足りなかった。
    band()で組む建物は**中が空洞**なので、町屋の真ん中に湧いても

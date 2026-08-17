@@ -738,6 +738,25 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
     shikkui: mats.shikkui,
     urushi: mats.urushi,
     stone: mats.cutstone,
+    /* 提灯と行灯の灯り。**障子紙の材質を写して、自分で光る設定だけ足す。**
+
+       なぜ写すか: 新しく焼くと1枚147ms＋VRAM4MBかかるが、
+       欲しいのは「同じ紙が光っている」だけなので、地図(map)は共有できる。
+       cloneはテクスチャを共有するので、焼き直しもVRAMも増えない。
+
+       なぜ点光源(PointLight)にしないか: 点光源は1つでも全フラグメントに乗る。
+       このrepoは既定で0個にしてある（src/main.jsのlamps）ので、
+       灯りを「光る面」で作る。**ブルームも既定で切ってある**ので、
+       にじみに頼らず、材質そのものを明るくして読ませる */
+    lantern: (() => {
+      const m = mats.shojiPaper.clone();
+      m.emissive = new THREE.Color(0xff9333);
+      // 2.6。周りの白漆喰(輝度0.65)より明確に上へ出す量。
+      // 3を超えると白飛びして、紙の質感も骨も見えないただの白い塊になる
+      m.emissiveIntensity = 2.6;
+      m.toneMapped = true;
+      return m;
+    })(),
   };
 
   // 全材質に頂点カラーを開ける。emit()が個体ごとに±5%の明度を焼き込むので、
@@ -2009,6 +2028,24 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
     boxT(w + 0.1, 0.07, 0.07, M.timber, cx, y + 0.02, cz, ry, 0, 0, 1.0, false);
   };
 
+  /* 提灯（ちょうちん）。**これが一番「江戸」を出す。**
+
+     町並みの形をどれだけ作り込んでも、灯りが1点も無いと
+     「昼の土壁の集落」で終わる。逆に軒下に橙の点が並ぶだけで、
+     同じ地形が宿場町になる。
+
+     光る面なので当たり判定には入れない（人が引っかかると邪魔なだけ）。
+     竹の輪は入れない——0.4mの物に輪を6本足すと、20個で120枚増える。
+     **胴の紙と上下の口輪だけ**で、その距離では形が読める */
+  const chochin = (x, y, z, r = 0.17, h = 0.42) => {
+    // 胴。上下をわずかに絞ると、円筒ではなく提灯の膨らみに見える
+    emit(cylGeo(r, r * 0.72, h, 8, 1), M.lantern, x, y, z, 0, 0, 0, false, true, 1.0);
+    // 上下の口輪（木の輪）と、吊るす紐
+    cyl(r * 0.74, 0.045, 8, M.timber, x, y + h / 2, z, 1.0, false);
+    cyl(r * 0.74, 0.045, 8, M.timber, x, y - h / 2 - 0.045, z, 1.0, false);
+    boxD(0.025, 0.16, 0.025, M.timber, x, y + h / 2 + 0.10, z, 0, 1.0);
+  };
+
   /* 町屋。**この1つを並べて通りを作る。**
      妻入り/平入りはryで振る。doorsはband()と同じ書式で、
      face（正面）の側にだけ庇・格子・暖簾を足す */
@@ -2043,6 +2080,14 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
       }
     }
     noren(px, pz, doorW * 0.92, 2.0, fry);
+    /* 軒提灯。**入口の脇に1つ。**庇の下（＝暗がりの中）に置くので、
+       橙の点が軒の影から浮いて、通りに沿って灯りの列ができる。
+       壁から0.3m離す（面に貼り付くと、ただの光る染みに見える） */
+    {
+      const u = fw / 2 - 0.55;
+      const outX = -Math.sin(fry) * 0.34, outZ = -Math.cos(fry) * 0.34;
+      chochin(px + u * Math.cos(fry) + outX, 1.98, pz - u * Math.sin(fry) + outZ);
+    }
     mark(cx, cz, Math.max(w, d) * 0.6, 0.9);
   };
 
@@ -2107,12 +2152,16 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
     mark(x, z, w * 0.5, 0.5);
   };
 
-  // 石灯籠。竿・中台・火袋・笠を積む。石材が無いのでconcreteで代用
+  /* 石灯籠。竿・中台・火袋・笠を積む。**火袋に火を入れる。**
+     ここは全部同じ石で組んでいたので、名前は灯籠なのに一度も光っていなかった。
+     火袋（4段目）だけ光る材質にすると、参道に沿って腰の高さの灯りが並ぶ */
   const lantern = (x, z) => {
     cyl(0.16, 0.30, 8, M.stone, x, 0, z, 2);       // 基礎
     cyl(0.11, 0.62, 8, M.stone, x, 0.30, z, 2);    // 竿
     box(0.44, 0.10, 0.44, M.stone, x, 0.92, z, 0, 1.4);
-    box(0.30, 0.36, 0.30, M.stone, x, 1.02, z, 0, 1.2);   // 火袋
+    // 火袋の石枠。中の紙が見えるよう、一回り小さい光る箱を内側へ入れる
+    box(0.30, 0.36, 0.30, M.stone, x, 1.02, z, 0, 1.2);
+    boxD(0.24, 0.28, 0.24, M.lantern, x, 1.06, z, 0, 1.0);
     box(0.56, 0.12, 0.56, M.kawara, x, 1.38, z, Math.PI / 4, 1.4);
     box(0.14, 0.16, 0.14, M.stone, x, 1.50, z, Math.PI / 4, 1.0);  // 宝珠
     mark(x, z, 0.6, 0.6);
@@ -2236,6 +2285,10 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
     }
     boxD(gateW + 1.2, 0.26, 0.30, M.timber, x, 3.2, z, ry, 1.2);
     gableRoof(x, z, gateW + 1.6, 1.6, 3.46, 0.62, ry, 0.5);
+    // 門提灯。**町の入口が一番大きい灯り。**遠くからでも「あそこが門だ」と分かる
+    for (const s of [-1, 1]) {
+      chochin(x + dirX * s * (gateW / 2 - 0.35), 2.62, z + dirZ * s * (gateW / 2 - 0.35), 0.24, 0.56);
+    }
   };
   gate(0, -half, 0); gate(0, half, 0);
   gate(-half, 0, Math.PI / 2); gate(half, 0, Math.PI / 2);
@@ -2392,6 +2445,68 @@ export function buildLevel(mats, { lamps = true, mapId = 'urban' } = {}) {
   bambooFence(12, 31.5, 0, 10, 1.3);
   bambooFence(-31.5, 12, Math.PI / 2, 10, 1.3);
   bambooFence(31.5, -12, Math.PI / 2, 10, 1.3);
+
+  /* ------------------------------------------------------------ 場外の景 */
+  /* **塀の外に何も無かった。**
+     板塀(2.6m)の外は無地の土が地平線まで続いていて、見えるのは空だけ。
+     山も寺も城も無いので、**この町が「どこかの町の一部」に見えない。**
+     市街地の方は遠景の街・崩落壁・瓦礫の土手を持っていて、
+     それが「広い場所の一角に居る」感じを作っている。江戸側にはそれが1行も無かった。
+
+     全部当たり判定に入れない（届かない所に置く物なので）。
+     板塀の天端(2.72m)より高い物だけを置く——低い物は塀に隠れて1ピクセルも見えない。
+     **手前の戦いには一切関わらない**ので、形は粗くてよい */
+  {
+    // 山並み。町を囲む稜線。三角柱を重ねるだけだが、
+    // 高さと距離をばらすと1枚の書き割りに見えない
+    const ridge = (ang, dist, w, h, tint) => {
+      const x = Math.sin(ang) * dist, z = Math.cos(ang) * dist;
+      emit(new THREE.ConeGeometry(w, h, 4, 1), M.earth, x, h / 2 - 6, z,
+        ang + Math.PI / 4, 0, 0, false, false, tint);
+    };
+    for (let i = 0; i < 14; i++) {
+      const a = (i / 14) * Math.PI * 2 + 0.21;
+      const r = 150 + ((i * 37) % 60);
+      // 遠いほど淡く。空気遠近はシェーダー側も掛けるが、
+      // 頂点色でも落としておくと山が「奥にある」と読める
+      ridge(a, r, 60 + (i % 5) * 14, 34 + (i % 7) * 11, 0.72 - (r - 150) / 60 * 0.16);
+    }
+    // 天守。**1つだけ大きい物を置くと、町の向きが分かる。**
+    // どこに居ても「城はあっち」で自分の向きが読めるようになる
+    {
+      const cx = -96, cz = -128;
+      // 石垣。上へ行くほど細い台形
+      emit(cylGeo(15, 21, 13, 4, 2), M.stone, cx, 6.5, cz, Math.PI / 4, 0, 0, false, false, 0.80);
+      // 5層。上へ行くほど小さく、各層に瓦の庇を回す
+      let y = 13, w = 17;
+      for (let i = 0; i < 5; i++) {
+        emit(new THREE.BoxGeometry(w, 5.2, w), M.shikkui, cx, y + 2.6, cz, 0, 0, 0, false, false, 0.86);
+        emit(new THREE.BoxGeometry(w + 3.4, 0.9, w + 3.4), M.kawara, cx, y + 5.4, cz, 0, 0, 0, false, false, 0.80);
+        y += 5.9; w *= 0.80;
+      }
+      // 最上層の屋根。四角錐で締める
+      emit(new THREE.ConeGeometry(w * 0.95, 5.0, 4, 1), M.kawara, cx, y + 2.4, cz, Math.PI / 4, 0, 0, false, false, 0.78);
+    }
+    // 火の見櫓。近い場外に2基。細い骨組みなので、輪郭で「町の外れ」が読める
+    for (const [tx, tz] of [[52, -44], [-46, 50]]) {
+      for (const su of [-1, 1]) {
+        for (const sv of [-1, 1]) {
+          // 柱は上で狭まる。下だけ置いて上を寄せる
+          emit(new THREE.BoxGeometry(0.5, 13, 0.5), M.timber,
+            tx + su * 1.9, 6.5, tz + sv * 1.9, 0, 0, 0, false, false, 0.9);
+        }
+      }
+      emit(new THREE.BoxGeometry(5.6, 0.5, 5.6), M.timber, tx, 13.2, tz, 0, 0, 0, false, false, 0.9);
+      emit(new THREE.ConeGeometry(4.2, 2.6, 4, 1), M.kawara, tx, 14.8, tz, Math.PI / 4, 0, 0, false, false, 0.8);
+      // 半鐘。火の見櫓はこれが吊ってあるから火の見櫓に見える
+      emit(cylGeo(0.34, 0.42, 0.72, 8, 1), M.lantern, tx, 13.9, tz, 0, 0, 0, false, false, 1.0);
+    }
+    // 寺の屋根。塀の向こうに大きい瓦屋根を2つ覗かせる
+    for (const [tx, tz, ta] of [[-58, -26, 0.3], [40, 62, 1.2]]) {
+      emit(new THREE.BoxGeometry(22, 7, 14), M.shikkui, tx, 3.5, tz, ta, 0, 0, false, false, 0.84);
+      emit(new THREE.ConeGeometry(16, 7.5, 4, 1), M.kawara, tx, 10.2, tz, ta + Math.PI / 4, 0, 0, false, false, 0.78);
+    }
+  }
 
   /* -------------------------------------------------------- 地面の敷き分け */
   /* **ここが無かったのが「砂漠に木箱」の正体。**
