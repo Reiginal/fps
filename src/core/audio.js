@@ -2761,108 +2761,21 @@ export class AudioEngine {
     this._out(out, kind === 'roar' ? 0.6 : 0.3, kind === 'roar' ? 0.7 : 0.3);
   }
 
-  /* 「今から殴る」の予告。**溜めに入った瞬間に鳴らす短い音。**
+  /* **爪の音と、殴る前の予告の音は置かない。** 2026-08-17に2度言われて消した。
+       1度目「ピュンピュンピュンってなってんのは、仲間が攻撃受けてる時」
+       2度目「変な音、ピンピンピンピン殴られてる音はちょっといらないっす」
 
-     なぜ要るか: 爪は振った瞬間に当たる（避けようが無い）ので、公平さは
-     溜めが見えることで担保している。ところが小型は体高1.26mで、
-     間合い2.4mだと視線の下に沈む。**見えない予告は予告ではない。**
-     2026-08-17に「敵の攻撃モーションが俺に全く見えない。
-     なんか気づいたらダメージ食らってる」と言われた所。
+     測ったら理由がはっきりしていた。
+       爪を振る音 … 一番強い山442Hz／重心1413Hz／振幅0.75
+       溜めの予告 … 一番強い山135Hz／重心 998Hz／振幅0.43
+       被弾(hurt) … 一番強い山4720Hz／重心 698Hz／**振幅0.12**
+     **振りかぶった音が、殴られた実感の6倍の音量で鳴っていた。**
+     しかも爪の音は帯を1500Hz→260Hzへ滑らせる作りなので、
+     少し離れると高い所だけが残って口笛になる。囲まれるとそれが連続する。
 
-     唸り(monsterVoice)を短くした物にはしない。あれは落ちていく音で、
-     「終わった感じ」がする。予告は**上がっていく**必要がある。
-     長さも0.26秒に切ってあるので、溜め(0.42秒)の中に収まって
-     「鳴り終わってから来る」形になる */
-  monsterTell(scale = 1, position = null, camera = null) {
-    if (!this.ready || !this.enabled) return;
-    const ctx = this.ctx;
-    const dist = this._dist(position, camera);
-    // 予告は自分に向いた物だけでいい。遠くの分まで鳴らすと、
-    // 何が起きているか分からない音が四方から鳴る（仲間が殴られるたびに鳴っていた）
-    if (dist > 18) return;
-    // 同時に何体も溜めた時は間引く。3体が同じ音を重ねても大きくなるだけ
-    if (this._busy(ctx.currentTime, 1) > 5) return;
-    const t = ctx.currentTime + Math.min(0.6, dist / SOUND_SPEED);
-    const len = 0.26;
-    const f0 = 132 / Math.pow(scale, 0.7);
-    const bus = ctx.createGain();
-
-    // 喉が持ち上がる。低い所から上へ滑らせる
-    const o = ctx.createOscillator();
-    o.type = 'sawtooth';
-    o.frequency.setValueAtTime(f0 * 0.72, t);
-    o.frequency.exponentialRampToValueAtTime(f0 * 1.35, t + len);
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.setValueAtTime(f0 * 3.4, t);
-    lp.frequency.exponentialRampToValueAtTime(f0 * 8, t + len);
-    lp.Q.value = 2.2;
-    const g = ctx.createGain();
-    o.connect(lp); lp.connect(g); g.connect(bus);
-    this._env(g, t, 0.26, 0.03, len);
-    o.start(t); o.stop(t + len + 0.2);
-
-    // 息を吸う擦れ。これが無いと電子音の「ピュイ」になる
-    const air = this._noiseSource(rnd(0.6, 0.8));
-    const bp = ctx.createBiquadFilter();
-    bp.type = 'bandpass';
-    bp.frequency.setValueAtTime(f0 * 2.2, t);
-    bp.frequency.exponentialRampToValueAtTime(f0 * 5.5, t + len);
-    bp.Q.value = 0.9;
-    const ag = ctx.createGain();
-    air.connect(bp); bp.connect(ag); ag.connect(bus);
-    this._env(ag, t, 0.14, 0.02, len);
-    air.start(t, Math.random()); air.stop(t + len + 0.2);
-
-    this._out(this._place(bus, position, camera, 9, dist), 0.25, 0.25);
-  }
-
-  /* 爪を振る音。**刃の風切り(swing)とは別物にする。**
-     刃は薄いので高い所が「シュッ」と鳴るが、爪は太い腕ごと来るので
-     低い所の「ゴッ」が要る。同じ音を流用すると、モンスターがナイフを
-     振っているように聞こえる */
-  monsterSwipe(scale = 1, position = null, camera = null) {
-    if (!this.ready || !this.enabled) return;
-    const ctx = this.ctx;
-    const dist = this._dist(position, camera);
-    /* **遠くの爪は鳴らさない。** 帯を1500Hzから260Hzへ滑らせる音なので、
-       遠くで小さく鳴ると高い所だけが残って「ピュン」という口笛になる。
-       協力プレイは離れた仲間も殴られ続けるので、視界の外から
-       「ピュンピュンピュン」と鳴り続ける状態になっていた
-       （2026-08-17に「ピュンピュンピュンってなってんのは、仲間が攻撃受けてる時」）。
-       22mは着弾音(impact)の26mより手前。爪は自分の周りの出来事なので、
-       銃声や着弾より狭くてよい */
-    if (dist > 22) return;
-    // 囲まれた時に音が団子にならないよう間引く（銃声と同じ仕掛け）
-    if (this._busy(ctx.currentTime, 1) > 7) return;
-    const t = ctx.currentTime + Math.min(0.6, dist / SOUND_SPEED);
-    const len = 0.20 * (0.8 + scale * 0.3);
-    const bus = ctx.createGain();
-
-    // 風。帯を上から下へ滑らせると「通り過ぎた」に聞こえる
-    const air = this._noiseSource(rnd(0.85, 1.1));
-    const bp = ctx.createBiquadFilter();
-    bp.type = 'bandpass';
-    bp.frequency.setValueAtTime(1500 / scale, t);
-    bp.frequency.exponentialRampToValueAtTime(260 / scale, t + len);
-    bp.Q.value = 1.1;
-    const ag = ctx.createGain();
-    air.connect(bp); bp.connect(ag); ag.connect(bus);
-    this._env(ag, t, 0.34, 0.012, len);
-    air.start(t, Math.random()); air.stop(t + len + 0.2);
-
-    // 腕の重み。低い所に短い山を1つ置くだけで、細い風切りが太い腕になる
-    const thud = ctx.createOscillator();
-    thud.type = 'sine';
-    thud.frequency.setValueAtTime(150 / scale, t + len * 0.55);
-    thud.frequency.exponentialRampToValueAtTime(52 / scale, t + len * 1.4);
-    const tg = ctx.createGain();
-    thud.connect(tg); tg.connect(bus);
-    this._env(tg, t + len * 0.55, 0.30, 0.006, len * 0.9);
-    thud.start(t); thud.stop(t + len * 2 + 0.2);
-
-    this._out(this._place(bus, position, camera, 11, dist), 0.3, 0.3);
-  }
+     殴られたことは hurt()（世界の音がこもる）と画面の赤みと向きのリングが伝える。
+     鳴らす物を足すなら、**振りかぶりではなく当たった瞬間**に、
+     低い所だけで鳴る物を新しく作ること（この2つを直す形では戻さない）*/
 
   // 火の玉を吐く。濡れた噴き出しと、火が付く一瞬の膨らみ
   monsterSpit(position = null, camera = null) {

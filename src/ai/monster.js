@@ -68,6 +68,7 @@ export const MSTATE = {
 export const MONSTER_KINDS = {
   // 小型。**数で来る。**速くて脆く、まっすぐ突っ込んで爪で殴る
   crawler: {
+    hit: 'beast',
     scale: 0.78, health: 62, speed: 5.4, radius: 0.36,
     melee: { damage: 12, reach: 2.4, windup: 0.42, strike: 0.14, recover: 0.55 },
     ranged: null,
@@ -77,6 +78,7 @@ export const MONSTER_KINDS = {
   },
   // 大型。**遠くから焼いてくる。**遅くて硬い。近づかれると下がりながら吐く
   spitter: {
+    hit: 'beast',
     scale: 1.32, health: 300, speed: 2.9, radius: 0.55,
     melee: { damage: 20, reach: 3.0, windup: 0.55, strike: 0.16, recover: 0.75 },
     ranged: {
@@ -100,7 +102,15 @@ export const MONSTER_KINDS = {
        路地にも門にも引っかかって、町の中をほとんど歩けていない。
        0.78なら江戸の門(5.0m)も町屋の戸(2.2m)も通る。
        体の見た目が少し壁へめり込むが、来ないボスよりはるかにまし */
-    scale: 2.75, health: 2600, speed: 3.1, radius: 0.78,
+    /* 足の速さ。**3.1では追いつけないので4.4へ上げた。**
+       プレイヤーは歩き4.7・走り7.4（src/player/player.js）なので、
+       3.1だと下がられた時点で物理的に届かない。実測すると、走って距離を取る
+       標的を江戸で180秒追わせて**爪が届いた回数0・最小距離13.8m・
+       合計99ダメージ**で終わった（＝ボスは何もしていない）。
+       4.4は歩きよりまだ遅いので、意識して下がれば引き離せる。
+       ただし撃ちながら下がると歩きになるので、**撃つなら覚悟が要る**距離になる */
+    hit: 'beast',
+    scale: 2.75, health: 2600, speed: 4.4, radius: 0.78,
     /* 歩く時の背丈。**見た目(4.5m)より低くする。**
        素直に4.5mのカプセルで歩かせると、庇も門も鳥居も全部つかえて、
        建物の近くに立っている人には永久に届かない（実測で8m手前が限界だった）。
@@ -119,10 +129,39 @@ export const MONSTER_KINDS = {
          ぶつかりだけで、溜め→爪の一連が一度も見られない状態だった） */
       keepAway: false,
     },
-    // 技。それぞれ独立した間隔で回る
-    charge: { speed: 11.5, windup: 0.75, run: 1.9, damage: 40, cooldown: 9.0, stun: 2.2 },
+    /* 技。それぞれ独立した間隔で回る。
+
+       **間合いに穴を空けない。** 前は
+         〜5.2m 踏み ／ 5.2〜7.4m **何も無い** ／ 7.4〜10m 突進 ／ 10m〜 火の玉
+       で、6.0mに立っていると180秒のうち爪0・踏み0・火0・突進0で
+       咆哮11回だけ（SEEKに91%）という状態だった。
+       突進の下限を5.0mへ下げて、踏み(〜5.2m)と重ねてある。
+       これでどの距離にも必ず出せる手がある
+
+       minRange は突進を出す下限。前は melee.reach * 1.6 = 7.36m を直に計算していて、
+       **その数字がどこにも書いていなかった**ので穴に気づけなかった */
+    charge: {
+      speed: 11.5, windup: 0.75, run: 1.9, damage: 40, cooldown: 9.0, stun: 2.2,
+      minRange: 5.0, maxRange: 26,
+      /* 当てた時の硬直。**外した時(stun 2.2秒)と分ける。**
+         前はどちらでも2.2秒棒立ちだった。当てても隙だらけなら、
+         突進は「こちらが得をする技」になってしまう。
+         外した時だけ長く硬直するなら、**避けること自体が反撃の機会**になる */
+      hitRecover: 0.55,
+    },
     stomp: { windup: 0.70, radius: 6.5, damage: 30, cooldown: 7.5 },
-    roar: { windup: 0.9, cooldown: 16.0 },
+    /* 咆哮。**小型を呼ぶ間隔を空けた（16→24秒）。**
+       実測でプレイヤーが受ける被害の85〜88%が、咆哮で湧いた小型からだった。
+       ボス本人は12〜15%しか出していない＝**ボスが遅い背景になっていた。**
+       呼ぶ数もserver/monsters.jsの_roarSpawnで3→2に減らしてある */
+    roar: { windup: 0.9, cooldown: 24.0 },
+    /* 手負いになると変わる。**同じ相手を3分殴り続けるのをやめる。**
+       残り体力がここを割るたびに、間隔が縮んで足が速くなる。
+       段が変わったことは目の光(tell)と体の傾きで分かる（animate側）*/
+    rage: [
+      { at: 0.60, cd: 0.72, speed: 1.10 },   // 6割で怒る
+      { at: 0.30, cd: 0.52, speed: 1.22 },   // 3割で本気
+    ],
     shape: { crouch: 0.0, headScale: 1.10, armLen: 1.05, tail: 1.10, belly: 1.15, horn: 1 },
     palette: 2,
   },
@@ -144,18 +183,74 @@ const NOMINAL_H = 1.62;
    骨から読まないので、サーバーは見た目を1つも組まなくていい。
    数字は「基準の姿(NOMINAL_H)を1とした時の、足元からの高さと前後」。
    zの負が前（兵士と揃えてある。ヨー0で前方が-Z） */
-const HIT = {
+/* 前傾した四つ足の当たり所。**頭が前へ突き出た姿**の物。
+   これが長い間「唯一の表」だった（3種類とも同じ骨組みの縮尺違いだったので
+   それで足りていた）*/
+const HIT_BEAST = {
   // 頭。前へ突き出している。**ここが一番小さくて、一番よく入る**
   HEAD: { y: 1.24, z: -0.86, r: 0.26, mul: 2.0 },
   // 胴。腰から首の付け根まで斜めに1本
   BODY: { ay: 0.92, az: 0.24, by: 1.32, bz: -0.60, r: 0.42, mul: 1.0 },
   // 脚。まとめて1本の筒
   LEG: { ay: 0.08, az: 0.06, by: 0.94, bz: 0.06, r: 0.34, mul: 0.72 },
-  // 背中のコブ。**ボスだけが持つ弱点。** 前からは胴に隠れて狙えない
+  // 背中のコブ。**弱点を持つ個体だけ。** 前からは胴に隠れて狙えない
   WEAK: { y: 1.46, z: 0.30, r: 0.30, mul: 3.0 },
 };
 
+/* まっすぐ立つ姿の当たり所。**中心線上に縦一本。**
+
+   なぜ要るか: 上の表はHEADがz-0.86＝**体の86cm前**にある。
+   前傾した獣ならそこに頭があるが、まっすぐ立つ妖怪に同じ表を使うと
+   **頭の当たり所が体の前の空中に浮く。**（基準1.62mの姿で0.86、
+   体高2mの個体なら実寸1m以上前）。撃っても当たらない頭と、
+   誰も居ない空中の当たり判定が同時にできる。
+
+   xを持たないのは_syncHitboxesの作りに合わせているため（あちらは
+   ローカルxを常に0として省いてある）。左右へ張り出す物——翼・触手・
+   横に広い壁のような姿——は、この形式では表せない。
+   作るならput()にxを足す話になる */
+const HIT_UPRIGHT = {
+  HEAD: { y: 1.38, z: 0, r: 0.24, mul: 2.0 },
+  BODY: { ay: 0.58, az: 0, by: 1.18, bz: 0, r: 0.30, mul: 1.0 },
+  LEG: { ay: 0.04, az: 0, by: 0.58, bz: 0, r: 0.24, mul: 0.72 },
+};
+
+/* 一本足で跳ねる姿（唐傘小僧）。**傘が輪郭の8割を占める。**
+   頭の球を傘の外形(半径0.42)に合わせて大きく取り、そのぶん倍率を下げる。
+   2.0のままだと「どこを撃っても頭」になって、狙う意味が消える */
+const HIT_POLE = {
+  HEAD: { y: 1.32, z: 0, r: 0.40, mul: 1.25 },
+  BODY: { ay: 0.70, az: 0, by: 1.15, bz: 0, r: 0.18, mul: 1.0 },
+  LEG: { ay: 0.05, az: 0, by: 0.70, bz: 0, r: 0.16, mul: 0.72 },
+};
+
+/* 浮いている姿（提灯お化け）。**脚を持たない。**
+   垂れ紙に当たり判定を持たせると、紙を撃って本体が減ることになる */
+const HIT_FLOAT = {
+  HEAD: { y: 0.86, z: 0, r: 0.26, mul: 2.0 },
+  BODY: { ay: 0.30, az: 0, by: 0.84, bz: 0, r: 0.28, mul: 1.0 },
+};
+
+/* 種類 → 当たり所の表。**姿を足したらここにも足す。**
+   足し忘れると獣の表が使われて、頭の判定が体の前に浮く。
+   tools/check-coop.mjsの[29]が、全種類ぶん載っていることを見張る */
+const HITS = {
+  beast: HIT_BEAST,
+  upright: HIT_UPRIGHT,
+  pole: HIT_POLE,
+  float: HIT_FLOAT,
+};
+
+/* 既定の表。**この名前で外へ出しているのは、
+   弱点の高さ(WEAK.y)を検査とクライアントが直接読んでいるため。**
+   種類ごとの表が要る所は hitOf() を使うこと */
+const HIT = HIT_BEAST;
+
 export const MONSTER_HIT = HIT;
+export const MONSTER_HITS = HITS;
+
+/** その種類の当たり所の表。知らない名前は獣の表へ落とす */
+export const hitOf = (kind) => HITS[MONSTER_KINDS[kind]?.hit || 'beast'] || HIT_BEAST;
 
 /* 詰まりの判定。**ここが緩いと、挟まったモンスターが1体でも出た瞬間に
    波が永久に終わらなくなる**（生き残りが0にならないと次の波へ進まないため）。
@@ -611,6 +706,12 @@ export class Monster {
     const def = MONSTER_KINDS[kind];
     this.def = def;
     this.scale = def.scale;
+    /* この個体の当たり所の表。**種類ごとに違う。**
+       前傾した獣・まっすぐ立つ物・一本足・浮いている物で、
+       頭がどこにあるかも脚があるかも違う。
+       def.hitを書き忘れると獣の表になり、まっすぐ立つ姿だと
+       頭の当たり所が体の前の空中に浮く（HITSの説明を読むこと） */
+    this.hitbox = hitOf(kind);
 
     this.visual = opts.visual !== false;
     this.parts = this.visual ? buildMonster(kind) : null;
@@ -659,7 +760,6 @@ export class Monster {
     this._sideFor = 0;
     this._sideDir = Math.random() < 0.5 ? -1 : 1;
     this._wantHop = false;
-    this._backoff = 0;
 
     // 見た目の姿勢（クライアントもサーバーも同じ変数を持つ。サーバーは骨へ流さない）
     this.mouth = 0;         // 口の開き 0..1
@@ -697,7 +797,49 @@ export class Monster {
 
   get feetY() { return this.collider.start.y - this.radius; }
 
-  get eyeY() { return this.feetY + HIT.HEAD.y * this.scale; }
+  // 目の高さ。視線の判定・火の玉の出所・狙いのピッチが全部これを見る
+  get eyeY() { return this.feetY + this.hitbox.HEAD.y * this.scale; }
+
+  /* 手負いの段。**同じ相手を3分殴り続けるのをやめるための物。**
+     0=無傷 / 1=怒った / 2=本気。定義(def.rage)を持たない個体は常に0。
+
+     段は体力の割合だけで決まるので、**サーバーとクライアントで必ず一致する**
+     （どちらもhealthとmaxHealthを知っている。packMonsterがhpを載せている）。
+     別の電文を足さずに、段が上がったことを見た目にも出せる */
+  get ragePhase() {
+    const r = this.def.rage;
+    if (!r) return 0;
+    const f = this.maxHealth > 0 ? this.health / this.maxHealth : 1;
+    let n = 0;
+    for (let i = 0; i < r.length; i++) if (f <= r[i].at) n = i + 1;
+    return n;
+  }
+
+  /** 技の間隔に掛ける倍率。段が上がるほど短くなる（1.0 → 0.72 → 0.52） */
+  get rageCdMul() {
+    const n = this.ragePhase;
+    return n === 0 ? 1 : this.def.rage[n - 1].cd;
+  }
+
+  /** 足の速さに掛ける倍率。段が上がるほど速くなる */
+  get rageSpeedMul() {
+    const n = this.ragePhase;
+    return n === 0 ? 1 : this.def.rage[n - 1].speed;
+  }
+
+  /**
+   * 突進を何秒走るか。**相手までの距離から決める。**
+   * 固定1.9秒だと11.5m/sで約21m直進するので、12m先の相手には
+   * 通り過ぎるのが正しい動きになっていた（実測で20回中接触0回）。
+   * 相手の位置より1.4m先で止まる長さにして、行き過ぎを抑える。
+   * 短すぎると手前で止まって間抜けなので0.55秒を下限にする
+   */
+  _chargeRunFor(dist) {
+    const cg = this.def.charge;
+    if (!cg) return 0;
+    const want = (dist + 1.4) / cg.speed;
+    return clamp(want, 0.55, cg.run);
+  }
 
   spawn(pos) {
     this.collider.start.set(pos.x, pos.y + this.radius, pos.z);
@@ -711,9 +853,11 @@ export class Monster {
     this.mouth = 0; this.rear = 0; this.lunge = 0; this.bodyTilt = 0; this.tell = 0;
     this.meleeCd = 0;
     this.rangedCd = this.def.ranged ? Math.random() * 1.2 : 0;
+    // 突進の狙いと走る長さ。使い回しの個体に前回の値が残らないよう毎回戻す
+    this._chargeYaw = this.yaw;
+    this._chargeRun = this.def.charge ? this.def.charge.run : 0;
     this._lastPos.copy(this.collider.start);
     this._stuckWin = 0; this._stuckFor = 0; this._sideFor = 0; this._wantHop = false;
-    this._backoff = 0;
     this._syncHitboxes();
     if (this.root) { this.root.visible = true; this.root.rotation.set(0, 0, 0); }
   }
@@ -724,18 +868,22 @@ export class Monster {
      どちらの骨を信じるのかという話が増える */
   _syncHitboxes() {
     const s = this.scale;
+    const h = this.hitbox;
     const x = this.collider.start.x, z = this.collider.start.z, y = this.feetY;
     const c = Math.cos(this.yaw), sn = Math.sin(this.yaw);
     /* ローカル(0,y,z)を向きで回して世界へ。xは常に0（体の中心線上）なので省ける。
        ヨー0で前方が-Zなので、前方ベクトルは(-sin,-cos)。
        ローカルzがlzの点は「前へ-lz進んだ所」なので、世界の足しは(lz*sin, lz*cos)になる */
     const put = (out, ly, lz) => out.set(x + sn * lz * s, y + ly * s, z + c * lz * s);
-    put(this._head, HIT.HEAD.y, HIT.HEAD.z);
-    put(this._bodyA, HIT.BODY.ay, HIT.BODY.az);
-    put(this._bodyB, HIT.BODY.by, HIT.BODY.bz);
-    put(this._legA, HIT.LEG.ay, HIT.LEG.az);
-    put(this._legB, HIT.LEG.by, HIT.LEG.bz);
-    if (this.hasWeak) put(this._weak, HIT.WEAK.y, HIT.WEAK.z);
+    put(this._head, h.HEAD.y, h.HEAD.z);
+    put(this._bodyA, h.BODY.ay, h.BODY.az);
+    put(this._bodyB, h.BODY.by, h.BODY.bz);
+    // 脚を持たない姿（浮いている物）がある。表に無ければ作らない
+    if (h.LEG) {
+      put(this._legA, h.LEG.ay, h.LEG.az);
+      put(this._legB, h.LEG.by, h.LEG.bz);
+    }
+    if (this.hasWeak && h.WEAK) put(this._weak, h.WEAK.y, h.WEAK.z);
   }
 
   /**
@@ -746,10 +894,11 @@ export class Monster {
   intersect(origin, dir, pad = 0) {
     if (!this.alive) return null;
     const s = this.scale;
-    const th = raySphere(origin, dir, this._head, HIT.HEAD.r * s);
-    const tb = rayCapsule(origin, dir, this._bodyA, this._bodyB, HIT.BODY.r * s + pad);
-    const tl = rayCapsule(origin, dir, this._legA, this._legB, HIT.LEG.r * s + pad);
-    const tw = this.hasWeak ? raySphere(origin, dir, this._weak, HIT.WEAK.r * s) : -1;
+    const h = this.hitbox;
+    const th = raySphere(origin, dir, this._head, h.HEAD.r * s);
+    const tb = rayCapsule(origin, dir, this._bodyA, this._bodyB, h.BODY.r * s + pad);
+    const tl = h.LEG ? rayCapsule(origin, dir, this._legA, this._legB, h.LEG.r * s + pad) : -1;
+    const tw = (this.hasWeak && h.WEAK) ? raySphere(origin, dir, this._weak, h.WEAK.r * s) : -1;
 
     let best = Infinity, part = null;
     if (tb >= 0 && tb < best) { best = tb; part = 'body'; }
@@ -757,7 +906,7 @@ export class Monster {
     /* 頭とコブは、胴より少し後ろでも優先する（兵士のintersectと同じ決まり）。
        胴のカプセルは太くて上端が丸いので、素直に手前を採ると
        顔を撃っても背中のコブを撃っても全部「胴」になる */
-    const SPAN = HIT.BODY.r * 2 * s;
+    const SPAN = h.BODY.r * 2 * s;
     if (th >= 0 && (part === null || th - best <= SPAN)) { best = th; part = 'head'; }
     if (tw >= 0 && (part === null || tw - best <= SPAN)) { best = tw; part = 'weak'; }
     if (!part) return null;
@@ -769,11 +918,14 @@ export class Monster {
     };
   }
 
-  /** 部位ごとの倍率。room.jsが電文へ載せる前に掛ける */
-  static mulOf(part) {
-    return part === 'head' ? HIT.HEAD.mul
-      : part === 'weak' ? HIT.WEAK.mul
-        : part === 'legs' ? HIT.LEG.mul : HIT.BODY.mul;
+  /* 部位ごとの倍率。room.jsが電文へ載せる前に掛ける。
+     **種類ごとの表を見る。**唐傘小僧は傘が輪郭の8割を占めるので
+     頭の倍率を下げてある（2.0のままだと、どこを撃っても頭になる） */
+  static mulOf(part, kind = null) {
+    const h = kind ? hitOf(kind) : HIT;
+    return part === 'head' ? h.HEAD.mul
+      : part === 'weak' ? (h.WEAK?.mul ?? 1)
+        : part === 'legs' ? (h.LEG?.mul ?? 1) : h.BODY.mul;
   }
 
   /** 当てられた。倒し切ったらtrue */
@@ -883,10 +1035,6 @@ export class Monster {
     this.chargeCd = Math.max(0, this.chargeCd - dt);
     this.stompCd = Math.max(0, this.stompCd - dt);
     this.roarCd = Math.max(0, this.roarCd - dt);
-    /* 間合いの取り直しは**毎ティック減らす。** SEEKの中だけで減らしていた頃は、
-       殴り終わった次のフレームでまた爪の間合いに入って即WINDUPへ行くので、
-       下がる時間が1フレームも取れず、値が2.3のまま止まっていた */
-    this._backoff = Math.max(0, this._backoff - dt);
 
     const tp = target?.pos;
     const dx = tp ? tp.x - this.collider.start.x : 0;
@@ -927,20 +1075,43 @@ export class Monster {
       } else {
         this.state = S.SEEK;
         const def = this.def;
-        // ボスの技。近い順に見る。**同時に回さない**（1つ出ている間はbusy）
-        if (def.stomp && this.stompCd <= 0 && dist < def.stomp.radius * 0.8) {
-          this._enter(S.STOMP); this.stompCd = def.stomp.cooldown;
-        } else if (def.charge && this.chargeCd <= 0 && this.hasLOS
-                   && dist > def.melee.reach * 1.6 && dist < 26) {
-          this._enter(S.CHARGE); this.chargeCd = def.charge.cooldown;
-          this._chargeYaw = wantYaw;
-        } else if (def.roar && this.roarCd <= 0 && dist < 20) {
-          this._enter(S.ROAR); this.roarCd = def.roar.cooldown;
-        } else if (dist <= def.melee.reach && this.meleeCd <= 0 && this._backoff <= 0) {
+        /* 技の選び方。**「一番痛い技を、届く時に必ず出す」順に見る。**
+
+           2026-08-17に「ボスが全然怖くないし、全然こっち殴ってこない」と
+           言われて実測したら、順番そのものが間違っていた。
+
+           前は 踏み(5.2m) → 突進(7.4m) → 咆哮(20m) → 爪(4.6m) → 火の玉 の順。
+           踏みの5.2mは爪の4.6mを丸ごと含み、咆哮の20mはさらに広いので、
+           **冷めていれば必ずそちらが勝って、一番痛い爪(34)が一番出なかった。**
+           3mに張り付かせた180秒で、踏み21回・咆哮11回が40.8秒(23%)を占めていた。
+
+           今は「届く距離で一番痛い物から」。爪34 > 突進40だが突進は
+           当たらない回が多い（12mだと21m走って通り過ぎる）ので、
+           **間合いの中に居る時は必ず爪**にしてある。
+           咆哮は一番後ろ——あれは自分で殴らずに小型を呼ぶ手なので、
+           他に何も出せない時の埋め草でいい */
+        const rageCd = this.rageCdMul;
+        if (dist <= def.melee.reach && this.meleeCd <= 0) {
+          // 1. 間合いの中なら必ず爪。**他の技に譲らない**
           this._enter(S.WINDUP);
+        } else if (def.stomp && this.stompCd <= 0 && dist < def.stomp.radius * 0.8) {
+          // 2. 爪は届かないが踏みなら届く（4.6〜5.2m）
+          this._enter(S.STOMP); this.stompCd = def.stomp.cooldown * rageCd;
+        } else if (def.charge && this.chargeCd <= 0 && this.hasLOS
+                   && dist > def.charge.minRange && dist < def.charge.maxRange) {
+          /* 3. 突進。**下限を5.0mまで下げた。**
+             前は melee.reach*1.6 = 7.36m だったので、
+             5.2〜7.4mに立たれると出せる技が咆哮しか無かった */
+          this._enter(S.CHARGE); this.chargeCd = def.charge.cooldown * rageCd;
+          this._chargeYaw = wantYaw;
+          this._chargeRun = this._chargeRunFor(dist);
         } else if (def.ranged && this.rangedCd <= 0 && this.hasLOS
                    && dist >= def.ranged.min && dist <= def.ranged.max) {
-          this._enter(S.SPIT); this.rangedCd = def.ranged.cooldown;
+          // 4. 火の玉。遠くへ逃げた相手を追い立てる
+          this._enter(S.SPIT); this.rangedCd = def.ranged.cooldown * rageCd;
+        } else if (def.roar && this.roarCd <= 0 && dist < 20) {
+          // 5. 咆哮。**一番後ろ。**自分では殴らない手なので、他が全部塞がった時だけ
+          this._enter(S.ROAR); this.roarCd = def.roar.cooldown * rageCd;
         }
       }
     }
@@ -965,17 +1136,27 @@ export class Monster {
            通っていない時に下がると、壁の裏で永久に後退し続けて、
            流用していた頃と同じ「何も起きない試合」に戻る */
         const rg = this.def.ranged;
-        if (this._backoff > 0) {
-          // 殴った後の間合い取り直し（RECOVERから来る）。少し下がって次の技へ。
-          // 減らすのは上のまとめて減らしている所
-          ux = -tx; uz = -tz; speedMul = 0.85;
-        } else if (rg && rg.keepAway && this.hasLOS && dist < rg.min) {
+        if (rg && rg.keepAway && this.hasLOS && dist < rg.min) {
           ux = -tx; uz = -tz; speedMul = 0.75;
         } else if (rg && rg.keepAway && this.hasLOS && dist < rg.max * 0.7) {
           // 間合いの中。横へ流れながら次の吐きを待つ
           const side = Math.sin(this.jitter) > 0 ? 1 : -1;
           ux = sx * side; uz = sz * side;
           speedMul = 0.6;
+        }
+        /* **離れられるほど足を速める。** ボスだけ。
+
+           ボスの足は4.4m/sで、プレイヤーの走り(7.4m/s)より遅い。
+           まっすぐ走って逃げ続けられると物理的に届かず、実測で
+           **180秒追って爪0回・合計0ダメージ**（＝何も起きない試合）だった。
+
+           かといって常時7.4m/sにすると、間合いの中でも同じ速さで来るので
+           避ける余地が消える。**遠い時だけ速い**という形にする。
+           14mより外で1.55倍（6.8m/s）まで上げるので、走って逃げる相手には
+           じりじり詰め、間合いの中では今まで通り鈍い。
+           「引き離したはずなのに、気づくと後ろに居る」が怖さの正体 */
+        if (this.def.rage && dist > 14) {
+          speedMul *= clamp(1 + (dist - 14) / 10 * 0.55, 1, 1.55);
         }
         // 進路を少し散らす。全員が最短距離で来ると一列になる
         this.jitter += dt * 0.7;
@@ -1022,21 +1203,25 @@ export class Monster {
         this.mouth += (0.2 - this.mouth) * Math.min(1, dt * 5);
         speedMul = 0.35;
         if (this.stateT >= this.def.melee.recover) {
-          this.meleeCd = 0.35;
-          /* **殴り終わったら一度離れる。** 遠距離や突進を持っている個体
-             （＝ボス）は、離れないとその技を一生使わない。
-             爪の間合い(4.6m)に張り付いたままだと、突進(7.4m以上)も
-             火の玉(10m以上)も条件に入らないため——実際そうなっていて、
-             onMeleeが出るのは突進のぶつかりだけ、という状態だった。
-             逃げるのではなく「次の技のために間合いを取り直す」動き */
-          if ((this.def.charge && this.chargeCd <= 2.5)
-              || (this.def.ranged && this.rangedCd <= 2.5)) {
-            /* 2.6秒。**次の技が届く所まで下がり切る長さ**で決めてある。
-               速さ3.1×0.85で約7m開くので、爪の間合い(4.6m)から
-               突進の帯(7.4〜26m)と火の玉の下限(10m)の両方に入る。
-               短いと下がりきる前に間合いへ戻ってしまい、技が一度も出ない */
-            this._backoff = 2.6;
-          }
+          this.meleeCd = 0.35 * this.rageCdMul;
+          /* **殴り終わっても下がらない。**
+
+             ここには「次の技のために間合いを取り直す」つもりで
+             2.6秒の後退(_backoff)を入れていた。実測したら、それが
+             「ボスが全然殴ってこない」の一番大きい原因だった。
+
+             判定が `冷却が明けているか` だけで **`その距離でその技が出せるか` を
+             見ていなかった。** 爪の間合い(4.6m)では突進も火の玉も撃てないので
+             冷却は0のまま張り付き、条件が永久に真になる。
+             3mに張り付かせた180秒の実測:
+               ・後退していた時間 109.1秒（61%）
+               ・間合いに居て手が空いていた69.2秒のうち、振らなかった時間 68.5秒（99%）
+               ・その距離で実際に撃てた突進・火の玉 0回
+             **下がる理由だった技が1つも出ていなかった。**
+
+             直し方は「後退の条件を賢くする」ではなく**後退そのものをやめる**。
+             技を出せないのが問題なら、技の側を近い距離へ届かせればいい
+             （突進の下限を7.4m→5.0mへ下げた。上の技の選択を読むこと） */
           this._enter(S.SEEK);
         }
         break;
@@ -1072,7 +1257,18 @@ export class Monster {
         } else {
           this.rear += (0 - this.rear) * Math.min(1, dt * 10);
           this.mouth += (1 - this.mouth) * Math.min(1, dt * 6);
-          wantYaw = this._chargeYaw;      // 走り出したら曲がらない
+          /* 走っている間の舵。**ほんの少しだけ曲がれる。**
+
+             前は一切曲がらなかった。まっすぐ逃げているだけの相手にも
+             当たらないので（相手は走りながら進むぶん、狙った点から必ずずれる）、
+             実測で20回突進して接触0回だった。
+
+             0.6ラジアン/秒。走る時間は最長1.9秒なので、曲がれるのは
+             合計65度ぶん。**横へ跳んで避ける手はそのまま効く**
+             （真横へ避けられると角度が90度以上変わるので追い切れない）。
+             まっすぐ逃げる相手だけ捕まえられる、という強さにしてある */
+          if (tp) this._chargeYaw += wrapPi(wantYaw - this._chargeYaw) * Math.min(1, dt * 0.6);
+          wantYaw = this._chargeYaw;
           wishX = -Math.sin(this._chargeYaw);
           wishZ = -Math.cos(this._chargeYaw);
           speedMul = cg.speed / this.speed;
@@ -1081,9 +1277,24 @@ export class Monster {
             this._struck = true;
             this.onMelee?.(this, cg.damage, this.radius + 2.6);
           }
-          // 壁に当たったら怯む。onFloorが立たない＝横から押し返されている
           const spd = Math.hypot(this.velocity.x, this.velocity.z);
-          if (this.stateT >= cg.windup + cg.run || (this.stateT > cg.windup + 0.35 && spd < 2.5)) {
+          /* 走り終わり。**当てたか外したかで硬直を変える。**
+
+             前はどちらでも2.2秒棒立ちだった。当てても隙だらけなら、
+             突進はプレイヤーにとって「当たった方が得」な技になる。
+             当てた時は0.55秒で立ち直り（＝そのまま爪へ繋がる）、
+             外した時だけ2.2秒硬直する。**避けること自体が反撃の機会**になる。
+
+             走る長さも相手までの距離から決める(_chargeRunFor)。
+             前は固定1.9秒で、11.5m/sだと約21m直進していた。
+             12m先の相手には**通り過ぎるのが正しい動き**になっていて、
+             実測で20回突進して接触0回だった */
+          const runFor = this._chargeRun ?? cg.run;
+          if (this._struck) {
+            this._enter(S.RECOVER);
+            this.meleeCd = cg.hitRecover;
+          } else if (this.stateT >= cg.windup + runFor
+                     || (this.stateT > cg.windup + 0.35 && spd < 2.5)) {
             this._enter(S.STUN);
             this._stunFor = cg.stun;
           }
@@ -1158,7 +1369,12 @@ export class Monster {
     this.pitch = tp && dist > 0.5
       ? clamp(Math.atan2((target.eyeY - this.eyeY), dist), -0.6, 0.6) : 0;
 
-    const targetSpeed = this.speed * speedMul * (1 - this.flinch * 0.45);
+    /* 足の速さ。**手負いの段で上がる。**
+       突進の最中(speedMulがcg.speed/this.speedになっている時)は掛けない——
+       あちらは自前の速さを持っているので、段で二重に速くすると
+       避けられない速度になる */
+    const rageSpd = this.state === S.CHARGE ? 1 : this.rageSpeedMul;
+    const targetSpeed = this.speed * speedMul * rageSpd * (1 - this.flinch * 0.45);
     if (this.onFloor) {
       const sp = Math.hypot(this.velocity.x, this.velocity.z);
       if (sp > 0.01) {
@@ -1337,8 +1553,13 @@ export class Monster {
     /* 口の奥と目の光。**歩いている時と溜めている時で3倍以上開ける。**
        前は 1.6 + mouth*2.6 で、歩き(2.5)と溜め(4.2)の差が1.7しかなかった。
        画面の端に映った時にその差は読めない */
+    /* 手負いの段でも光る。**段が上がったことが画で分かるようにする。**
+       段はhealth/maxHealthだけで決まるので、サーバーと必ず一致する
+       （別の電文は要らない。packMonsterがhpを載せている）。
+       6割で怒り、3割で本気。目が赤熱していくのが「そろそろ危ない」の合図 */
     const g = p.mats.glow;
-    g.emissiveIntensity = 1.3 + this.mouth * 1.4 + this.tell * 5.2;
+    const rage = this.ragePhase;
+    g.emissiveIntensity = 1.3 + this.mouth * 1.4 + this.tell * 5.2 + rage * 1.8;
   }
 
   /** 倒れる絵。クライアントが自分で進める（サーバーは倒れた瞬間しか教えない） */

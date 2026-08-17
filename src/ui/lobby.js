@@ -175,8 +175,20 @@ export class Lobby {
     // マップも同じ扱い
     if (map) this.map = map;
     const curMap = MAP_LIST.find((m) => m.id === this.map) || MAP_LIST[0];
-    this.mapEls.forEach((b, i) => b.classList.toggle('on', MAP_LIST[i].id === curMap.id));
-    this.el.mapDesc.textContent = curMap.desc;
+    /* **協力プレイは江戸だけ。** 他のマップの札を畳む。
+
+       サーバー側(server/room.jsのCOOP_MAP)が江戸へ寄せるので、
+       押しても江戸のままになる。ここで畳んでおかないと
+       「押したのに変わらない札」が並ぶことになる
+       （2026-08-17に「協力モードは江戸じゃない方のマップは消しといていい」）*/
+    const coopOnly = cur.id === 'coop';
+    this.mapEls.forEach((b, i) => {
+      const id = MAP_LIST[i].id;
+      b.classList.toggle('on', id === curMap.id);
+      b.classList.toggle('hidden', coopOnly && id !== 'edo');
+    });
+    this.el.mapDesc.textContent = coopOnly
+      ? `${curMap.desc}（協力プレイはここだけ）` : curMap.desc;
 
     // 席番号から座っている人を引けるようにしておく
     const bySeat = [];

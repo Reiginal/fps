@@ -13,7 +13,7 @@
    「当たった／当たらない」は必ずサーバーの答えが届く */
 
 import * as THREE from 'three';
-import { Monster, MSTATE, MONSTER_HIT } from '../ai/monster.js';
+import { Monster, MSTATE } from '../ai/monster.js';
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -235,7 +235,8 @@ export class RemoteMonsters {
       /* 頭の位置。**当たり判定と同じ数字(MONSTER_HIT.HEAD)から作る。**
          骨から読むと、判定（サーバーの計算）と音や火花の位置（骨）が
          別々の場所を指すことになる */
-      const h = MONSTER_HIT.HEAD;
+      // **その個体の表から引く**（種類ごとに頭の位置が違う）
+      const h = mon.hitbox.HEAD;
       const s = mon.scale;
       slot.headPos.set(
         slot.cx + Math.sin(slot.drawYaw) * h.z * s,

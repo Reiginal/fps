@@ -1823,11 +1823,6 @@ class Game {
     this._coopWave = 0;
     this._coopWaveOf = 0;
     this._coopBoss = false;
-    /* 溜めに入った時の予告音。**毎フレーム渡す関数なので、1回だけ作って持っておく。**
-       その場で `(slot) => ...` と書くと、毎フレーム新しい関数を作って捨てることになる */
-    this._onMonsterTell = (slot) => {
-      this.audio.monsterTell(slot.mon.scale, slot.headPos, this.camera);
-    };
     /* 今このとき地面に落ちている物。**置いた時の1回しか配られない**ので、
        途中から入った時はお迎えの電文で受け取らないと、拾える物が見えないまま
        「近づいたら何か起きた」になる */
@@ -3338,13 +3333,6 @@ class Game {
         break;
       }
 
-      case EV.MSWING: {
-        const r = this.remoteMonsters?.get(ev.mid);
-        if (!r) break;
-        this.audio.monsterSwipe(MONSTER_KINDS[r.kind]?.scale ?? 1, r.headPos, this.camera);
-        break;
-      }
-
       case EV.MSPIT: {
         this.remoteMonsters?.spit(ev.p, ev.d, ev.sp);
         if (this._vecOf(this._evPos, ev.p)) this.audio.monsterSpit(this._evPos, this.camera);
@@ -3674,7 +3662,7 @@ class Game {
     // 協力プレイのモンスター。coop以外ではnet.monstersが空なので実質何もしない
     if (this.remoteMonsters) {
       this.remoteMonsters.sync(net.monsters);
-      this.remoteMonsters.update(dt, this.camera, this._onMonsterTell);
+      this.remoteMonsters.update(dt, this.camera);
     }
     this._updatePlates(states);
 

@@ -16,7 +16,7 @@ const { getRoom } = await import('../server/room.js');
 const { buildWorld } = await import('../server/world.js');
 const { MONSTER_KINDS, WAVE_COUNT } = await import('../server/monsters.js');
 const { modeOf } = await import('../server/modes.js');
-const { Monster, MSTATE, MONSTER_HIT } = await import('../src/ai/monster.js');
+const { Monster, MSTATE } = await import('../src/ai/monster.js');
 
 const world = buildWorld();
 let bad = 0;
@@ -315,7 +315,7 @@ console.log('\n[10] ボスの弱点（背中のコブ）');
   }
   // 背中(+Z側)の、コブの高さから撃つ
   {
-    const y = boss.feetY + MONSTER_HIT.WEAK.y * boss.scale;
+    const y = boss.feetY + boss.hitbox.WEAK.y * boss.scale;
     const o = new THREE.Vector3(0, y, 14);
     const d = new THREE.Vector3(0, y, 0.30 * boss.scale).sub(o).normalize();
     const h = boss.intersect(o, d);
@@ -801,6 +801,245 @@ console.log('\n[25] 4人が固まって湧いて、そこから歩ける');
   const src = readFileSync(new URL('../server/room.js', import.meta.url), 'utf8');
   ok(/this\.rules\?\.coop && this\.world\.coopSpawns/.test(src),
     '部屋が協力プレイの時にその表を引いている');
+}
+
+console.log('\n[26] ボスがちゃんと殴りに来る（実際に180秒動かして数える）');
+/* なぜ要るか: 2026-08-17に「ボスが全然怖くないし、全然こっち殴ってこない」と
+   言われて実測したら、原因が4つ重なっていた。
+
+   ① 殴った後に必ず2.6秒下がる処理(_backoff)が**永久ループしていた。**
+      判定が「冷却が明けているか」だけで「その距離でその技が出せるか」を
+      見ていない。爪の間合い(4.6m)では突進(7.4m以上)も火の玉(10m以上)も
+      撃てないので冷却は0のまま張り付き、条件が常に真になる。
+      3mに張り付かせた180秒で、下がっていたのが109.1秒(61%)、
+      間合いに居て手が空いていた69.2秒のうち**68.5秒(99%)が不発**だった
+   ② 5.2〜7.4mに**出せる技が1つも無い空白帯**があった。
+      6.0mに立たれると180秒で爪0・踏み0・火0・突進0（咆哮だけ）
+   ③ 踏み(5.2m)と咆哮(20m)が爪(4.6m)より先に判定されるので、
+      **一番痛い技(34)が一番出なかった**
+   ④ ボスの足3.1m/sに対しプレイヤーは走り7.4m/s。走って逃げられると
+      **180秒追って爪0回・合計99ダメージ**
+
+   全部「遊んでみないと分からない」ではなく机上で数えられる物なので、
+   ここで数え続ける。**遅いのでこの節だけ数秒かかる** */
+{
+  const { Monster, MSTATE: MS } = await import('../src/ai/monster.js');
+  const DT = 1 / 60;
+
+  /* **乱数の種を固定する。**（やり方は tools/check-swarm.mjs と同じ）
+     モンスターは進路の揺らぎ(jitter)・湧いた直後の火の玉の待ち時間・
+     詰まった時にどちらへ回るか、を Math.random() で決める。
+     素のままだと**この節は毎回別の試合を測っている**ことになり、
+     敷居の際の項目が運で落ちる。実際、種を入れる前は
+     同じコードで「60秒に24回」と「8回」の両方が出た。
+     時々落ちる検査は最後には誰も見なくなる */
+  const realRandom = Math.random;
+  let _s = 20260817;
+  Math.random = () => { _s = (_s * 1664525 + 1013904223) >>> 0; return _s / 4294967296; };
+
+  /* **江戸で測る。** 協力プレイは江戸でしかやらない（[28]）ので、
+     ボスの振る舞いもそこで測らないと意味が無い。
+     遮蔽の量も広さも市街地とは別物になる */
+  const cw = buildWorld('edo');
+
+  // 標的を動かしながらボスを回して、出した技と当てた回数を数える
+  const play = (mover, secs = 60, startD = 14) => {
+    _s = 20260817;   // 1本ごとに同じ所から始める
+    const level = { octree: cw.octree, bounds: cw.bounds, enemySpawns: cw.enemySpawns };
+    const m = new Monster(level, 'boss', { visual: false });
+    m.spawn(new THREE.Vector3(0, 0.2, 0));
+    const target = { pos: new THREE.Vector3(startD, 0.2, 0), eyeY: 1.6, alive: true };
+    const out = { claw: 0, stomp: 0, charge: 0, spit: 0, hits: 0, dmg: 0, inReach: 0, idleSeek: 0 };
+    const land = (self, d, reach) => {
+      const c = self.collider.start;
+      const px = target.pos.x - c.x, pz = target.pos.z - c.z;
+      const dd = Math.hypot(px, pz);
+      const fx = -Math.sin(self.yaw), fz = -Math.cos(self.yaw);
+      if (dd > reach) return;
+      if (dd > 0.1 && (px / dd) * fx + (pz / dd) * fz < 0.25) return;
+      out.hits++; out.dmg += d;
+    };
+    m.onMelee = land;
+    m.onStomp = (self, radius, d) => {
+      const c = self.collider.start;
+      if (Math.hypot(target.pos.x - c.x, target.pos.z - c.z) <= radius) { out.hits++; out.dmg += d; }
+    };
+    m.onSpit = () => { out.spit++; };
+    let was = m.state;
+    const b = (cw.bounds || 38) - 2;
+    for (let i = 0; i < secs / DT; i++) {
+      mover(target.pos, m.collider.start, DT);
+      target.pos.x = Math.max(-b, Math.min(b, target.pos.x));
+      target.pos.z = Math.max(-b, Math.min(b, target.pos.z));
+      m.update(DT, target, { others: [] });
+      if (m.state !== was) {
+        if (m.state === MS.WINDUP) out.claw++;
+        if (m.state === MS.STOMP) out.stomp++;
+        if (m.state === MS.CHARGE) out.charge++;
+        was = m.state;
+      }
+      if (m.state === MS.SEEK || m.state === MS.IDLE) out.idleSeek += DT;
+      const d = Math.hypot(target.pos.x - m.collider.start.x, target.pos.z - m.collider.start.z);
+      if (d <= m.def.melee.reach) out.inReach += DT;
+    }
+    return out;
+  };
+  const still = () => {};
+  const flee = (sp) => (p, c, dt) => {
+    const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz) || 1;
+    p.x += (dx / d) * sp * dt; p.z += (dz / d) * sp * dt;
+  };
+
+  const a = play(still, 60);
+  ok(a.claw >= 15, `棒立ちの相手を60秒で${a.claw}回殴りにいく（15回以上）`);
+  ok(a.dmg > 600, `与えた被害 ${Math.round(a.dmg)}（600以上。プレイヤーの体力は260）`);
+
+  // ④ 走って逃げる相手。前は爪0回・99ダメージだった
+  const b2 = play(flee(7.4), 60);
+  ok(b2.hits > 0, `走って逃げる相手にも届く（当てた${b2.hits}回。前は0回）`);
+
+  // ② 空白帯。6mに張り付かせて、何か1つは出ること
+  const hold = (dd) => (p, c) => {
+    const dx = p.x - c.x, dz = p.z - c.z, d = Math.hypot(dx, dz) || 1;
+    p.x = c.x + (dx / d) * dd; p.z = c.z + (dz / d) * dd;
+  };
+  const c6 = play(hold(6.0), 30);
+  ok(c6.charge + c6.stomp + c6.claw + c6.spit > 0,
+    `5.2〜7.4mの空白帯が無い（6.0mで技が${c6.charge + c6.stomp + c6.claw + c6.spit}回出た。前は0回）`);
+  const c3 = play(hold(3.0), 30);
+  ok(c3.claw >= 8, `3.0mでは爪が主役（30秒で${c3.claw}回。前は後退で61%潰れていた）`);
+  ok(c3.idleSeek < 30 * 0.35,
+    `間合いの中で手が空いていない（歩いていた${c3.idleSeek.toFixed(1)}秒 / 10.5秒未満）`);
+  Math.random = realRandom;   // 後の節へ持ち越さない
+}
+
+console.log('\n[27] ボスの作りが元へ戻っていない（読んで確かめる）');
+{
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../src/ai/monster.js', import.meta.url), 'utf8');
+  ok(!/_backoff/.test(src.replace(/2\.6秒の後退\(_backoff\)/g, '')),
+    '殴った後に下がる処理を持っていない');
+
+  const pick = src.split('/* 技の選び方。')[1]?.split('/* ------')[0] || '';
+  ok(pick.length > 0, '技の選び方が見つかった');
+  const clawAt = pick.indexOf('dist <= def.melee.reach');
+  const stompAt = pick.indexOf('def.stomp &&');
+  const roarAt = pick.indexOf('def.roar &&');
+  ok(clawAt > 0 && stompAt > clawAt, '爪を踏みつけより先に見る（一番痛い技が一番出る）');
+  ok(roarAt > clawAt && roarAt > stompAt, '咆哮は一番後ろ（自分で殴らない手なので）');
+
+  const { MONSTER_KINDS: K } = await import('../src/ai/monster.js');
+  const boss = K.boss;
+  ok(boss.charge.minRange < boss.stomp.radius * 0.8,
+    `突進の下限(${boss.charge.minRange}m)が踏みの届く所(${(boss.stomp.radius * 0.8).toFixed(1)}m)と重なっている`);
+  ok(boss.speed > 4.0, `足が遅すぎない（${boss.speed}m/s。3.1では走る相手に永久に届かない）`);
+  ok(boss.speed < 4.7, `プレイヤーの歩き(4.7m/s)より遅い（意識して下がれば引き離せる）`);
+  ok(Array.isArray(boss.rage) && boss.rage.length >= 2, '手負いの段を持っている');
+  ok(boss.charge.hitRecover < boss.charge.stun,
+    `当てた時の硬直(${boss.charge.hitRecover}秒)が外した時(${boss.charge.stun}秒)より短い`);
+
+  // 段が体力だけで決まる＝サーバーとクライアントで必ず一致する
+  const m = new Monster({ octree: null }, 'boss', { visual: false });
+  m.health = m.maxHealth;
+  ok(m.ragePhase === 0, '満タンなら段は0');
+  m.health = m.maxHealth * 0.5;
+  ok(m.ragePhase === 1, '半分で段が1つ上がる');
+  m.health = m.maxHealth * 0.2;
+  ok(m.ragePhase === 2, '2割で段が2つ上がる');
+  ok(m.rageCdMul < 1 && m.rageSpeedMul > 1, '段が上がると間隔が縮んで足が速くなる');
+}
+
+console.log('\n[28] 協力プレイは江戸でしかやらない');
+/* 2026-08-17に「協力モードは江戸じゃない方のマップは消しといていい」と言われた所。
+   選べるようにしておくと、湧き地点も遮蔽も妖怪の見た目も2つのマップぶん
+   考えることになるし、市街地の廃墟に妖怪が出るのも噛み合っていない */
+{
+  clear();
+  room.phase = PHASE.WAIT;
+  // 前の節が協力プレイのまま残っていることがあるので、先に対戦へ戻してから始める
+  room.setMode('dm');
+  room.setMap('urban');
+  ok(room.map === 'urban', '前提: 市街地に居る');
+  room.setMode('coop');
+  ok(room.map === 'edo', '協力プレイを選ぶと江戸へ移る');
+  ok(room.world.mapId === 'edo', '地形も江戸に差し替わっている');
+  ok(room.setMap('urban') === false, '協力プレイの最中は市街地へ移せない');
+  ok(room.map === 'edo', '断った後も江戸のまま');
+
+  // 他の遊び方へ戻したら、そこは自由（江戸で対戦したい人が選び直さずに済む）
+  room.setMode('dm');
+  ok(room.map === 'edo', '協力から戻っても勝手に市街地へ戻さない');
+  ok(room.setMap('urban') === true, '対戦なら市街地を選べる');
+
+  const { readFileSync } = await import('node:fs');
+  const lobby = readFileSync(new URL('../src/ui/lobby.js', import.meta.url), 'utf8');
+  ok(/coopOnly/.test(lobby) && /classList\.toggle\('hidden'/.test(lobby),
+    'ロビーの札も畳んでいる（押しても変わらない札を並べない）');
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  ok(/\.lbmode\.hidden/.test(html), '畳む見た目がCSSにある');
+  clear();
+  room.setMode('dm');
+  room.setMap('urban');
+}
+
+console.log('\n[29] 当たり所の表が種類ごとに揃っている');
+/* なぜ要るか: 表は長い間1つしか無く、**前傾した四つ足専用**だった
+   （HEADがz-0.86＝体の86cm前）。3種類とも同じ骨組みの縮尺違いだったので
+   それで足りていたが、まっすぐ立つ姿を1体でも足すと
+   **頭の当たり所が体の前の空中に浮く。**
+   撃っても当たらない頭と、誰も居ない所の当たり判定が同時にできる。
+
+   種類ごとの表にしたので、**姿を足した人が表を足し忘れないこと**を見張る。
+   忘れると黙って獣の表へ落ちる（例外も警告も出ない）*/
+{
+  const { MONSTER_KINDS: K, MONSTER_HITS, hitOf } = await import('../src/ai/monster.js');
+
+  for (const kind of Object.keys(K)) {
+    const def = K[kind];
+    ok(!!def.hit, `${kind}: どの表を使うか書いてある（def.hit=${def.hit}）`);
+    ok(!!MONSTER_HITS[def.hit], `${kind}: その名前の表が実在する`);
+    const h = hitOf(kind);
+    // 頭と胴はどの姿にも要る（脚と弱点は姿による）
+    ok(h.HEAD && h.BODY, `${kind}: 頭と胴の当たり所がある`);
+    ok(h.HEAD.y > 0 && h.HEAD.r > 0, `${kind}: 頭が体の上にある（y=${h.HEAD.y}）`);
+    // 弱点を持つ個体は表にも弱点が要る
+    const m = new Monster({ octree: null }, kind, { visual: false });
+    if (m.hasWeak) ok(!!h.WEAK, `${kind}: 弱点を持つので表にもWEAKがある`);
+    // 表の中身が実際にその個体へ入っていること
+    ok(m.hitbox === h, `${kind}: 個体がその表を持っている`);
+  }
+
+  /* まっすぐ立つ姿の表は、頭が中心線上にあること。
+     ここがz≠0だと、獣の表を写して名前だけ変えた事故 */
+  for (const name of ['upright', 'pole', 'float']) {
+    const h = MONSTER_HITS[name];
+    ok(!!h, `${name}の表がある`);
+    ok(h.HEAD.z === 0, `${name}: 頭が体の中心線上にある（z=${h.HEAD.z}）`);
+  }
+  ok(MONSTER_HITS.beast.HEAD.z < 0, '獣の表だけは頭が前へ出ている（前傾しているので）');
+  ok(!MONSTER_HITS.float.LEG, '浮いている姿は脚の当たり所を持たない');
+
+  // 脚の無い表でも、当たり判定の計算が落ちないこと
+  {
+    const probe = new Monster({ octree: null }, Object.keys(K)[0], { visual: false });
+    probe.hitbox = MONSTER_HITS.float;
+    probe.spawn(new THREE.Vector3(0, 0, 0));
+    const o = new THREE.Vector3(0, 1.0, -6), d = new THREE.Vector3(0, 0, 1);
+    let threw = false;
+    try { probe.intersect(o, d, 0); } catch { threw = true; }
+    ok(!threw, '脚を持たない表でも当たり判定が落ちない');
+  }
+
+  // 倍率も種類ごとに引けること（唐傘小僧のように頭の倍率を下げる個体がある）
+  ok(typeof Monster.mulOf === 'function', '部位ごとの倍率を引く口がある');
+  const anyKind = Object.keys(K)[0];
+  ok(Monster.mulOf('head', anyKind) === hitOf(anyKind).HEAD.mul,
+    '倍率が種類ごとの表から出ている');
+
+  const { readFileSync } = await import('node:fs');
+  const room = readFileSync(new URL('../server/room.js', import.meta.url), 'utf8');
+  ok(/mulOf\(mres\.hit\.part, mres\.m\.kind\)/.test(room),
+    '部屋が倍率を引く時に種類を渡している');
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
