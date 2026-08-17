@@ -717,6 +717,48 @@ console.log('\n[協力プレイのモンスター] 体格が耳で分かるか')
   ok(step.lowPct > 40, `ボスの足音は低音が主役（${step.lowPct.toFixed(0)}%）`);
   ok(step.peak < 0.6, `足音は歩くたびに鳴るので控えめ（山${step.peak.toFixed(2)}）`);
 }
+{
+  /* 「今から殴る」の予告。**溜め(0.42秒)の中で鳴り終わること**が仕事なので、
+     長さを測る。長いと「鳴っている最中に殴られる」ので予告にならない。
+     唸り(growl)と取り違えないよう、あちらより短いことも見る */
+  const tell = await capture((a) => a.monsterTell(0.78, null, null), { seconds: 1.2 });
+  /* **lenMsでは見ない。** あれは山の1%まで落ちた所を終わりとする測り方なので、
+     残響の尾（2.6秒）が全部入って、どの音も窓いっぱいの値になる。
+     ここで見たいのは「すぐ気づけるか」と「溜めの中に収まるか」の2つなので、
+     山までの立ち上がりと、鳴っている本体の長さ（コード側のlen）で見る */
+  ok(tell.attackMs < 120, `すぐ立ち上がる（${tell.attackMs.toFixed(0)}ms / 120ms以内）`);
+  // 何体も同時に溜めるので、1つ1つは小さくてよい（間引きはaudio.js側の_busy）
+  ok(tell.peak < 0.6, `重なっても割れない大きさ（山${tell.peak.toFixed(2)}）`);
+  ok(tell.peak > 0.02, `無音ではない（山${tell.peak.toFixed(2)}）`);
+
+  /* 予告が溜めの中で鳴り終わること。一番短い溜め（小型の0.42秒）と比べる。
+     鳴っている最中に殴られるなら、それは予告ではない */
+  const { MONSTER_KINDS } = await import('../src/ai/monster.js');
+  const src0 = (await import('node:fs')).readFileSync(
+    new URL('../src/core/audio.js', import.meta.url), 'utf8',
+  );
+  const tellLen = Number(src0.split('monsterTell(')[1]?.match(/const len = ([\d.]+);/)?.[1]);
+  const shortest = Math.min(...Object.values(MONSTER_KINDS).map((d) => d.melee.windup));
+  ok(tellLen > 0 && tellLen < shortest,
+    `一番短い溜め(${shortest}秒)の中で鳴り終わる（予告${tellLen}秒）`);
+}
+{
+  /* 遠くの爪は鳴らさない。**帯を1500Hz→260Hzへ滑らせる音**なので、
+     遠くで小さく鳴ると高い所だけが残って「ピュン」という口笛になる。
+     協力プレイは離れた仲間も殴られ続けるので、視界の外から
+     ピュンピュンと鳴り続けていた（2026-08-17）*/
+  const { AudioEngine } = await import('../src/core/audio.js');
+  const src = (await import('node:fs')).readFileSync(
+    new URL('../src/core/audio.js', import.meta.url), 'utf8',
+  );
+  const swipe = src.split('monsterSwipe(')[1]?.split('\n  }')[0] || '';
+  ok(/if \(dist > 22\) return;/.test(swipe), '22mより遠い爪は鳴らさない');
+  ok(/_busy\(/.test(swipe), '囲まれた時に間引く');
+  const tellSrc = src.split('monsterTell(')[1]?.split('\n  }')[0] || '';
+  ok(/if \(dist > 18\) return;/.test(tellSrc), '予告は自分に向いた分だけ（18m）');
+  ok(/_busy\(/.test(tellSrc), '同時に何体も溜めたら間引く');
+  ok(typeof AudioEngine.prototype.monsterTell === 'function', '予告の口がある');
+}
 
 console.log(`\n${bad === 0 ? '全部通った' : `${bad}件 失敗`}`);
 process.exit(bad === 0 ? 0 : 1);
