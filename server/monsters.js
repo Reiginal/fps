@@ -25,8 +25,12 @@ export const WAVE_COUNT = 3;
 /* 同時に生かしておく上限。**遊びやすさとサーバーの負荷の両方の話。**
    上限が無いと、湧いた数がそのまま画面の敵の数になって、
    遮蔽から出た瞬間に全方位から削られる（凌ぎようが無い）。
-   倒すたびに待っている個体が出てくるので、総数は減らない */
-const ALIVE_CAP = 14;
+   倒すたびに待っている個体が出てくるので、総数は減らない。
+
+   14から10へ下げた（2026-08-17）。**画面の重さにも直に効く。**
+   1体29枚のメッシュなので、14体だと406枚を毎フレーム描くうえ、
+   近くに居る個体は影の焼き直しにも同じ枚数ぶん乗る */
+const ALIVE_CAP = 10;
 
 /* 波が終わらない時の保険。**生き残りが0にならないと次の波へ進まない**作りなので、
    どこかで1体でも取り残されると試合がそこで止まる。
@@ -109,12 +113,22 @@ export class MonsterDirector {
     return m;
   }
 
-  /** 波の中身。人数が多いほど数を足す（1人で4人分の群れは凌げない） */
+  /* 波の中身。人数が多いほど数を足す（1人で4人分の群れは凌げない）。
+
+     **数を半分近くまで落とした（2026-08-17）。**
+     前は 5 + wave*3 + extra*2 で、1人でも 8 / 11 / 14 体。
+     火を吐く方を足すと 8 / 12 / 16 の36体で、ボスに辿り着く前に
+     同じ作業を36回やることになっていた。
+     「ボスまで見たいから敵少なめにしてほしい」と言われた所。
+
+     今は 1人で 5 / 7 / 9 体（火を吐く方を足して 5 / 8 / 11 の24体）。
+     4人なら 11 / 13 / 15。倒すのに掛かる時間は人数ぶん短くなるので、
+     頭数を素直に足すと1人の時より長くなる。足すのは1人あたり2体まで */
   _composition(wave, playerCount) {
     const extra = Math.max(0, playerCount - 1);
     const list = [];
     // 小型。波が進むほど増える
-    const crawlers = 5 + wave * 3 + extra * 2;
+    const crawlers = 3 + wave * 2 + extra * 2;
     // 大型（火を吐く方）は2波目から。1波目から遠距離が居ると、
     // 遊び方を覚える前に見えない所から焼かれる
     const spitters = wave >= 2 ? (wave - 1) + (extra > 1 ? 1 : 0) : 0;
@@ -221,7 +235,8 @@ export class MonsterDirector {
       const d = Math.hypot(px, pz);
       if (d > reach) continue;
       if (d > 0.1 && (px / d) * fx + (pz / d) * fz < 0.25) continue;   // 正面120度ぶん
-      this.cb.onHitPlayer?.(p.slot, dmg, 'claw');
+      // 4つめは「どこから来たか」。撃たれた向きのリングを出すのに要る
+      this.cb.onHitPlayer?.(p.slot, dmg, 'claw', c);
     }
   }
 
@@ -235,7 +250,7 @@ export class MonsterDirector {
       if (d > radius) continue;
       // 縁ほど軽い。ぎりぎりで逃げた人が丸ごと食らわない
       const k = 1 - Math.max(0, (d - radius * 0.4) / (radius * 0.6)) * 0.55;
-      this.cb.onHitPlayer?.(p.slot, dmg * k, 'stomp');
+      this.cb.onHitPlayer?.(p.slot, dmg * k, 'stomp', c);
     }
   }
 
@@ -290,7 +305,8 @@ export class MonsterDirector {
       this.betweenWaves -= dt;
       if (this.betweenWaves <= 0) {
         this.wave++;
-        this.betweenWaves = 6.0;
+        // 波と波の間。6秒は「片付いたのに何も起きない時間」が長すぎた
+        this.betweenWaves = 4.0;
         this._waveT = 0;
         if (this.wave > WAVE_COUNT) {
           // ボス戦。1体の大物と、脇を固める小型
@@ -306,11 +322,14 @@ export class MonsterDirector {
       this._waveT += dt;
     }
 
-    // 湧かせる。一斉に出すと群れて歩いてくるので間隔を空ける
+    /* 湧かせる。一斉に出すと群れて歩いてくるので間隔を空ける。
+       0.8秒だと、湧き切るまでに波の頭の6秒を使い切って
+       「まだ来ない」時間が続く。0.45秒でも群れにはならない
+       （湧き地点そのものが散っているので、間隔より場所の方が効く）*/
     if (this.queue.length > 0 && this._aliveCount() < ALIVE_CAP) {
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) {
-        this.spawnTimer = 0.8;
+        this.spawnTimer = 0.45;
         this._spawnOne(this.queue.shift(), players);
       }
     }
@@ -414,7 +433,8 @@ export class MonsterDirector {
           const d = Math.hypot(at.x - c.x, at.z - c.z, at.y - (c.y + 0.4));
           if (d > s.splash) continue;
           const k = 1 - (d / s.splash) * 0.6;
-          this.cb.onHitPlayer?.(p.slot, s.damage * k, 'fire');
+          // 火の玉は「弾けた場所」から来たことにする（吐いた本体ではなく）
+          this.cb.onHitPlayer?.(p.slot, s.damage * k, 'fire', at);
         }
         this.spits.splice(i, 1);
       }

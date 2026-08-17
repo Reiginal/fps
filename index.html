@@ -1248,7 +1248,9 @@
     <div class="sbtitle">戦績</div>
     <div class="sbrow sbh">
       <div class="c1">順位</div><div class="cn">名前</div>
-      <div class="c">取得</div><div class="c">撃破</div><div class="cp">応答</div>
+      <!-- この2列は遊び方で中身が変わる（協力プレイに「取得」は無い）。
+           書き換えるのは src/ui/hud.js の scoreboard() -->
+      <div class="c" id="sbColA">取得</div><div class="c" id="sbColB">撃破</div><div class="cp">応答</div>
     </div>
     <div id="sbRows"></div>
   </div>
@@ -1630,7 +1632,7 @@
     <div class="subtitle">最終順位</div>
     <div class="sbrow sbh">
       <div class="c1">順位</div><div class="cn">名前</div>
-      <div class="c">取得</div><div class="c">撃破</div><div class="cp">応答</div>
+      <div class="c" id="fbColA">取得</div><div class="c" id="fbColB">撃破</div><div class="cp">応答</div>
     </div>
     <div id="fbRows"></div>
     <div class="fbnote" id="fbNote"></div>

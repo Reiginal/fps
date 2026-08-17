@@ -380,7 +380,20 @@ const tube = (rt, rb, h, seg = 8) => new THREE.CylinderGeometry(rt, rb, h, seg, 
 function buildMonster(kind) {
   const def = MONSTER_KINDS[kind];
   const sh = def.shape;
-  const M = materials()[def.palette];
+  const shared = materials()[def.palette];
+  /* 皮と角は全個体で同じ物を使い回すが、**光る所だけは1体ずつ別に持たせる。**
+
+     ここは1つで共有していた。animate()の最後で
+     `p.mats.glow.emissiveIntensity = 1.6 + this.mouth * 2.6` と書いているので、
+     共有していると**その種類の全個体の目が、最後に姿勢を作った1体の値になる。**
+     つまり「溜めている個体の目が光る」という唯一の予告が、
+     群れの中では誰の予告でもない点滅になっていた。倒れる絵(animateDeath)が
+     0まで落とすので、1体倒れると生きている全員の目が消える回まであった。
+
+     2026-08-17に「敵の攻撃モーションが俺に全く見えない。
+     なんか気づいたらダメージ食らってる」と言われた所の正体がこれ。
+     材質1つは軽い（同じシェーダで、値だけが別になる） */
+  const M = { hide: shared.hide, horn: shared.horn, glow: shared.glow.clone(), eye: shared.eye };
   const root = new THREE.Group();
 
   // 腰。ここが体の付け根で、前傾も歩きの上下もここから下げる
@@ -652,7 +665,11 @@ export class Monster {
     this.mouth = 0;         // 口の開き 0..1
     this.rear = 0;          // 前脚を上げて立ち上がる量 0..1
     this.lunge = 0;         // 爪を振り抜く量 -1..1
+    this.tell = 0;          // 「今から来る」の光り具合 0..1
     this.bodyTilt = 0;
+    // 脚の角度を組み立てる時の入れ物。毎フレーム作らないために持っておく
+    this._stepL = { thigh: 0, shin: 0, foot: 0, splay: 0 };
+    this._stepR = { thigh: 0, shin: 0, foot: 0, splay: 0 };
 
     // 判定の当たり所（毎ティック位置を更新する）
     this._head = new THREE.Vector3();
@@ -691,7 +708,7 @@ export class Monster {
     this.state = MSTATE.IDLE;
     this.stateT = 0;
     this.flinch = 0;
-    this.mouth = 0; this.rear = 0; this.lunge = 0; this.bodyTilt = 0;
+    this.mouth = 0; this.rear = 0; this.lunge = 0; this.bodyTilt = 0; this.tell = 0;
     this.meleeCd = 0;
     this.rangedCd = this.def.ranged ? Math.random() * 1.2 : 0;
     this._lastPos.copy(this.collider.start);
@@ -1244,7 +1261,16 @@ export class Monster {
       : st.state === S.STRIKE ? 0.8 : moving ? 0.35 : 0.1;
     const wantLunge = st.state === S.STRIKE ? 1 : st.state === S.WINDUP ? -0.7 : 0;
     const wantTilt = st.state === S.STUN ? 0.35 : 0;
+    /* 「今から痛いのが来る」の合図。**目と口の奥を強く光らせる。**
+       溜め・火を吐く前・踏みつけ・突進・咆哮の5つだけ。
+       立ち上がる姿勢(rear)だけでは、小型が足元に居る時に画面へ入らない
+       （体高1.26mなので、2.4mの間合いだと視線の下に沈む）。
+       光は視界の端でも分かるので、姿勢と別に持たせる。
+       上がるのは速く、消えるのは遅くする（振り終わってから気づいても間に合うように）*/
+    const wantTell = (st.state === S.WINDUP || st.state === S.SPIT || st.state === S.STOMP
+      || st.state === S.CHARGE || st.state === S.ROAR) ? 1 : 0;
     this.rear += (wantRear - this.rear) * Math.min(1, dt * 10);
+    this.tell += (wantTell - this.tell) * Math.min(1, dt * (wantTell > 0 ? 16 : 6));
     this.mouth += (wantMouth - this.mouth) * Math.min(1, dt * 9);
     this.lunge += (wantLunge - this.lunge) * Math.min(1, dt * (wantLunge > 0 ? 24 : 8));
     this.bodyTilt += (wantTilt - this.bodyTilt) * Math.min(1, dt * 6);
@@ -1283,16 +1309,18 @@ export class Monster {
 
     /* 脚。指行性なので、腿が後ろへ／脛が前へ／足がその逆、で1歩になる。
        立ち上がっている間は前脚（＝腕）を上げているだけなので、脚は踏ん張らせる */
-    const step = (ph, side) => {
+    /* 入れ物は使い回す（_stepOut）。**毎フレーム2つ作って捨てていた。**
+       1体では気にならない量だが、協力プレイは同時に10体が歩くので、
+       毎秒1200個の使い捨てになる。GCが動く回数がそのまま画面の息継ぎになる */
+    const step = (out, ph, side) => {
       const s = Math.sin(ph), c = Math.cos(ph);
-      return {
-        thigh: 0.30 + s * 0.62 * amp - rear * 0.20,
-        shin: -0.72 - Math.max(0, c) * 0.55 * amp - rear * 0.25,
-        foot: 0.44 + Math.max(0, -s) * 0.30 * amp,
-        splay: side * (0.06 + Math.abs(s) * 0.05 * amp),
-      };
+      out.thigh = 0.30 + s * 0.62 * amp - rear * 0.20;
+      out.shin = -0.72 - Math.max(0, c) * 0.55 * amp - rear * 0.25;
+      out.foot = 0.44 + Math.max(0, -s) * 0.30 * amp;
+      out.splay = side * (0.06 + Math.abs(s) * 0.05 * amp);
+      return out;
     };
-    const l = step(t, 1), r = step(t + Math.PI, -1);
+    const l = step(this._stepL, t, 1), r = step(this._stepR, t + Math.PI, -1);
     p.legL.rotation.set(l.thigh, 0, l.splay);
     p.shinL.rotation.x = l.shin;
     p.footL.rotation.x = l.foot;
@@ -1306,9 +1334,11 @@ export class Monster {
     p.tail2.rotation.set(0.16, tw * 0.9, 0);
     p.tail3.rotation.set(0.20, tw * 0.8, 0);
 
-    // 口の奥と目の光。溜めている間だけ強くする
+    /* 口の奥と目の光。**歩いている時と溜めている時で3倍以上開ける。**
+       前は 1.6 + mouth*2.6 で、歩き(2.5)と溜め(4.2)の差が1.7しかなかった。
+       画面の端に映った時にその差は読めない */
     const g = p.mats.glow;
-    g.emissiveIntensity = 1.6 + this.mouth * 2.6;
+    g.emissiveIntensity = 1.3 + this.mouth * 1.4 + this.tell * 5.2;
   }
 
   /** 倒れる絵。クライアントが自分で進める（サーバーは倒れた瞬間しか教えない） */
@@ -1334,6 +1364,9 @@ export class Monster {
       if (!o.isMesh) return;
       o.geometry?.dispose?.();
     });
+    // 光る材質だけは1体ずつの持ち物なので、ここで解放する
+    // （皮と角は共有なのでdisposeMonsterMaterials側）
+    this.parts?.mats?.glow?.dispose?.();
   }
 }
 

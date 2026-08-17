@@ -1397,10 +1397,15 @@ export class Room {
        散らす表(arenaSpawns)をそのまま使うと味方が35m離れた所から出てきて、
        組んで戦う遊び方なのに合流するまでが毎ラウンドの最初の仕事になる。
        席番号でそのまま引く（level.jsのteamSpawnsが席の並びで持っている） */
+    /* 協力プレイはさらに別の表。**4人とも固まって出る。**
+       2対2用の表をそのまま使っていたので、全員が同じチームなのに
+       3人目と4人目だけ35m離れた反対側から出ていた（level.jsのcoopSpawns）*/
+    const coop = this.rules?.coop && this.world.coopSpawns;
     const team = this.rules?.teams && this.world.teamSpawns;
-    const spawns = team ? this.world.teamSpawns : this.world.arenaSpawns;
+    const spawns = coop ? this.world.coopSpawns
+      : team ? this.world.teamSpawns : this.world.arenaSpawns;
     if (slot.seat === null) return spawns[0];
-    const idx = team ? slot.seat % SEATS : SEAT_SPAWN[slot.seat % SEATS];
+    const idx = (coop || team) ? slot.seat % SEATS : SEAT_SPAWN[slot.seat % SEATS];
     return spawns[idx % spawns.length];
   }
 
@@ -1687,7 +1692,7 @@ export class Room {
         onBoom: (pos, r) => this.push({ e: EV.MBOOM, p: [r3(pos.x), r3(pos.y), r3(pos.z)], r }),
         onStomp: (m, r) => this.push({ e: EV.MSTOMP, mid: m.mid, r }),
         onRoar: (m) => this.push({ e: EV.MROAR, mid: m.mid }),
-        onHitPlayer: (slot, dmg) => this._monsterHitPlayer(slot, dmg),
+        onHitPlayer: (slot, dmg, kind, from) => this._monsterHitPlayer(slot, dmg, kind, from),
         onDeath: (m, by, part) => {
           this.push({ e: EV.MKILL, mid: m.mid, by: by ? by.id : -1, part });
           if (by?.sim) by.sim.kills++;
@@ -1716,15 +1721,21 @@ export class Room {
      （撃つ側がAIなので、遅延の公平を取る相手がいない）。
      無敵(protectIn)は人からの弾と同じように効かせる——湧いた瞬間に
      囲まれて溶けるのは、対人より対モンスターの方が起きやすい */
-  _monsterHitPlayer(slot, dmg) {
+  _monsterHitPlayer(slot, dmg, kind, from = null) {
     if (this.phase !== PHASE.LIVE) return;
     const sim = slot.sim;
     if (!sim || !sim.alive || sim.protectIn > 0) return;
     const p = sim.player.collider.start;
-    // by:-1 は「人ではない」の印。クライアントは名前を探しにいかない
+    /* by:-1 は「人ではない」の印。クライアントは名前を探しにいかない。
+
+       **どこから来たかは別に載せる(mp)。** 撃たれた向きのリング(_damageArrow)は
+       「撃った人のid」から位置を引く作りなので、by:-1では引く先が無く、
+       モンスターに殴られた時だけ**向きが一切出ていなかった。**
+       pは自分の位置なので方向の役には立たない（あちらは弾道用）*/
     this.push({
       e: EV.HIT, id: slot.id, by: -1,
       dmg: Math.round(dmg * 10) / 10, part: 1, p: [p.x, p.y + 0.5, p.z],
+      mp: from ? [r3(from.x), r3(from.y), r3(from.z)] : undefined,
     });
     sim.player.damage(dmg);
     if (!sim.player.alive) this._killByMonster(slot);

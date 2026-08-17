@@ -525,5 +525,283 @@ console.log('\n[16] 協力プレイで仲間が仲間だと分かる');
   ok(/\.plate\.occl /.test(html), '壁の向こうの札の見た目がCSSにある');
 }
 
+console.log('\n[17] 影を落とすのは近くの個体だけ（カクつきの元）');
+/* なぜ要るか: 太陽の影は2枚に分けて焼いていて、遠い1枚は
+   「遠くで何かが動いていたら、影を落とすメッシュ全部を丸ごと焼き直す」作り。
+   モンスターの影を44m（場内のほぼ全域）まで立てていたので、
+   **地形96枚の焼き直しに、モンスター408枚が丸ごと乗っていた**（5.2倍）。
+   3フレームに1回それが走るので、毎秒20回の息継ぎになる。
+   2026-08-17に「協力プレイだと歩くだけでカクカクする」と言われた所 */
+{
+  const { RemoteMonsters } = await import('../src/net/remoteMonsters.js');
+  const scene = new THREE.Scene();
+  const rm = new RemoteMonsters(scene);
+  const cam = new THREE.PerspectiveCamera();
+  cam.position.set(0, 1.6, 0);
+
+  rm.spawn(1, 'crawler', 0.78, [4, 0, 0]);     // 近い
+  rm.spawn(2, 'crawler', 0.78, [30, 0, 0]);    // 遠い
+  const at = (mid, x) => ({ mid, x, y: 0, z: 0, yaw: 0, pitch: 0, state: MSTATE.SEEK });
+  rm.sync([at(1, 4), at(2, 30)]);
+  for (let i = 0; i < 90; i++) rm.update(1 / 60, cam);
+
+  const casters = (mid) => rm.slots.get(mid).mon.meshes.filter((m) => m.castShadow).length;
+  const total = rm.slots.get(1).mon.meshes.length;
+  ok(casters(1) === total, `4mの個体は影を落とす（${casters(1)}/${total}枚）`);
+  ok(casters(2) === 0, `30mの個体は落とさない（${casters(2)}枚）`);
+
+  // 近づいたら点く。切りっぱなしだと足元の暗がりが二度と戻らない
+  rm.sync([at(1, 4), at(2, 6)]);
+  for (let i = 0; i < 90; i++) rm.update(1 / 60, cam);
+  ok(casters(2) === total, '近づいてきたら点く');
+
+  // cameraを渡さない呼び方でも落ちない（距離が測れないので全部切る）
+  rm.update(1 / 60);
+  ok(casters(1) === 0 && casters(2) === 0, 'カメラ無しで呼ばれたら全部切る');
+  rm.dispose();
+}
+
+console.log('\n[18] 光る所は1体ずつ別の材質を持つ');
+/* なぜ要るか: 目と口の奥の材質を種類ごとに1つ共有していた。
+   animate()が毎フレーム emissiveIntensity を書くので、
+   **その種類の全個体が「最後に姿勢を作った1体」の明るさになる。**
+   溜めている個体だけ光るという唯一の予告が、群れの中では
+   誰の予告でもない点滅になっていた。倒れる絵は0まで落とすので、
+   1体倒れると生きている全員の目が消える回まであった。
+   2026-08-17に「敵の攻撃モーションが俺に全く見えない」と言われた所 */
+{
+  const a = new Monster({ octree: null }, 'crawler', { visual: true });
+  const b = new Monster({ octree: null }, 'crawler', { visual: true });
+  ok(a.parts.mats.glow !== b.parts.mats.glow, '同じ種類でも光る材質は別物');
+  ok(a.parts.mats.hide === b.parts.mats.hide, '皮は共有のまま（枚数を増やさない）');
+
+  const st = (state) => ({ speed: 0, state, pitch: 0 });
+  // aだけ溜めさせる。bは歩いているだけ
+  for (let i = 0; i < 60; i++) { a.animate(1 / 60, st(MSTATE.WINDUP)); b.animate(1 / 60, st(MSTATE.SEEK)); }
+  const ga = a.parts.mats.glow.emissiveIntensity;
+  const gb = b.parts.mats.glow.emissiveIntensity;
+  ok(ga > gb * 2, `溜めている個体だけが強く光る（溜め${ga.toFixed(1)} / 歩き${gb.toFixed(1)}）`);
+  a.dispose(); b.dispose();
+}
+
+console.log('\n[19] 溜めに入った瞬間を1回だけ知らせる');
+/* 爪は振った瞬間に当たるので、避けられるかどうかは溜めが分かるかで決まる。
+   小型は体高1.26mで間合い2.4mだと視線の下に沈むため、音でも知らせる。
+   **専用の電文は作らない**（状態番号は20Hzの定期便に元から載っている）*/
+{
+  const { RemoteMonsters } = await import('../src/net/remoteMonsters.js');
+  const scene = new THREE.Scene();
+  const rm = new RemoteMonsters(scene);
+  const cam = new THREE.PerspectiveCamera();
+  rm.spawn(1, 'crawler', 0.78, [2, 0, 0]);
+  let tells = 0;
+  const onTell = () => { tells++; };
+  const at = (state) => [{ mid: 1, x: 2, y: 0, z: 0, yaw: 0, pitch: 0, state }];
+
+  rm.sync(at(MSTATE.SEEK));
+  for (let i = 0; i < 10; i++) rm.update(1 / 60, cam, onTell);
+  ok(tells === 0, '歩いているだけでは鳴らない');
+
+  rm.sync(at(MSTATE.WINDUP));
+  for (let i = 0; i < 25; i++) rm.update(1 / 60, cam, onTell);   // 溜めは0.42秒＝25コマ
+  ok(tells === 1, `溜めの間に1回だけ（${tells}回）`);
+
+  rm.sync(at(MSTATE.STRIKE));
+  for (let i = 0; i < 10; i++) rm.update(1 / 60, cam, onTell);
+  rm.sync(at(MSTATE.WINDUP));
+  for (let i = 0; i < 10; i++) rm.update(1 / 60, cam, onTell);
+  ok(tells === 2, '次の溜めでまた鳴る');
+  rm.dispose();
+}
+
+console.log('\n[20] モンスターに殴られた時、どこから来たかが届く');
+/* なぜ要るか: 撃たれた向きのリングは「撃った人のidから位置を引く」作り。
+   モンスターは人ではないので by:-1 で届き、引く先が無いまま
+   **モンスターの一撃だけ向きが一切出ていなかった。**
+   「気づいたらダメージ食らってる」の半分はこれ */
+{
+  clear();
+  room.phase = PHASE.WAIT;
+  room.setMode('coop');
+  const a = join('こう');
+  room.takeSeat(a.slot, 0);
+  room.setReady(a.slot, true);
+  ok(room.phase === PHASE.LIVE, '試合が始まった');
+
+  // 湧いた直後の無敵(protectIn)が切れるまで回す。切れる前は当たっても無視される
+  for (let i = 0; i < 600; i++) room._tick();
+  a.conn.sent.length = 0;
+  // 爪が届いたことにして、直接叩く（湧いて歩いてくるのを待たない）
+  const from = new THREE.Vector3(7, 1, -3);
+  room._monsterHitPlayer(a.slot, 9, 'claw', from);
+  for (let i = 0; i < 10; i++) room._tick();   // 溜めた出来事は刻みで配られる
+  const hit = eventsOf(a).find((e) => e.e === EV.HIT && e.by === -1);
+  ok(!!hit, 'モンスターの一撃が届く（by:-1）');
+  ok(Array.isArray(hit?.mp) && hit.mp.length === 3, 'どこから来たかが載っている（mp）');
+  ok(Math.abs(hit.mp[0] - 7) < 0.01 && Math.abs(hit.mp[2] + 3) < 0.01,
+    `位置が合っている（${hit.mp.join(', ')}）`);
+
+  const { readFileSync } = await import('node:fs');
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  ok(/ev\.mp[\s\S]{0,120}?_damageFromPoint/.test(main), 'クライアントがmpから向きを出している');
+  clear();
+}
+
+console.log('\n[21] 上帯と地図から対戦用の物が消えている');
+/* 協力プレイにはラウンドも先取本数も制限時間も戦域も無い（server/modes.jsのcoop、
+   room.jsの_zone）。それでも対戦用の表示を通していたので
+   「0 － 0 ／ 3本先取 ／ 残り 3:00」と、起きないことを3つ並べていた。
+   地図の方は逆に、**味方の点を出す条件が`mode === 'team'`だけ**だったので
+   協力プレイでは仲間の居場所が画面のどこにも無かった
+   （2026-08-17に「味方が範囲外に行きすぎてカバーができねえ」）*/
+{
+  const { readFileSync } = await import('node:fs');
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  const hud = readFileSync(new URL('../src/ui/hud.js', import.meta.url), 'utf8');
+
+  ok(/net\.mode === 'coop'[\s\S]{0,200}?hud\.coopInfo\(/.test(main),
+    '協力プレイは専用の上帯(coopInfo)へ回している');
+  const coopInfo = hud.split('coopInfo(')[1]?.split('\n  }')[0] || '';
+  ok(coopInfo.length > 0, 'coopInfoが居る');
+  ok(!/本先取/.test(coopInfo) && !/padStart/.test(coopInfo),
+    '先取本数も時計も出さない');
+  ok(/第\$\{wave\}波/.test(coopInfo) && /残り \$\{alive\}体/.test(coopInfo),
+    '代わりに第何波とあと何体かを出す');
+
+  const mini = main.split('_minimapFrame(dt) {')[1]?.split('\n  }')[0] || '';
+  ok(/coop \|\| this\.net\?\.mode === 'team'/.test(mini),
+    '地図に味方の点を出す（協力プレイも）');
+  ok(/const zoned = versus && !coop/.test(mini) && /zoned \? ZONE\.RADIUS : 0/.test(mini),
+    '協力プレイに戦域の円は出さない（サーバー側にも戦域が無い）');
+  ok(/if \(!zoned \|\| !this\.player\.alive\)/.test(mini),
+    '範囲外の警告も出さない');
+
+  // 戦績表と名簿。取ったラウンドは協力プレイでは全員ずっと0
+  ok(/scoreboard\(rows, input\.down\('Tab'\), net\.mode === 'coop'\)/.test(main),
+    '戦績表に協力プレイかどうかを渡している');
+  ok(/_setBoardHead\(/.test(hud) && /coop \? '撃破' : '取得'/.test(hud),
+    '見出しを撃破と倒れた数に差し替える');
+}
+
+console.log('\n[22] 波の数とテンポ');
+/* 「ボスまで見たいから敵少なめにしてほしい」と言われた所（2026-08-17）。
+   前は1人でも8/12/16の36体で、ボスに辿り着く前に同じ作業を36回やっていた */
+{
+  const { MonsterDirector } = await import('../server/monsters.js');
+  const d = new MonsterDirector(world, {});
+  const total = (n) => {
+    let s = 0;
+    for (let w = 1; w <= WAVE_COUNT; w++) s += d._composition(w, n).length;
+    return s;
+  };
+  ok(total(1) <= 26, `1人でボスまで${total(1)}体（26体以内）`);
+  ok(total(4) <= 46, `4人でボスまで${total(4)}体（46体以内）`);
+  ok(d._composition(1, 1).every((k) => k === 'crawler'),
+    '1波目に火を吐く方は出さない（遊び方を覚える前に焼かれる）');
+  ok(d._composition(2, 1).includes('spitter'), '2波目から火を吐く方が出る');
+  for (let w = 1; w < WAVE_COUNT; w++) {
+    ok(d._composition(w + 1, 1).length > d._composition(w, 1).length,
+      `第${w + 1}波は第${w}波より多い`);
+  }
+
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../server/monsters.js', import.meta.url), 'utf8');
+  const cap = Number(src.match(/const ALIVE_CAP = (\d+);/)?.[1]);
+  ok(cap > 0 && cap <= 10, `同時に生きられるのは${cap}体まで（画面の重さに直に効く）`);
+  // 0の代入（波の頭で戻す所）ではなく、次の1体までの間隔の方を読む
+  const gap = Number(src.match(/this\.spawnTimer = (0\.\d+);/)?.[1]);
+  ok(gap > 0 && gap <= 0.5, `湧く間隔は${gap}秒（0.8秒だと波の頭が待ち時間になる）`);
+}
+
+console.log('\n[23] 波が変わったら弾が戻る');
+/* 落ちている物を拾えない遊び方(modes.jsのdrops:false)なので、
+   補給が無いと3波目までに撃ち切った人はボスに何もできない。
+   2026-08-17に「第2波になってタイミングで弾の補充はさすがに欲しい」*/
+{
+  const { readFileSync } = await import('node:fs');
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  const wave = main.split('case EV.WAVE: {')[1]?.split('\n      }')[0] || '';
+  ok(wave.length > 0, '波の知らせを受ける所が見つかった');
+  ok(/this\.weapons\.refillReserve\(\)/.test(wave), '予備弾を満タンに戻している');
+  ok(!/w\.ammo = /.test(wave), 'マガジンの中身は戻さない（装填を飛ばせてしまう）');
+  ok(/if \(got\)/.test(wave), '満タンの時は「補給した」と言わない');
+
+  // ボス戦の頭でも戻る（ここが抜けると一番弾が要る所で空になる）
+  ok(main.split('case EV.WAVE: {')[1].indexOf('refillReserve')
+    < main.split('case EV.WAVE: {')[1].indexOf('boss ? \'ボスが来た\''),
+    'ボス戦の垂れ幕より先に補給する（ボスの波でも戻る）');
+}
+
+console.log('\n[24] 毎フレーム作って捨てる物を増やしていない');
+/* GCが動く回数がそのまま画面の息継ぎになる。
+   姿勢を作る所は同時に10体ぶん走るので、1体あたりの取りこぼしが10倍で効く */
+{
+  const src = (await import('node:fs')).readFileSync(
+    new URL('../src/net/remoteMonsters.js', import.meta.url), 'utf8',
+  );
+  ok(/this\._st = \{ speed: 0, state: 0, pitch: 0 \}/.test(src),
+    'animateへ渡す入れ物を1つ持っている');
+  ok(!/animate\(dt, \{/.test(src), 'その場で入れ物を作っていない');
+
+  const mon = (await import('node:fs')).readFileSync(
+    new URL('../src/ai/monster.js', import.meta.url), 'utf8',
+  );
+  ok(/this\._stepL = \{/.test(mon) && /step\(this\._stepL/.test(mon),
+    '脚の角度の入れ物も使い回している');
+}
+
+console.log('\n[25] 4人が固まって湧いて、そこから歩ける');
+/* なぜ要るか: 協力プレイは2対2用の湧き表(teamSpawns)をそのまま使っていた。
+   全員が同じチーム（modes.jsのteamOf）なのに、**3人目と4人目だけ
+   35m離れた反対側から出てくる。** 倒れた仲間を起こしにも行けないし、
+   モンスターは一番近い人を個別に狙うので、試合の頭からばらばらのまま削られる。
+   2026-08-17に「味方が範囲外に行きすぎてカバーができねえ」と言われた所。
+
+   固めるだけでは足りない。**固めた先が歩ける所かどうかは歩かせないと分からない**
+   （建物は中が空洞なので、部屋の真ん中でも埋まり判定はすり抜ける。
+   check-edo.mjsの[7]で実際に踏んだ）*/
+{
+  const { SimPlayer } = await import('../server/sim.js');
+  const { MAP_IDS } = await import('../src/net/protocol.js');
+  const K_FWD = 1 << 0;
+  for (const mapId of MAP_IDS) {
+    const w = buildWorld(mapId);
+    const sp = w.coopSpawns;
+    ok(Array.isArray(sp) && sp.length >= 4, `${mapId}: 協力プレイ用の湧き表がある（${sp?.length}箇所）`);
+
+    // 一番離れた2人でも声が届く距離に居ること
+    let widest = 0;
+    for (let i = 0; i < sp.length; i++) {
+      for (let j = i + 1; j < sp.length; j++) {
+        widest = Math.max(widest, Math.hypot(sp[i].x - sp[j].x, sp[i].z - sp[j].z));
+      }
+    }
+    ok(widest <= 10, `${mapId}: 一番離れた2人でも${widest.toFixed(1)}m（10m以内）`);
+    // 逆に重なってもいけない（同じ点に2人置くと押し合って弾かれる）
+    ok(widest >= 3, `${mapId}: 重なってはいない（${widest.toFixed(1)}m）`);
+
+    const sim = new SimPlayer(1, '検査', w);
+    let stuck = 0;
+    for (const v of sp) {
+      let open = 0;
+      for (let a = 0; a < 8; a++) {
+        const dir = (a / 8) * Math.PI * 2;
+        sim.spawn(new THREE.Vector3(v.x, 0.1, v.z), dir);
+        for (let i = 0; i < 60 * 3; i++) sim.tick(K_FWD, dir, 0);
+        const c = sim.player.collider.start;
+        if (Math.hypot(c.x - v.x, c.z - v.z) > 5) open++;
+      }
+      if (open < 5) stuck++;
+    }
+    ok(stuck === 0, `${mapId}: どの湧き点からも8方向のうち5方向以上へ歩ける（詰まり${stuck}箇所）`);
+  }
+
+  // 部屋が本当にその表を引いていること（表を足しても繋がっていなければ意味が無い）
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../server/room.js', import.meta.url), 'utf8');
+  ok(/this\.rules\?\.coop && this\.world\.coopSpawns/.test(src),
+    '部屋が協力プレイの時にその表を引いている');
+}
+
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);
 process.exit(bad === 0 ? 0 : 1);
