@@ -826,9 +826,26 @@ console.log('\n[26] ボスがちゃんと殴りに来る（実際に180秒動か
   const { Monster, MSTATE: MS } = await import('../src/ai/monster.js');
   const DT = 1 / 60;
 
+  /* **乱数の種を固定する。**（やり方は tools/check-swarm.mjs と同じ）
+     モンスターは進路の揺らぎ(jitter)・湧いた直後の火の玉の待ち時間・
+     詰まった時にどちらへ回るか、を Math.random() で決める。
+     素のままだと**この節は毎回別の試合を測っている**ことになり、
+     敷居の際の項目が運で落ちる。実際、種を入れる前は
+     同じコードで「60秒に24回」と「8回」の両方が出た。
+     時々落ちる検査は最後には誰も見なくなる */
+  const realRandom = Math.random;
+  let _s = 20260817;
+  Math.random = () => { _s = (_s * 1664525 + 1013904223) >>> 0; return _s / 4294967296; };
+
+  /* **江戸で測る。** 協力プレイは江戸でしかやらない（[28]）ので、
+     ボスの振る舞いもそこで測らないと意味が無い。
+     遮蔽の量も広さも市街地とは別物になる */
+  const cw = buildWorld('edo');
+
   // 標的を動かしながらボスを回して、出した技と当てた回数を数える
   const play = (mover, secs = 60, startD = 14) => {
-    const level = { octree: world.octree, bounds: world.bounds, enemySpawns: world.enemySpawns };
+    _s = 20260817;   // 1本ごとに同じ所から始める
+    const level = { octree: cw.octree, bounds: cw.bounds, enemySpawns: cw.enemySpawns };
     const m = new Monster(level, 'boss', { visual: false });
     m.spawn(new THREE.Vector3(0, 0.2, 0));
     const target = { pos: new THREE.Vector3(startD, 0.2, 0), eyeY: 1.6, alive: true };
@@ -849,7 +866,7 @@ console.log('\n[26] ボスがちゃんと殴りに来る（実際に180秒動か
     };
     m.onSpit = () => { out.spit++; };
     let was = m.state;
-    const b = (world.bounds || 38) - 2;
+    const b = (cw.bounds || 38) - 2;
     for (let i = 0; i < secs / DT; i++) {
       mover(target.pos, m.collider.start, DT);
       target.pos.x = Math.max(-b, Math.min(b, target.pos.x));
@@ -893,6 +910,7 @@ console.log('\n[26] ボスがちゃんと殴りに来る（実際に180秒動か
   ok(c3.claw >= 8, `3.0mでは爪が主役（30秒で${c3.claw}回。前は後退で61%潰れていた）`);
   ok(c3.idleSeek < 30 * 0.35,
     `間合いの中で手が空いていない（歩いていた${c3.idleSeek.toFixed(1)}秒 / 10.5秒未満）`);
+  Math.random = realRandom;   // 後の節へ持ち越さない
 }
 
 console.log('\n[27] ボスの作りが元へ戻っていない（読んで確かめる）');
@@ -929,6 +947,39 @@ console.log('\n[27] ボスの作りが元へ戻っていない（読んで確か
   m.health = m.maxHealth * 0.2;
   ok(m.ragePhase === 2, '2割で段が2つ上がる');
   ok(m.rageCdMul < 1 && m.rageSpeedMul > 1, '段が上がると間隔が縮んで足が速くなる');
+}
+
+console.log('\n[28] 協力プレイは江戸でしかやらない');
+/* 2026-08-17に「協力モードは江戸じゃない方のマップは消しといていい」と言われた所。
+   選べるようにしておくと、湧き地点も遮蔽も妖怪の見た目も2つのマップぶん
+   考えることになるし、市街地の廃墟に妖怪が出るのも噛み合っていない */
+{
+  clear();
+  room.phase = PHASE.WAIT;
+  // 前の節が協力プレイのまま残っていることがあるので、先に対戦へ戻してから始める
+  room.setMode('dm');
+  room.setMap('urban');
+  ok(room.map === 'urban', '前提: 市街地に居る');
+  room.setMode('coop');
+  ok(room.map === 'edo', '協力プレイを選ぶと江戸へ移る');
+  ok(room.world.mapId === 'edo', '地形も江戸に差し替わっている');
+  ok(room.setMap('urban') === false, '協力プレイの最中は市街地へ移せない');
+  ok(room.map === 'edo', '断った後も江戸のまま');
+
+  // 他の遊び方へ戻したら、そこは自由（江戸で対戦したい人が選び直さずに済む）
+  room.setMode('dm');
+  ok(room.map === 'edo', '協力から戻っても勝手に市街地へ戻さない');
+  ok(room.setMap('urban') === true, '対戦なら市街地を選べる');
+
+  const { readFileSync } = await import('node:fs');
+  const lobby = readFileSync(new URL('../src/ui/lobby.js', import.meta.url), 'utf8');
+  ok(/coopOnly/.test(lobby) && /classList\.toggle\('hidden'/.test(lobby),
+    'ロビーの札も畳んでいる（押しても変わらない札を並べない）');
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  ok(/\.lbmode\.hidden/.test(html), '畳む見た目がCSSにある');
+  clear();
+  room.setMode('dm');
+  room.setMap('urban');
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);

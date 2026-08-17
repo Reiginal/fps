@@ -17,6 +17,11 @@ import { SimPlayer, resolveShot, rewindMs, originVisible, WEAPONS, heavyDef } fr
 import { Bot, forwardOf } from './bot.js';
 import { modeOf } from './modes.js';
 import { buildWorld } from './world.js';
+
+/* 協力プレイの舞台。**ここでしかやらない。**
+   選べるようにすると、湧き地点も遮蔽も妖怪の見た目も2つのマップぶん
+   考えることになる。市街地の廃墟に妖怪が出るのも噛み合っていない */
+const COOP_MAP = 'edo';
 import { MonsterDirector, MONSTER_KINDS, WAVE_COUNT } from './monsters.js';
 import { logs } from './logs.js';
 
@@ -239,6 +244,21 @@ export class Room {
     if (this.phase !== PHASE.WAIT) return false;
     if (!MODE_IDS.includes(id) || id === this.mode) return false;
     this.mode = id;
+    /* **協力プレイは江戸でしかやらない。**（2026-08-17に
+       「協力モードは江戸じゃない方のマップは消しといていい」と言われた）
+
+       選べるようにしておくと、湧き地点も遮蔽も妖怪の見た目も
+       2つのマップぶん考えることになる。市街地の廃墟に妖怪が出るのは
+       そもそも噛み合っていないし、遊ぶ人が選ぶ理由も無い。
+
+       ここで**黙って江戸へ寄せる**（選択肢から消して「押せない」にするより、
+       押した結果が正しく変わる方が分かりやすい）。
+       協力プレイから他の遊び方へ戻した時は、そのまま江戸に居させる——
+       勝手に市街地へ戻すと、江戸で対戦したい人が毎回選び直すことになる */
+    if (modeOf(id).coop && this.map !== COOP_MAP) {
+      this.map = COOP_MAP;
+      this.world = buildWorld(COOP_MAP);
+    }
     // 選んだ瞬間に持ち物を配り直す。ロビーで構えている武器が
     // その遊び方の物に変わるので、押した結果がその場で見える
     for (const s2 of this.slots.values()) { s2.stage = 0; this._arm(s2); }
@@ -257,6 +277,8 @@ export class Room {
   setMap(id) {
     if (this.phase !== PHASE.WAIT) return false;
     if (!MAP_IDS.includes(id) || id === this.map) return false;
+    // 協力プレイの最中は江戸から動かさない（setModeの説明を読むこと）
+    if (this.rules.coop && id !== COOP_MAP) return false;
     this.map = id;
     this.world = buildWorld(id);
     this._sendLobby();

@@ -1033,6 +1033,8 @@
   }
   .lbmode:hover { border-color: rgba(255,255,255,.28); }
   .lbmode.on { border-color: var(--accent); color: var(--accent); background: rgba(99,210,255,.10); }
+  /* 協力プレイの時にマップの札を畳む（協力は江戸だけ。src/ui/lobby.jsのrender） */
+  .lbmode.hidden { display: none; }
   .lbmdesc { font-size: 11px; color: var(--dim); line-height: 1.5; min-height: 2.6em; }
   .lbchead { font-size: 10px; letter-spacing: .22em; color: var(--dim); margin-bottom: 7px; text-align: left; }
   /* 選んだ兵士の姿。ロビーにいる間だけ描く。
