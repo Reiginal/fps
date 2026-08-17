@@ -43,8 +43,6 @@ targets.push({ name: 'mon-growl', label: 'モンスターの唸り(小)', second
 targets.push({ name: 'mon-growl-big', label: 'モンスターの唸り(大)', seconds: 1.8, play: (a) => a.monsterVoice('growl', 1.32, null, null) });
 targets.push({ name: 'mon-roar', label: 'ボスの咆哮', seconds: 3.0, play: (a) => a.monsterVoice('roar', 2.75, null, null) });
 targets.push({ name: 'mon-die', label: 'モンスターが倒れる', seconds: 2.0, play: (a) => a.monsterVoice('die', 1.0, null, null) });
-targets.push({ name: 'mon-tell', label: '殴る前の予告', seconds: 0.8, play: (a) => a.monsterTell(0.78, null, null) });
-targets.push({ name: 'mon-swipe', label: '爪を振る', seconds: 1.0, play: (a) => a.monsterSwipe(1.32, null, null) });
 targets.push({ name: 'mon-spit', label: '火の玉を吐く', seconds: 1.2, play: (a) => a.monsterSpit(null, null) });
 targets.push({ name: 'mon-boom', label: '火の玉が弾ける', seconds: 1.6, play: (a) => a.monsterBoom(null, null) });
 targets.push({ name: 'mon-stomp', label: 'ボスの踏みつけ', seconds: 2.0, play: (a) => a.monsterStomp(null, null) });
