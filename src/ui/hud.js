@@ -32,7 +32,9 @@ export class HUD {
       matchBox: $('matchBox'), matchScore: $('matchScore'), matchTime: $('matchTime'),
       plates: $('plates'), netstat: $('netstat'),
       scoreboard: $('scoreboard'), sbRows: $('sbRows'), matchStage: $('matchStage'),
+      sbColA: $('sbColA'), sbColB: $('sbColB'),
       finalboard: $('finalboard'), fbRows: $('fbRows'), fbNote: $('fbNote'),
+      fbColA: $('fbColA'), fbColB: $('fbColB'),
       minimap: $('minimap'), zonewarn: $('zonewarn'), zoneSub: $('zoneSub'),
       rosterRows: $('rosterRows'),
       healWrap: $('healWrap'), healBar: $('healBar'), healFill: $('healFill'),
@@ -714,16 +716,17 @@ export class HUD {
     }
   }
 
-  /** Tabを押している間だけ出す想定。キーの取得は呼ぶ側 */
-  scoreboard(rows, show) {
+  /** Tabを押している間だけ出す想定。キーの取得は呼ぶ側。coopで見出しと並びが変わる */
+  scoreboard(rows, show, coop = false) {
     /* Tabを押している間、中身を毎フレーム作り直していた。
        人数ぶんのHTMLを組み立てて丸ごと入れ替える処理なので、
        押しっぱなしにしている間ずっとその仕事が乗る。変わった時だけにする */
     if (show) {
-      const key = (rows || []).map((r) => `${r.id}:${r.rounds | 0}:${r.kills | 0}:${r.deaths | 0}:${Math.round(r.ping || 0)}`).join('|');
+      const key = `${coop ? 'c' : 'v'}|` + (rows || []).map((r) => `${r.id}:${r.rounds | 0}:${r.kills | 0}:${r.deaths | 0}:${Math.round(r.ping || 0)}`).join('|');
       if (key !== this._lastBoard) {
         this._lastBoard = key;
-        this.el.sbRows.innerHTML = this._rankRows(rows, false);
+        this._setBoardHead(this.el.sbColA, this.el.sbColB, coop);
+        this.el.sbRows.innerHTML = this._rankRows(rows, false, coop);
       }
     }
     if (this._lastBoardShow !== show) {
@@ -733,27 +736,40 @@ export class HUD {
   }
 
   /** 試合終了の最終順位。showをfalseで畳む */
-  matchEnd(rows, show, note = '') {
+  matchEnd(rows, show, note = '', coop = false) {
     if (show) {
-      this.el.fbRows.innerHTML = this._rankRows(rows, true);
+      this._setBoardHead(this.el.fbColA, this.el.fbColB, coop);
+      this.el.fbRows.innerHTML = this._rankRows(rows, true, coop);
       this.el.fbNote.textContent = note;
     }
     this.el.finalboard.classList.toggle('hidden', !show);
   }
 
+  /* 戦績表の見出し2列。**協力プレイに「取得」は無い**（ラウンドが無いので
+     全員ずっと0のまま並ぶ）。倒した数と倒れた数に差し替える */
+  _setBoardHead(a, b, coop) {
+    if (a) a.textContent = coop ? '撃破' : '取得';
+    if (b) b.textContent = coop ? '倒れた' : '撃破';
+  }
+
   // 取ったラウンドの多い順。勝敗を決めているのはラウンド数なので、
   // ここを撃破数で並べると戦績表の1位と実際の勝者が食い違う回が出る。
   // 同数なら撃破の多いほうを上に出す。
+  // 協力プレイはラウンドが無いので撃破数で並べ、2列目に倒れた数を出す。
   // 渡された配列は呼ぶ側の物なので、並べ替える前に写しを取る
-  _rankRows(rows, markTop) {
+  _rankRows(rows, markTop, coop = false) {
     const list = (rows || []).slice()
-      .sort((a, b) => ((b.rounds | 0) - (a.rounds | 0)) || ((b.kills | 0) - (a.kills | 0)));
+      .sort(coop
+        ? (a, b) => ((b.kills | 0) - (a.kills | 0)) || ((a.deaths | 0) - (b.deaths | 0))
+        : (a, b) => ((b.rounds | 0) - (a.rounds | 0)) || ((b.kills | 0) - (a.kills | 0)));
     return list.map((r, i) => {
       const cls = 'sbrow' + (r.me ? ' me' : '') + (markTop && i === 0 ? ' win' : '');
       const ping = Number.isFinite(r.ping) ? `${Math.round(r.ping)}ms` : '—';
+      const colA = coop ? (r.kills | 0) : (r.rounds | 0);
+      const colB = coop ? (r.deaths | 0) : (r.kills | 0);
       return `<div class="${cls}"><div class="c1">${i + 1}</div>`
         + `<div class="cn">${esc(r.name)}</div>`
-        + `<div class="c">${r.rounds | 0}</div><div class="c">${r.kills | 0}</div>`
+        + `<div class="c">${colA}</div><div class="c">${colB}</div>`
         + `<div class="cp">${ping}</div></div>`;
     }).join('');
   }
@@ -938,20 +954,57 @@ export class HUD {
   }
 
   /**
+   * 協力プレイの上帯。**対戦の物(matchInfo)とは別物にする。**
+   *
+   * 協力プレイには取ったラウンドも先取本数も制限時間も無い（server/modes.jsのcoop）。
+   * それでもmatchInfoを通していたので「0 － 0 ／ 3本先取 ／ 残り 3:00」と、
+   * 3つとも起きないことを出していた（2026-08-17に「協力プレイなのに
+   * 3本選手とかの表記が残ってるのが気になる」と言われた所）。
+   *
+   * 代わりに出すのは「今どこまで来たか」と「あと何体か」の2つだけ。
+   *   wave/of … 第何波／全何波（ボス戦は of と同じ番号が来る）
+   *   boss    … ボス戦か
+   *   alive   … 今場内に居るモンスターの数（定期便に載っている数をそのまま数える）
+   *   phase   … protocol.jsのPHASE
+   */
+  coopInfo(wave, of, boss, alive, phase) {
+    const key = `c${wave}/${of}/${boss ? 1 : 0}/${alive}/${phase}`;
+    if (key === this._lastMatch) return;   // 毎フレーム呼ばれる。変わった時だけ触る
+    this._lastMatch = key;
+
+    this.el.matchScore.textContent = boss ? 'ボス戦' : wave > 0 ? `第${wave}波` : '準備中';
+    this.el.matchScore.classList.toggle('lead', !!boss);
+    this.el.matchScore.classList.remove('behind');
+
+    let sub;
+    if (phase === 0) sub = '席に着いて準備完了を押してください';
+    else if (phase === 3) sub = '試合終了';
+    else if (wave <= 0) sub = 'まもなく最初の波が来る';
+    else if (alive > 0) sub = boss ? `残り ${alive}体（背中のコブが弱点）` : `残り ${alive}体`;
+    else sub = boss ? 'ボスを倒した' : '次の波が来る';
+    this.el.matchTime.textContent = sub;
+    // 残り1体は「あと少し」なので赤くする。ボス戦はずっと1体なので赤くしない
+    this.el.matchTime.classList.toggle('urgent', !boss && alive > 0 && alive <= 2);
+  }
+
+  /**
    * 右上の参加者一覧。今このサーバーに誰がいるかを常に出す。
    * 1人で待っている間も自分の名前だけは出す。空欄だと、繋がっているのか
    * サーバーが死んでいるのかが画面から判別できない
    */
-  roster(rows) {
+  roster(rows, coop = false) {
     const el = this.el.rosterRows;
     if (!el) return;
     /* 毎フレーム呼ばれるので、中身が変わった時だけDOMを触る。
        前は変わったかを調べるためにslice→sort→map→joinを毎フレームやっていて、
        「触らない」ためだけに配列2本と文字列を毎回作って捨てていた。
        数字1個に畳んで比べれば、変わっていないフレームでは何も作らない */
-    let key = ((rows?.length || 0) * 31) | 0;
+    /* 協力プレイは取ったラウンドが無いので、名前の後ろの数字が全員ずっと0だった。
+       そこは倒した数にする（協力プレイで並べ替える意味のある数字はこれだけ） */
+    const valOf = coop ? (r) => (r.kills | 0) : (r) => (r.rounds | 0);
+    let key = ((rows?.length || 0) * 31 + (coop ? 1 : 0)) | 0;
     for (const r of (rows || [])) {
-      key = ((key * 33) + (r.id | 0) * 7 + (r.rounds | 0) * 131 + (r.me ? 1 : 0)) | 0;
+      key = ((key * 33) + (r.id | 0) * 7 + valOf(r) * 131 + (r.me ? 1 : 0)) | 0;
       // 名前の変わり目も拾う（入り直しで同じidに別の名前が付くことがある）
       const n = r.name || '';
       for (let i = 0; i < n.length; i++) key = ((key * 33) + n.charCodeAt(i)) | 0;
@@ -959,15 +1012,15 @@ export class HUD {
     if (key === this._lastRoster) return;
     this._lastRoster = key;
     const list = (rows || []).slice()
-      .sort((a, b) => ((b.rounds | 0) - (a.rounds | 0)) || (a.id - b.id));
+      .sort((a, b) => (valOf(b) - valOf(a)) || (a.id - b.id));
     // 先頭に印を付ける。3人4人と増えると、並び順だけでは
     // 「今は誰が一番なのか」が一瞬で読めなくなる。
     // 全員0本の時は誰も先頭ではない（開始直後に1人だけ光ると誤解する）
-    const top = list.length ? (list[0].rounds | 0) : 0;
+    const top = list.length ? valOf(list[0]) : 0;
     el.innerHTML = list.map((r) => {
-      const lead = top > 0 && (r.rounds | 0) === top;
+      const lead = top > 0 && valOf(r) === top;
       return `<div class="rname${r.me ? ' me' : ''}${lead ? ' lead' : ''}">`
-        + `${esc(r.name)}<span class="rw">${r.rounds | 0}</span></div>`;
+        + `${esc(r.name)}<span class="rw">${valOf(r)}</span></div>`;
     }).join('');
   }
 
