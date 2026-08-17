@@ -24,7 +24,24 @@ const NO_LEVEL = { octree: null, bounds: null, enemySpawns: null };
 
 const CORPSE_HOLD_S = 2.6;
 const CORPSE_SINK_S = 0.7;
-const SHADOW_BOUND = 44;
+
+/* 影を落とすのはカメラから何mまでか。**13m。**
+   ここは44（場内のほぼ全域）だった。remote.jsの相手プレイヤーから写した数字だが、
+   あちらは多くて7人、こちらは同時に10体以上いる。
+
+   なぜ効くか: 太陽の影は2枚に分けて焼いている（main.jsのCASCADES）。
+     ・近い1枚 … 半径16m・カメラに追従・毎フレーム焼く
+     ・遠い1枚 … 半径56m・3フレームに1回、**しかも遠くで何かが動いた時だけ**
+   遠い方は焼くとなると地形ごと全部（500枚超）を焼き直すので、
+   ソロの敵は13mより外でcastShadowを切って**遠い方に写らないようにしてある**
+   （enemy.jsの_liveShadow。同じ理屈をここへ持ってくる）。
+
+   44のままだと、モンスター全員が遠い1枚の住人になる。**地形500枚＋モンスター408枚を
+   3フレームに1回まるごと焼き直す**ので、毎秒20回の息継ぎが出る。
+   これが「協力プレイだと歩くだけでカクカクする」の正体（2026-08-17）。
+   13mの外の個体は足元の暗がりが無いぶん浮くが、影1枚のために
+   毎秒20回つっかえるほうが遊べない */
+const SHADOW_NEAR = 13;
 // 火の玉の見た目。半径は種類で変わらない（大きさで威力を読ませるほど種類が無い）
 const SPIT_R = 0.22;
 
@@ -40,6 +57,11 @@ export class RemoteMonsters {
     this._spitPool = [];
     this._spitGeo = null;
     this._spitMat = null;
+    /* animate()へ毎フレーム渡す入れ物。**1つ作って使い回す。**
+       その場で `{ speed, state, pitch }` と書くと、体の数だけ毎フレーム
+       作って捨てることになる（実測で1体あたり418バイト／フレーム。
+       10体だと毎秒250KBで、そのぶんGCが走る回数が増える＝画面の息継ぎ） */
+    this._st = { speed: 0, state: 0, pitch: 0 };
   }
 
   /** MSPAWNで呼ぶ。kindは湧いた時にしか届かないので、ここで姿を決める */
@@ -58,7 +80,8 @@ export class RemoteMonsters {
     mon.root.rotation.set(0, 0, 0);
     // MSPAWNのscaleは念のため受けるが、体格の元はMONSTER_KINDSなので普段は同じ値
     if (Number.isFinite(scale) && scale > 0) mon.root.scale.setScalar(scale);
-    for (const m of mon.meshes) m.castShadow = true;
+    // 影は消した状態から始める。近づいてきたら最初のupdate()が点ける
+    for (const m of mon.meshes) m.castShadow = false;
 
     const x = p?.[0] ?? 0, y = p?.[1] ?? 0, z = p?.[2] ?? 0;
     mon.root.position.set(x, y, z);
@@ -71,8 +94,11 @@ export class RemoteMonsters {
       yaw: 0, pitch: 0, drawYaw: 0,
       speed: 0,
       state: MSTATE.SEEK,
+      // 1つ前の状態。**変わった瞬間だけ**を拾って予告の音を鳴らすのに要る
+      // （溜めに入った瞬間は電文で別に届かない。姿勢と同じで状態番号から作る）
+      wasState: MSTATE.SEEK,
       dead: false, deadT: 0,
-      seen: true, shadowOn: true,
+      seen: true, shadowOn: false,
       headPos: new THREE.Vector3(x, y + mon.height * 0.8, z),
     });
   }
@@ -147,8 +173,14 @@ export class RemoteMonsters {
     this._spits.splice(i, 1);
   }
 
-  /** 毎フレーム呼ぶ。姿勢はここで全部作る */
-  update(dt) {
+  /**
+   * 毎フレーム呼ぶ。姿勢はここで全部作る。
+   * cameraは影を落とす距離を測るのに要る（渡さない時は影を全部切る）。
+   * onTellは「溜めに入った」を1回だけ知らせる先。(slot, mid) で呼ぶ
+   */
+  update(dt, camera = null, onTell = null) {
+    const cx = camera ? camera.position.x : 0;
+    const cz = camera ? camera.position.z : 0;
     for (const [mid, slot] of this.slots) {
       const mon = slot.mon;
 
@@ -178,12 +210,24 @@ export class RemoteMonsters {
 
       mon.root.position.set(slot.cx, slot.cy, slot.cz);
       mon.root.rotation.set(0, slot.drawYaw, 0);
-      mon.animate(dt, {
-        speed: slot.speed, state: slot.state, pitch: slot.pitch,
-      });
+      const st = this._st;
+      st.speed = slot.speed; st.state = slot.state; st.pitch = slot.pitch;
+      mon.animate(dt, st);
+
+      /* 溜めに入った瞬間を1回だけ知らせる。**専用の電文は作らない。**
+         状態番号は20Hzの定期便に元から載っているので、前の値と比べれば
+         「今フレームで溜めに入った」が分かる。溜めは0.42〜0.62秒あるので、
+         50msごとの定期便で必ず1回は溜めの姿が届く（取りこぼさない） */
+      if (slot.state !== slot.wasState) {
+        if (onTell && slot.state === MSTATE.WINDUP) onTell(slot, mid);
+        slot.wasState = slot.state;
+      }
 
       /* --------------------------------------------- 影と頭の位置 */
-      const wantShadow = Math.abs(slot.cx) <= SHADOW_BOUND && Math.abs(slot.cz) <= SHADOW_BOUND;
+      // 近い1枚（半径16m・毎フレーム焼く）に入る個体だけ影を落とす。
+      // 理由は上のSHADOW_NEARの説明
+      const ddx = slot.cx - cx, ddz = slot.cz - cz;
+      const wantShadow = !!camera && (ddx * ddx + ddz * ddz) < SHADOW_NEAR * SHADOW_NEAR;
       if (wantShadow !== slot.shadowOn) {
         slot.shadowOn = wantShadow;
         for (const m of mon.meshes) m.castShadow = wantShadow;
