@@ -468,7 +468,8 @@ export class MonsterDirector {
   }
 
   /** 部位ごとの倍率。room.jsが威力を出す時に掛ける */
-  static mulOf(part) { return Monster.mulOf(part); }
+  // 部位ごとの倍率。**種類を渡す**（唐傘小僧は頭の倍率が低い等、表が種類で違う）
+  static mulOf(part, kind = null) { return Monster.mulOf(part, kind); }
 
   /** スナップショットに載せる中身（protocol.jsのpackMonsterへ渡す形） */
   packSource() {

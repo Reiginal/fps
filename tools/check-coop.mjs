@@ -16,7 +16,7 @@ const { getRoom } = await import('../server/room.js');
 const { buildWorld } = await import('../server/world.js');
 const { MONSTER_KINDS, WAVE_COUNT } = await import('../server/monsters.js');
 const { modeOf } = await import('../server/modes.js');
-const { Monster, MSTATE, MONSTER_HIT } = await import('../src/ai/monster.js');
+const { Monster, MSTATE } = await import('../src/ai/monster.js');
 
 const world = buildWorld();
 let bad = 0;
@@ -315,7 +315,7 @@ console.log('\n[10] ボスの弱点（背中のコブ）');
   }
   // 背中(+Z側)の、コブの高さから撃つ
   {
-    const y = boss.feetY + MONSTER_HIT.WEAK.y * boss.scale;
+    const y = boss.feetY + boss.hitbox.WEAK.y * boss.scale;
     const o = new THREE.Vector3(0, y, 14);
     const d = new THREE.Vector3(0, y, 0.30 * boss.scale).sub(o).normalize();
     const h = boss.intersect(o, d);
@@ -980,6 +980,66 @@ console.log('\n[28] 協力プレイは江戸でしかやらない');
   clear();
   room.setMode('dm');
   room.setMap('urban');
+}
+
+console.log('\n[29] 当たり所の表が種類ごとに揃っている');
+/* なぜ要るか: 表は長い間1つしか無く、**前傾した四つ足専用**だった
+   （HEADがz-0.86＝体の86cm前）。3種類とも同じ骨組みの縮尺違いだったので
+   それで足りていたが、まっすぐ立つ姿を1体でも足すと
+   **頭の当たり所が体の前の空中に浮く。**
+   撃っても当たらない頭と、誰も居ない所の当たり判定が同時にできる。
+
+   種類ごとの表にしたので、**姿を足した人が表を足し忘れないこと**を見張る。
+   忘れると黙って獣の表へ落ちる（例外も警告も出ない）*/
+{
+  const { MONSTER_KINDS: K, MONSTER_HITS, hitOf } = await import('../src/ai/monster.js');
+
+  for (const kind of Object.keys(K)) {
+    const def = K[kind];
+    ok(!!def.hit, `${kind}: どの表を使うか書いてある（def.hit=${def.hit}）`);
+    ok(!!MONSTER_HITS[def.hit], `${kind}: その名前の表が実在する`);
+    const h = hitOf(kind);
+    // 頭と胴はどの姿にも要る（脚と弱点は姿による）
+    ok(h.HEAD && h.BODY, `${kind}: 頭と胴の当たり所がある`);
+    ok(h.HEAD.y > 0 && h.HEAD.r > 0, `${kind}: 頭が体の上にある（y=${h.HEAD.y}）`);
+    // 弱点を持つ個体は表にも弱点が要る
+    const m = new Monster({ octree: null }, kind, { visual: false });
+    if (m.hasWeak) ok(!!h.WEAK, `${kind}: 弱点を持つので表にもWEAKがある`);
+    // 表の中身が実際にその個体へ入っていること
+    ok(m.hitbox === h, `${kind}: 個体がその表を持っている`);
+  }
+
+  /* まっすぐ立つ姿の表は、頭が中心線上にあること。
+     ここがz≠0だと、獣の表を写して名前だけ変えた事故 */
+  for (const name of ['upright', 'pole', 'float']) {
+    const h = MONSTER_HITS[name];
+    ok(!!h, `${name}の表がある`);
+    ok(h.HEAD.z === 0, `${name}: 頭が体の中心線上にある（z=${h.HEAD.z}）`);
+  }
+  ok(MONSTER_HITS.beast.HEAD.z < 0, '獣の表だけは頭が前へ出ている（前傾しているので）');
+  ok(!MONSTER_HITS.float.LEG, '浮いている姿は脚の当たり所を持たない');
+
+  // 脚の無い表でも、当たり判定の計算が落ちないこと
+  {
+    const probe = new Monster({ octree: null }, Object.keys(K)[0], { visual: false });
+    probe.hitbox = MONSTER_HITS.float;
+    probe.spawn(new THREE.Vector3(0, 0, 0));
+    const o = new THREE.Vector3(0, 1.0, -6), d = new THREE.Vector3(0, 0, 1);
+    let threw = false;
+    try { probe.intersect(o, d, 0); } catch { threw = true; }
+    ok(!threw, '脚を持たない表でも当たり判定が落ちない');
+  }
+
+  // 倍率も種類ごとに引けること（唐傘小僧のように頭の倍率を下げる個体がある）
+  ok(typeof Monster.mulOf === 'function', '部位ごとの倍率を引く口がある');
+  const anyKind = Object.keys(K)[0];
+  ok(Monster.mulOf('head', anyKind) === hitOf(anyKind).HEAD.mul,
+    '倍率が種類ごとの表から出ている');
+
+  const { readFileSync } = await import('node:fs');
+  const room = readFileSync(new URL('../server/room.js', import.meta.url), 'utf8');
+  ok(/mulOf\(mres\.hit\.part, mres\.m\.kind\)/.test(room),
+    '部屋が倍率を引く時に種類を渡している');
 }
 
 console.log(bad === 0 ? '\n全部通った' : `\n${bad}件 落ちた`);

@@ -1101,7 +1101,7 @@ export class Room {
         /* **部位倍率は人の表(PART_MUL)を使わない。**
            モンスターは当たり所の大きさも意味も人と違う（背中のコブという
            弱点があり、脚は太くて当たりやすい）ので、倍率はsrc/ai/monster.jsが持つ */
-        const dmg = fireDef.damage * mul * MonsterDirector.mulOf(mres.hit.part);
+        const dmg = fireDef.damage * mul * MonsterDirector.mulOf(mres.hit.part, mres.m.kind);
         const pt = mres.hit.point;
         this.push({
           e: EV.MHIT, mid: mres.m.mid, by: slot.id,
